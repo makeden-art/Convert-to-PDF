@@ -25,8 +25,9 @@ from converter import (
 )
 
 MAX_MERGE_FILES = int(os.getenv("CONVERT_MAX_MERGE_FILES", "50"))
+SUPPORTED_FORMATS_LABEL = "DOC, DOCX, XLS, XLSX, ODT, ODS, RTF, DWG, DXF, PDF"
 
-app = FastAPI(title="Перевод в PDF", version="0.4.0")
+app = FastAPI(title="Перевод в PDF", version="0.4.1")
 
 
 def _version() -> str:
@@ -97,7 +98,7 @@ async def convert_page() -> str:
     h1 {{ margin: 0 0 8px; color: #38bdf8; font-size: 22px; }}
     h2 {{ margin: 0 0 12px; color: #7dd3fc; font-size: 16px; }}
     p, label {{ color: #9ca3af; font-size: 14px; line-height: 1.5; }}
-    input[type=text] {{ width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(148,163,184,.4); background: #0f172a; color: #e5e7eb; margin: 8px 0 12px; }}
+    input[type=text], input[type=password] {{ width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(148,163,184,.4); background: #0f172a; color: #e5e7eb; margin: 8px 0 12px; }}
     .drop {{ border: 2px dashed rgba(148,163,184,.4); border-radius: 12px; padding: 24px; text-align: center; margin: 12px 0; cursor: pointer; }}
     .drop:hover {{ border-color: #38bdf8; }}
     button {{ background: #38bdf8; color: #000; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 600; cursor: pointer; }}
@@ -111,9 +112,31 @@ async def convert_page() -> str:
   <div class="wrap">
     <div class="box">
       <h1>Перевод в PDF</h1>
-      <p>Офисные и CAD-форматы → PDF. По отдельности — PDF <b>рядом</b> с оригиналом. Или <b>до {MAX_MERGE_FILES} файлов в один PDF</b> (сборка).</p>
-      <p>Пример папки для загрузки файлов: <code>/data/documents</code></p>
-      <p class="ver">Доступные каталоги на сервере: <code>{roots}</code></p>
+      <p><b>Поддерживаются:</b> {SUPPORTED_FORMATS_LABEL}.</p>
+      <p>По отдельности — PDF <b>рядом</b> с оригиналом. До <b>{MAX_MERGE_FILES}</b> файлов — <b>сборка в один PDF</b>.</p>
+      <p>Локальная папка: <code>/data/documents</code>. Сетевая (SMB): <code>/data/smb/default</code> после подключения ниже.</p>
+      <p class="ver">Каталоги на сервере: <code>{roots}</code></p>
+    </div>
+
+    <div class="box">
+      <h2>🌐 Сетевая папка (SMB)</h2>
+      <p>Подключение с сервера портала. Логин/пароль или анонимный гостевой доступ.</p>
+      <p id="smb-status" class="ver">Статус: проверка…</p>
+      <label for="smb-server">Сервер</label>
+      <input type="text" id="smb-server" placeholder="192.168.88.50" />
+      <label for="smb-share">Имя шары</label>
+      <input type="text" id="smb-share" placeholder="Projects" />
+      <label for="smb-user">Логин (если не аноним)</label>
+      <input type="text" id="smb-user" placeholder="user" />
+      <label for="smb-pass">Пароль</label>
+      <input type="password" id="smb-pass" placeholder="••••••" />
+      <div class="chk">
+        <input type="checkbox" id="smb-anon" />
+        <label for="smb-anon" style="margin:0">Анонимный доступ (guest)</label>
+      </div>
+      <button id="btn-smb-mount" type="button">Подключить SMB</button>
+      <button id="btn-smb-unmount" type="button" style="margin-left:8px;background:#64748b">Отключить</button>
+      <pre id="log-smb" style="display:none"></pre>
     </div>
 
     <div class="box">
@@ -152,6 +175,59 @@ async def convert_page() -> str:
     <div class="ver">v{_version()}</div>
   </div>
   <script>
+    const logSmb = document.getElementById('log-smb');
+    const smbStatus = document.getElementById('smb-status');
+    async function refreshSmb() {{
+      try {{
+        const r = await fetch('/api/platform/smb/status');
+        const j = await r.json();
+        if (j.mounted && j.convert_path) {{
+          smbStatus.textContent = 'SMB: подключено → ' + j.convert_path + ' (' + (j.mount?.unc || '') + ')';
+          document.getElementById('folder').placeholder = j.convert_path + '/подпапка';
+        }} else if (j.configured) {{
+          smbStatus.textContent = 'SMB: настроено, но не смонтировано';
+        }} else {{
+          smbStatus.textContent = 'SMB: не подключено';
+        }}
+      }} catch (e) {{
+        smbStatus.textContent = 'SMB: статус недоступен';
+      }}
+    }}
+    refreshSmb();
+    document.getElementById('btn-smb-mount').onclick = async () => {{
+      const server = document.getElementById('smb-server').value.trim();
+      const share = document.getElementById('smb-share').value.trim();
+      if (!server || !share) {{ alert('Укажите сервер и имя шары'); return; }}
+      logSmb.style.display = 'block';
+      logSmb.textContent = 'Подключение SMB...';
+      const r = await fetch('/api/platform/smb/mount', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{
+          server, share,
+          username: document.getElementById('smb-user').value,
+          password: document.getElementById('smb-pass').value,
+          anonymous: document.getElementById('smb-anon').checked,
+          mount_id: 'default'
+        }})
+      }});
+      const j = await r.json();
+      if (!r.ok) {{
+        logSmb.textContent = j.detail || JSON.stringify(j);
+        return;
+      }}
+      logSmb.textContent = 'Подключено: ' + j.mount.convert_path;
+      refreshSmb();
+    }};
+    document.getElementById('btn-smb-unmount').onclick = async () => {{
+      logSmb.style.display = 'block';
+      logSmb.textContent = 'Отключение...';
+      const r = await fetch('/api/platform/smb/unmount', {{ method: 'POST' }});
+      const j = await r.json();
+      logSmb.textContent = r.ok ? 'Отключено' : (j.detail || JSON.stringify(j));
+      refreshSmb();
+    }};
+
     const btnFolder = document.getElementById('btn-folder');
     const logFolder = document.getElementById('log-folder');
     btnFolder.onclick = async () => {{
