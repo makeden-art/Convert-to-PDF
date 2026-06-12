@@ -1,0 +1,28 @@
+# Автономный запуск (без портала)
+#   docker compose up -d --build
+
+services:
+  convert-to-pdf:
+    build: .
+    image: makeden/convert-to-pdf:latest
+    container_name: convert-to-pdf-service
+    restart: unless-stopped
+    ports:
+      - "8084:8000"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+      - "com.centurylinklabs.watchtower.scope=convert-to-pdf"
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower-convert-pdf
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_HTTP_API_UPDATE=true
+      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_TOKEN:-platform_watchtower_secret}
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=3600
+      - WATCHTOWER_LABEL_ENABLE=true
+    command: --interval 3600
