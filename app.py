@@ -1,10 +1,12 @@
 """Convert-to-PDF — конвертация редактируемых форматов в PDF."""
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -17,13 +19,14 @@ from converter import (
     SUPPORTED_CAD,
     SUPPORTED_ALL,
     allowed_roots,
-    convert_file_in_place,
     convert_folder,
-    validate_folder,
+    convert_uploads_to_merged_pdf,
     _convert_with_libreoffice,
 )
 
-app = FastAPI(title="Перевод в PDF", version="0.3.1")
+MAX_MERGE_FILES = int(os.getenv("CONVERT_MAX_MERGE_FILES", "50"))
+
+app = FastAPI(title="Перевод в PDF", version="0.4.0")
 
 
 def _version() -> str:
@@ -34,6 +37,8 @@ def _version() -> str:
 class FolderRequest(BaseModel):
     path: str
     recursive: bool = True
+    merge: bool = False
+    output_name: str = "сборка.pdf"
 
 
 @app.get("/health")
@@ -106,7 +111,7 @@ async def convert_page() -> str:
   <div class="wrap">
     <div class="box">
       <h1>Перевод в PDF</h1>
-      <p>Офисные и CAD-форматы → PDF. Результат кладётся <b>в ту же папку</b>, что и исходник (<code>отчёт.docx</code> → <code>отчёт.pdf</code>, <code>план.dwg</code> → <code>план.pdf</code>).</p>
+      <p>Офисные и CAD-форматы → PDF. По отдельности — PDF <b>рядом</b> с оригиналом. Или <b>до {MAX_MERGE_FILES} файлов в один PDF</b> (сборка).</p>
       <p>Пример папки для загрузки файлов: <code>/data/documents</code></p>
       <p class="ver">Доступные каталоги на сервере: <code>{roots}</code></p>
     </div>
@@ -119,8 +124,22 @@ async def convert_page() -> str:
         <input type="checkbox" id="recursive" checked />
         <label for="recursive" style="margin:0">Включая вложенные подпапки</label>
       </div>
+      <div class="chk">
+        <input type="checkbox" id="merge-folder" />
+        <label for="merge-folder" style="margin:0">Собрать всё в один PDF</label>
+      </div>
+      <label for="output-name">Имя итогового файла (при сборке)</label>
+      <input type="text" id="output-name" value="сборка.pdf" />
       <button id="btn-folder">Конвертировать папку</button>
       <pre id="log-folder" style="display:none"></pre>
+    </div>
+
+    <div class="box">
+      <h2>📚 Несколько файлов → один PDF</h2>
+      <div class="drop" id="drop-multi">Выберите файлы (до {MAX_MERGE_FILES}) или перетащите</div>
+      <input type="file" id="files-multi" style="display:none" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.rtf,.dwg,.dxf" />
+      <button id="btn-multi" disabled>Скачать сборку PDF</button>
+      <pre id="log-multi" style="display:none"></pre>
     </div>
 
     <div class="box">
@@ -141,10 +160,12 @@ async def convert_page() -> str:
       btnFolder.disabled = true;
       logFolder.style.display = 'block';
       logFolder.textContent = 'Перевод в PDF...';
+      const merge = document.getElementById('merge-folder').checked;
+      const output_name = document.getElementById('output-name').value.trim() || 'сборка.pdf';
       const r = await fetch('/api/convert-folder', {{
         method: 'POST',
         headers: {{ 'Content-Type': 'application/json' }},
-        body: JSON.stringify({{ path, recursive: document.getElementById('recursive').checked }})
+        body: JSON.stringify({{ path, recursive: document.getElementById('recursive').checked, merge, output_name }})
       }});
       const j = await r.json();
       if (!r.ok) {{
@@ -152,9 +173,58 @@ async def convert_page() -> str:
         btnFolder.disabled = false;
         return;
       }}
-      logFolder.textContent = 'Готово: ' + j.stats.ok + ' файлов, пропущено ' + j.stats.skipped + ', ошибок ' + j.stats.error + '\\n\\n' +
-        j.files.map(f => f.status + ' | ' + f.source + ' → ' + (f.pdf || '-')).join('\\n');
+      if (j.merge) {{
+        logFolder.textContent = 'Сборка: ' + j.merged_pdf + '\\nФайлов в PDF: ' + j.pages_from +
+          ', ошибок: ' + j.stats.error + '\\n\\n' +
+          j.files.map(f => f.status + ' | ' + f.source).join('\\n');
+      }} else {{
+        logFolder.textContent = 'Готово: ' + j.stats.ok + ' файлов, пропущено ' + j.stats.skipped + ', ошибок ' + j.stats.error + '\\n\\n' +
+          j.files.map(f => f.status + ' | ' + f.source + ' → ' + (f.pdf || '-')).join('\\n');
+      }}
       btnFolder.disabled = false;
+    }};
+
+    const dropMulti = document.getElementById('drop-multi');
+    const inputMulti = document.getElementById('files-multi');
+    const btnMulti = document.getElementById('btn-multi');
+    const logMulti = document.getElementById('log-multi');
+    let filesMulti = [];
+    const maxMerge = {MAX_MERGE_FILES};
+    const setMultiLabel = () => {{
+      dropMulti.textContent = filesMulti.length
+        ? ('Выбрано файлов: ' + filesMulti.length)
+        : ('Выберите файлы (до ' + maxMerge + ') или перетащите');
+      btnMulti.disabled = filesMulti.length === 0;
+    }};
+    dropMulti.onclick = () => inputMulti.click();
+    inputMulti.onchange = () => {{ filesMulti = Array.from(inputMulti.files || []); setMultiLabel(); }};
+    dropMulti.ondragover = e => e.preventDefault();
+    dropMulti.ondrop = e => {{
+      e.preventDefault();
+      filesMulti = Array.from(e.dataTransfer.files || []);
+      setMultiLabel();
+    }};
+    btnMulti.onclick = async () => {{
+      if (!filesMulti.length) return;
+      if (filesMulti.length > maxMerge) {{ alert('Максимум ' + maxMerge + ' файлов'); return; }}
+      btnMulti.disabled = true;
+      logMulti.style.display = 'block';
+      logMulti.textContent = 'Сборка PDF...';
+      const fd = new FormData();
+      filesMulti.forEach(f => fd.append('files', f));
+      const r = await fetch('/api/convert-merge', {{ method: 'POST', body: fd }});
+      if (!r.ok) {{
+        logMulti.textContent = await r.text();
+        btnMulti.disabled = false;
+        return;
+      }}
+      const blob = await r.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'сборка.pdf';
+      a.click();
+      logMulti.textContent = 'Готово, файл скачан';
+      btnMulti.disabled = false;
     }};
 
     const drop = document.getElementById('drop');
@@ -188,7 +258,14 @@ async def convert_page() -> str:
 @app.post("/api/convert-folder")
 async def api_convert_folder(body: FolderRequest):
     try:
-        return JSONResponse(convert_folder(body.path, body.recursive))
+        return JSONResponse(
+            convert_folder(
+                body.path,
+                body.recursive,
+                merge=body.merge,
+                output_name=body.output_name,
+            )
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
@@ -196,12 +273,59 @@ async def api_convert_folder(body: FolderRequest):
 
 
 @app.post("/api/convert-folder-form")
-async def api_convert_folder_form(path: str = Form(...), recursive: bool = Form(True)):
+async def api_convert_folder_form(
+    path: str = Form(...),
+    recursive: bool = Form(True),
+    merge: bool = Form(False),
+    output_name: str = Form("сборка.pdf"),
+):
     """Для вызова из curl / скриптов без JSON."""
     try:
-        return JSONResponse(convert_folder(path, recursive))
+        return JSONResponse(convert_folder(path, recursive, merge=merge, output_name=output_name))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/convert-merge")
+async def api_convert_merge(
+    files: Annotated[list[UploadFile], File(...)],
+):
+    if not files:
+        raise HTTPException(status_code=400, detail="Передайте хотя бы один файл")
+    if len(files) > MAX_MERGE_FILES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Слишком много файлов (макс. {MAX_MERGE_FILES})",
+        )
+
+    tmp = Path(tempfile.mkdtemp(prefix="convert_merge_"))
+    try:
+        sources: list[Path] = []
+        for uf in files:
+            suffix = Path(uf.filename or "upload").suffix.lower()
+            if suffix not in SUPPORTED_ALL:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Формат {suffix} не поддерживается ({uf.filename})",
+                )
+            dest = tmp / f"{len(sources):04d}_{Path(uf.filename or 'upload').name}"
+            dest.write_bytes(await uf.read())
+            sources.append(dest)
+
+        out = tmp / "сборка.pdf"
+        convert_uploads_to_merged_pdf(sources, out)
+        return FileResponse(
+            path=str(out),
+            media_type="application/pdf",
+            filename="сборка.pdf",
+            background=BackgroundTask(lambda: shutil.rmtree(tmp, ignore_errors=True)),
+        )
+    except HTTPException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    except Exception as e:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/convert")
