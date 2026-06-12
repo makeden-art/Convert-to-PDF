@@ -7,10 +7,30 @@
 - Маршрут (в платформе): `/convert` через прокси портала `:8080`
 - Прямой порт: `8084`
 
-## Поддерживаемые форматы (v0.1)
+## Поддерживаемые форматы (v0.2)
 
 - DOC, DOCX, XLS, XLSX, ODT, ODS, RTF → PDF (LibreOffice)
-- PDF → passthrough
+- PDF — пропускается (уже PDF)
+
+## Пакетная конвертация папки
+
+Укажите путь на сервере — все файлы внутри конвертируются, **PDF кладётся рядом** с оригиналом:
+
+```
+/data/проект/ведомость.docx  →  /data/проект/ведомость.pdf
+```
+
+Веб-интерфейс: блок «Папка целиком» на `/convert`.
+
+API:
+
+```bash
+curl -X POST http://localhost:8084/api/convert-folder \
+  -H 'Content-Type: application/json' \
+  -d '{"path": "/data/моя_папка", "recursive": true}'
+```
+
+Разрешённые каталоги задаются переменной `CONVERT_ALLOWED_ROOTS` (по умолчанию `/data`, `/workspace`, `/opt/road-pdf-platform`).
 
 ## Локальный запуск
 

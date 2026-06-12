@@ -8,11 +8,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice-writer-nogui \
     libreoffice-calc-nogui \
+    fonts-dejavu-core \
     curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY app.py VERSION ./
+COPY app.py converter.py cad_converter.py VERSION ./
 
 ENV PYTHONUNBUFFERED=1
 
