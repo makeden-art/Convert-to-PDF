@@ -49,6 +49,11 @@
     .merge-panel.visible { display: block; }
     .merge-list { max-height: 200px; overflow: auto; margin: 8px 0; }
     .merge-item { display: flex; align-items: center; gap: 6px; padding: 5px 6px; font-size: 12px; border-bottom: 1px solid rgba(148,163,184,.1); }
+    .merge-item.draggable-row { cursor: grab; }
+    .merge-item.draggable-row:active { cursor: grabbing; }
+    .merge-item.drag-over { background: rgba(56,189,248,.15); border-top: 2px solid #38bdf8; }
+    .merge-item.dragging { opacity: .45; }
+    .merge-item .drag-handle { color: #64748b; font-size: 14px; flex-shrink: 0; user-select: none; padding: 0 2px; }
     .merge-item .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .merge-item button { padding: 2px 8px; font-size: 11px; }
     .num-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
@@ -109,7 +114,7 @@
           <div class="chk"><input type="checkbox" id="recursive" checked /><label for="recursive" style="margin:0">Включая вложенные подпапки (для выбранных папок)</label></div>
           <div class="chk"><input type="checkbox" id="merge" /><label for="merge" style="margin:0">Собрать в один PDF</label></div>
           <div class="merge-panel" id="merge-panel">
-            <p class="hint" style="margin:0 0 6px">Порядок файлов в сборке (↑ ↓):</p>
+            <p class="hint" style="margin:0 0 6px">Порядок в сборке — перетащите мышью или ↑ ↓:</p>
             <div class="merge-list" id="merge-list"></div>
           </div>
           <div class="num-row" id="num-row" style="display:none">
@@ -278,6 +283,15 @@
       renderMergeList();
     }
 
+    let mergeDragIdx = null;
+
+    function moveMergeItem(from, to) {
+      if (from === to || from < 0 || to < 0 || from >= mergeOrder.length || to >= mergeOrder.length) return;
+      const item = mergeOrder.splice(from, 1)[0];
+      mergeOrder.splice(to, 0, item);
+      renderMergeList();
+    }
+
     function renderMergeList() {
       mergeList.innerHTML = '';
       if (!mergeOrder.length) {
@@ -293,23 +307,44 @@
       mergeList.appendChild(header);
       mergeOrder.forEach((item, idx) => {
         const row = document.createElement('div');
-        row.className = 'merge-item';
+        row.className = 'merge-item draggable-row';
+        row.draggable = true;
         row.innerHTML =
+          '<span class="drag-handle" title="Перетащите">⠿</span>' +
           '<button type="button" class="secondary" data-up="' + idx + '">↑</button>' +
           '<button type="button" class="secondary" data-down="' + idx + '">↓</button>' +
           '<span class="fname">' + (idx + 1) + '. ' + item.name + '</span>';
-        row.querySelector('[data-up]').onclick = () => {
-          if (idx > 0) {
-            const t = mergeOrder[idx - 1]; mergeOrder[idx - 1] = mergeOrder[idx]; mergeOrder[idx] = t;
-            renderMergeList();
+
+        row.addEventListener('dragstart', (e) => {
+          if (e.target.closest('button')) {
+            e.preventDefault();
+            return;
           }
-        };
-        row.querySelector('[data-down]').onclick = () => {
-          if (idx < mergeOrder.length - 1) {
-            const t = mergeOrder[idx + 1]; mergeOrder[idx + 1] = mergeOrder[idx]; mergeOrder[idx] = t;
-            renderMergeList();
-          }
-        };
+          mergeDragIdx = idx;
+          row.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', String(idx));
+        });
+        row.addEventListener('dragend', () => {
+          mergeDragIdx = null;
+          row.classList.remove('dragging');
+          mergeList.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+        });
+        row.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          row.classList.add('drag-over');
+        });
+        row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+        row.addEventListener('drop', (e) => {
+          e.preventDefault();
+          row.classList.remove('drag-over');
+          const from = mergeDragIdx !== null ? mergeDragIdx : parseInt(e.dataTransfer.getData('text/plain'), 10);
+          if (!isNaN(from)) moveMergeItem(from, idx);
+        });
+
+        row.querySelector('[data-up]').onclick = () => { if (idx > 0) moveMergeItem(idx, idx - 1); };
+        row.querySelector('[data-down]').onclick = () => { if (idx < mergeOrder.length - 1) moveMergeItem(idx, idx + 1); };
         mergeList.appendChild(row);
       });
     }
@@ -665,14 +700,26 @@
       const c = smbBody.classList.toggle('is-collapsed');
       smbToggle.setAttribute('aria-expanded', c ? 'false' : 'true');
     };
+    function formatSmbConnected(mount) {
+      if (!mount) return '';
+      const host = mount.server || (mount.unc || '').replace(/^\/\//, '').split('/')[0] || '';
+      const share = mount.share || (mount.unc || '').split('/').filter(Boolean)[1] || '';
+      if (host && share) return host + ' → ' + share;
+      return host || share || '';
+    }
+
     async function refreshSmb() {
       try {
         const r = await fetch('/api/platform/smb/status');
         const j = await r.json();
-        if (j.mounted && j.convert_path) {
-          smbStatus.textContent = 'SMB: подключено → ' + j.convert_path;
+        const label = formatSmbConnected(j.mount);
+        if (j.mounted && label) {
+          smbStatus.textContent = 'SMB: подключено — ' + label;
           document.getElementById('smb-root-hint').textContent =
-            'Работа с файлами: ' + j.convert_path;
+            'Работа с файлами: ' + label;
+          if (!currentPath) loadTree('');
+        } else if (j.mounted && j.convert_path) {
+          smbStatus.textContent = 'SMB: подключено';
           if (!currentPath) loadTree('');
         } else if (j.configured) {
           smbStatus.textContent = 'SMB: настроено, не смонтировано';
@@ -705,7 +752,9 @@
         })
       });
       const j = await r.json();
-      logSmb.textContent = r.ok ? ('Подключено: ' + j.mount.convert_path) : (j.detail || JSON.stringify(j));
+      logSmb.textContent = r.ok
+        ? ('Подключено: ' + (formatSmbConnected(j.mount) || j.mount.convert_path || ''))
+        : (j.detail || JSON.stringify(j));
       if (r.ok) { refreshSmb(); if (j.mount.convert_path) loadTree(''); }
     };
     document.getElementById('btn-smb-unmount').onclick = async () => {
