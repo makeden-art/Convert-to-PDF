@@ -42,7 +42,18 @@
     .drop:hover { border-color: #38bdf8; color: #7dd3fc; }
     .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
     .hint { font-size: 13px; color: #64748b; margin: 0; }
-    .sel-count { font-size: 12px; color: #38bdf8; }
+    .sel-count { font-size: 12px; color: #38bdf8; line-height: 1.5; }
+    .sel-detail { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+    .progress-hint { font-size: 12px; color: #fbbf24; margin: 4px 0 0; }
+    .merge-panel { display: none; border: 1px solid rgba(148,163,184,.25); border-radius: 10px; padding: 10px; background: #0b1220; }
+    .merge-panel.visible { display: block; }
+    .merge-list { max-height: 200px; overflow: auto; margin: 8px 0; }
+    .merge-item { display: flex; align-items: center; gap: 6px; padding: 5px 6px; font-size: 12px; border-bottom: 1px solid rgba(148,163,184,.1); }
+    .merge-item .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .merge-item button { padding: 2px 8px; font-size: 11px; }
+    .num-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+    .num-row input[type=number] { width: 72px; margin: 0; padding: 6px 8px; }
+    .tree-item .chk-box { flex-shrink: 0; }
   </style>
 </head>
 <body>
@@ -51,7 +62,7 @@
     <div class="box">
       <h1>Перевод в PDF</h1>
       <p>Офисные и CAD-форматы → PDF. PDF <b>рядом</b> с оригиналом или сборка до <b>{{MAX_MERGE}}</b> файлов в один PDF.</p>
-      <p class="ver">Каталоги: <code>{{ROOTS}}</code></p>
+      <p class="ver" id="smb-root-hint">Работа с файлами — только через подключённую SMB-папку.</p>
     </div>
 
     <div class="box">
@@ -78,7 +89,7 @@
 
     <div class="box">
       <h2>📄 Конвертация</h2>
-      <p class="hint">Выберите папку или файлы в дереве на сервере — или загрузите с компьютера.</p>
+      <p class="hint">Выберите папку или файлы в дереве SMB-шары — или загрузите с компьютера.</p>
       <div class="work-grid">
         <div class="tree-panel">
           <div class="tree-toolbar">
@@ -91,10 +102,23 @@
         <div class="action-panel">
           <div class="drop" id="drop-upload">📎 Загрузить с компьютера (один или несколько файлов)</div>
           <input type="file" id="file-upload" style="display:none" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.rtf,.dwg,.dxf" />
-          <p class="sel-count" id="sel-count">На сервере выбрано: 0</p>
+          <p class="sel-count" id="sel-count">На сервере: ничего не выбрано</p>
+          <p class="sel-detail" id="sel-detail"></p>
           <p class="sel-count" id="upload-count" style="color:#94a3b8">С компьютера: 0</p>
-          <div class="chk"><input type="checkbox" id="recursive" checked /><label for="recursive" style="margin:0">Включая вложенные подпапки (если выбрана только папка)</label></div>
+          <div class="chk"><input type="checkbox" id="recursive" checked /><label for="recursive" style="margin:0">Включая вложенные подпапки (для выбранных папок)</label></div>
           <div class="chk"><input type="checkbox" id="merge" /><label for="merge" style="margin:0">Собрать в один PDF</label></div>
+          <div class="merge-panel" id="merge-panel">
+            <p class="hint" style="margin:0 0 6px">Порядок файлов в сборке (↑ ↓):</p>
+            <div class="merge-list" id="merge-list"></div>
+          </div>
+          <div class="num-row" id="num-row" style="display:none">
+            <div class="chk" style="margin:0"><input type="checkbox" id="number-pages" /><label for="number-pages" style="margin:0">Нумеровать страницы</label></div>
+            <label for="page-start" style="margin:0;color:#9ca3af">с страницы</label>
+            <input type="number" id="page-start" min="1" value="1" title="Страница документа, на которой появятся цифры" />
+            <label for="num-start" style="margin:0;color:#9ca3af">с числа</label>
+            <input type="number" id="num-start" min="1" value="1" title="Первое число на выбранной странице" />
+            <span class="hint" style="margin:0">(раньше — без цифр)</span>
+          </div>
           <label for="output-name">Имя итогового PDF (при сборке)</label>
           <input type="text" id="output-name" value="сборка.pdf" />
           <div class="btn-row">
@@ -110,25 +134,190 @@
   <script>
     const maxMerge = {{MAX_MERGE}};
     let currentPath = '';
-    let selectedPaths = new Set();
+    let orderedSelections = [];
+    let mergeOrder = [];
+    let resolvedFileCount = 0;
+    let resolveTimer = null;
     let uploadFiles = [];
 
     const treeList = document.getElementById('tree-list');
     const treePathEl = document.getElementById('tree-path');
     const selCountEl = document.getElementById('sel-count');
+    const selDetailEl = document.getElementById('sel-detail');
     const uploadCountEl = document.getElementById('upload-count');
     const logWork = document.getElementById('log-work');
     const dropUpload = document.getElementById('drop-upload');
     const fileUpload = document.getElementById('file-upload');
+    const mergePanel = document.getElementById('merge-panel');
+    const mergeList = document.getElementById('merge-list');
+    const numRow = document.getElementById('num-row');
+
+    function isSelected(path) {
+      return orderedSelections.some(s => s.path === path);
+    }
+
+    function toggleSelection(path, name, type, checked) {
+      if (checked) {
+        if (!isSelected(path)) orderedSelections.push({ path, name, type });
+      } else {
+        orderedSelections = orderedSelections.filter(s => s.path !== path);
+      }
+      updateSelCount();
+      refreshMergePanel();
+    }
 
     function updateSelCount() {
-      selCountEl.textContent = 'На сервере выбрано: ' + selectedPaths.size;
+      const dirs = orderedSelections.filter(s => s.type === 'dir');
+      const files = orderedSelections.filter(s => s.type === 'file');
+      if (!orderedSelections.length) {
+        selCountEl.textContent = 'На сервере: ничего не выбрано';
+        selDetailEl.textContent = '';
+        resolvedFileCount = 0;
+        return;
+      }
+      const parts = [];
+      if (dirs.length) parts.push(dirs.length + ' ' + plural(dirs.length, 'папка', 'папки', 'папок'));
+      if (files.length) parts.push(files.length + ' ' + plural(files.length, 'файл', 'файла', 'файлов'));
+      selCountEl.textContent = 'На сервере выбрано: ' + parts.join(', ');
+      scheduleResolveCount();
     }
+
+    function plural(n, one, few, many) {
+      const m10 = n % 10, m100 = n % 100;
+      if (m10 === 1 && m100 !== 11) return one;
+      if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+      return many;
+    }
+
+    function scheduleResolveCount() {
+      clearTimeout(resolveTimer);
+      selDetailEl.textContent = 'Подсчёт файлов…';
+      resolveTimer = setTimeout(resolveFileCount, 350);
+    }
+
+    async function resolveFileCount() {
+      if (!orderedSelections.length) {
+        selDetailEl.textContent = '';
+        resolvedFileCount = 0;
+        return;
+      }
+      try {
+        const r = await fetch('/api/resolve-paths', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            paths: orderedSelections.map(s => s.path),
+            recursive: document.getElementById('recursive').checked
+          })
+        });
+        const j = await r.json();
+        if (!r.ok) {
+          selDetailEl.textContent = j.detail || 'Ошибка подсчёта';
+          return;
+        }
+        resolvedFileCount = (j.files || []).length;
+        selDetailEl.textContent = 'К обработке: ' + resolvedFileCount + ' ' +
+          plural(resolvedFileCount, 'файл', 'файла', 'файлов');
+        if (document.getElementById('merge').checked) {
+          mergeOrder = j.files || [];
+          renderMergeList();
+        }
+      } catch (e) {
+        selDetailEl.textContent = 'Не удалось подсчитать файлы';
+      }
+    }
+
+    async function refreshMergePanel() {
+      const mergeOn = document.getElementById('merge').checked;
+      numRow.style.display = mergeOn ? 'flex' : 'none';
+      if (!mergeOn) {
+        mergePanel.classList.remove('visible');
+        mergeOrder = [];
+        return;
+      }
+      mergePanel.classList.add('visible');
+
+      const hasServer = orderedSelections.length > 0;
+      const hasUpload = uploadFiles.length > 0;
+
+      if (hasServer) {
+        if (mergeOrder.length && resolvedFileCount > 0 &&
+            mergeOrder.length === resolvedFileCount &&
+            mergeOrder[0] && mergeOrder[0].path && !mergeOrder[0].upload) {
+          renderMergeList();
+          return;
+        }
+        const r = await fetch('/api/resolve-paths', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            paths: orderedSelections.map(s => s.path),
+            recursive: document.getElementById('recursive').checked
+          })
+        });
+        const j = await r.json();
+        if (!r.ok) {
+          mergeList.innerHTML = '<div class="merge-item">' + (j.detail || 'Ошибка') + '</div>';
+          return;
+        }
+        mergeOrder = j.files || [];
+        resolvedFileCount = mergeOrder.length;
+        selDetailEl.textContent = 'К обработке: ' + resolvedFileCount + ' ' +
+          plural(resolvedFileCount, 'файл', 'файла', 'файлов');
+      } else if (hasUpload) {
+        mergeOrder = uploadFiles.map(f => ({ path: f.name, name: f.name, upload: true, file: f }));
+      } else {
+        mergeList.innerHTML = '<div class="merge-item">Выберите файлы или папки</div>';
+        mergeOrder = [];
+        return;
+      }
+      renderMergeList();
+    }
+
+    function renderMergeList() {
+      mergeList.innerHTML = '';
+      if (!mergeOrder.length) {
+        mergeList.innerHTML = '<div class="merge-item">Нет файлов для сборки</div>';
+        return;
+      }
+      const header = document.createElement('div');
+      header.className = 'merge-item';
+      header.style.color = '#94a3b8';
+      header.style.borderBottom = 'none';
+      header.textContent = 'Всего в сборке: ' + mergeOrder.length + ' ' +
+        plural(mergeOrder.length, 'файл', 'файла', 'файлов');
+      mergeList.appendChild(header);
+      mergeOrder.forEach((item, idx) => {
+        const row = document.createElement('div');
+        row.className = 'merge-item';
+        row.innerHTML =
+          '<button type="button" class="secondary" data-up="' + idx + '">↑</button>' +
+          '<button type="button" class="secondary" data-down="' + idx + '">↓</button>' +
+          '<span class="fname">' + (idx + 1) + '. ' + item.name + '</span>';
+        row.querySelector('[data-up]').onclick = () => {
+          if (idx > 0) {
+            const t = mergeOrder[idx - 1]; mergeOrder[idx - 1] = mergeOrder[idx]; mergeOrder[idx] = t;
+            renderMergeList();
+          }
+        };
+        row.querySelector('[data-down]').onclick = () => {
+          if (idx < mergeOrder.length - 1) {
+            const t = mergeOrder[idx + 1]; mergeOrder[idx + 1] = mergeOrder[idx]; mergeOrder[idx] = t;
+            renderMergeList();
+          }
+        };
+        mergeList.appendChild(row);
+      });
+    }
+
+    document.getElementById('merge').onchange = refreshMergePanel;
+    document.getElementById('recursive').onchange = refreshMergePanel;
     function updateUploadCount() {
       uploadCountEl.textContent = 'С компьютера: ' + uploadFiles.length;
       dropUpload.textContent = uploadFiles.length
         ? ('📎 ' + uploadFiles.length + ' файл(ов): ' + uploadFiles.map(f => f.name).join(', '))
         : '📎 Загрузить с компьютера (один или несколько файлов)';
+      refreshMergePanel();
     }
 
     async function loadTree(path) {
@@ -149,23 +338,32 @@
       treeList.innerHTML = '';
       for (const e of j.entries) {
         const row = document.createElement('div');
+        const sel = isSelected(e.path);
         row.className = 'tree-item ' + e.type + (e.type === 'file' && !e.convertible ? ' disabled' : '');
+        const checked = sel ? 'checked' : '';
+        const canSelect = e.type === 'dir' || e.convertible;
+        const cb = canSelect
+          ? '<input type="checkbox" class="chk-box" ' + checked + ' />'
+          : '<span class="chk-box" style="width:16px"></span>';
+
         if (e.type === 'dir') {
-          row.innerHTML = '<span class="icon">📁</span><span class="name">' + e.name + '</span>';
-          row.onclick = () => loadTree(e.path);
+          row.innerHTML = cb + '<span class="icon">📁</span><span class="name">' + e.name + '</span>';
+          row.querySelector('.name').onclick = () => loadTree(e.path);
+          const checkbox = row.querySelector('input[type=checkbox]');
+          if (checkbox) {
+            checkbox.onclick = ev => {
+              ev.stopPropagation();
+              toggleSelection(e.path, e.name, 'dir', checkbox.checked);
+              checkbox.checked = isSelected(e.path);
+            };
+          }
         } else {
-          const checked = selectedPaths.has(e.path) ? 'checked' : '';
-          const cb = e.convertible
-            ? '<input type="checkbox" ' + checked + ' data-path="' + e.path.replace(/"/g, '&quot;') + '" />'
-            : '';
           row.innerHTML = cb + '<span class="icon">📄</span><span class="name">' + e.name + '</span>';
           const checkbox = row.querySelector('input[type=checkbox]');
           if (checkbox) {
             checkbox.onclick = ev => {
               ev.stopPropagation();
-              if (checkbox.checked) selectedPaths.add(e.path);
-              else selectedPaths.delete(e.path);
-              updateSelCount();
+              toggleSelection(e.path, e.name, 'file', checkbox.checked);
             };
           }
         }
@@ -192,52 +390,130 @@
 
     function showLog(text) { logWork.style.display = 'block'; logWork.textContent = text; }
 
+    async function apiPost(url, body) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 30 * 60 * 1000);
+      try {
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: ctrl.signal
+        });
+        if (r.status === 502 || r.status === 503) {
+          throw new Error('Сервис конвертации завис или перезапускался.\nОбновите страницу (Ctrl+F5) и попробуйте снова.');
+        }
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
+        return j;
+      } catch (e) {
+        if (e.name === 'AbortError') {
+          throw new Error('Превышено время ожидания (30 мин).\nОбновите страницу и попробуйте меньше файлов.');
+        }
+        throw e;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    let progressTimer = null;
+    function startProgress(baseMsg) {
+      const t0 = Date.now();
+      const tick = () => {
+        const sec = Math.floor((Date.now() - t0) / 1000);
+        const m = Math.floor(sec / 60);
+        const s = sec % 60;
+        const elapsed = m > 0 ? (m + ' мин ' + s + ' сек') : (s + ' сек');
+        showLog(baseMsg + '\nПрошло: ' + elapsed);
+      };
+      tick();
+      clearInterval(progressTimer);
+      progressTimer = setInterval(tick, 1000);
+    }
+    function stopProgress() {
+      clearInterval(progressTimer);
+      progressTimer = null;
+    }
+
+    function numberingLog(j) {
+      if (!j.numbering_from_page) return '';
+      let s = '\nНумерация: с ' + j.numbering_from_page + '-й страницы';
+      if (j.numbering_start && j.numbering_start !== 1) s += ', начиная с ' + j.numbering_start;
+      return s;
+    }
+
+    function progressMessage(merge, fileCount) {
+      if (merge && fileCount > 1) {
+        const estMin = Math.max(1, Math.round(fileCount * 0.4));
+        const estMax = Math.max(estMin + 1, Math.round(fileCount * 0.9));
+        return 'Сборка ' + fileCount + ' ' + plural(fileCount, 'файла', 'файлов', 'файлов') +
+          ' в один PDF…\nОценка: ' + estMin + '–' + estMax + ' мин.\n' +
+          'Word/Excel конвертируются по одному — не закрывайте страницу.';
+      }
+      if (fileCount > 1) {
+        return 'Конвертация ' + fileCount + ' ' + plural(fileCount, 'файла', 'файлов', 'файлов') +
+          '…\nКаждый файл скачивается с SMB — подождите.';
+      }
+      return 'Конвертация…\nСкачивание с SMB и преобразование в PDF.';
+    }
+
     document.getElementById('btn-server').onclick = async () => {
       const merge = document.getElementById('merge').checked;
       const output_name = document.getElementById('output-name').value.trim() || 'сборка.pdf';
+      const number_pages = document.getElementById('number-pages').checked;
+      const numbering_from_page = parseInt(document.getElementById('page-start').value, 10) || 1;
+      const numbering_start = parseInt(document.getElementById('num-start').value, 10) || 1;
       const btn = document.getElementById('btn-server');
       btn.disabled = true;
-      showLog('Обработка…');
+      btn.textContent = 'Обработка…';
+      const fileCount = merge && mergeOrder.length ? mergeOrder.length : resolvedFileCount;
+      startProgress(progressMessage(merge, fileCount || orderedSelections.length || 1));
 
       try {
-        if (selectedPaths.size > 0) {
-          const r = await fetch('/api/convert-paths', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ paths: Array.from(selectedPaths), merge, output_name })
+        if (merge && mergeOrder.length > 0) {
+          const j = await apiPost('/api/convert-paths', {
+            paths: mergeOrder.map(f => f.path),
+            merge: true,
+            output_name,
+            number_pages,
+            numbering_from_page,
+            numbering_start
           });
-          const j = await r.json();
-          if (!r.ok) { showLog(j.detail || JSON.stringify(j)); return; }
-          if (j.merge) {
-            showLog('Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + ', ошибок: ' + j.stats.error);
-          } else {
-            showLog('Готово: ' + j.stats.ok + ' OK, ошибок ' + j.stats.error + '\n' +
-              j.files.map(f => f.status + ' | ' + f.source).join('\n'));
-          }
+          showLog('Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) +
+            ', ошибок: ' + j.stats.error);
+        } else if (orderedSelections.length > 0) {
+          const j = await apiPost('/api/convert-paths', {
+            paths: orderedSelections.map(s => s.path),
+            merge: false,
+            recursive: document.getElementById('recursive').checked
+          });
+          showLog('Готово: ' + j.stats.ok + ' OK, ошибок ' + j.stats.error + '\n' +
+            j.files.map(f => f.status + ' | ' + f.source).join('\n'));
         } else if (currentPath) {
-          const r = await fetch('/api/convert-folder', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              path: currentPath,
-              recursive: document.getElementById('recursive').checked,
-              merge,
-              output_name
-            })
+          const j = await apiPost('/api/convert-folder', {
+            path: currentPath,
+            recursive: document.getElementById('recursive').checked,
+            merge,
+            output_name,
+            number_pages,
+            numbering_from_page,
+            numbering_start
           });
-          const j = await r.json();
-          if (!r.ok) { showLog(j.detail || JSON.stringify(j)); return; }
           if (j.merge) {
-            showLog('Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from);
+            showLog('Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j));
           } else {
             showLog('Готово: ' + j.stats.ok + ' файлов\n' +
               j.files.map(f => f.status + ' | ' + f.source).join('\n'));
           }
         } else {
-          alert('Выберите файлы в дереве или откройте папку');
+          alert('Выберите файлы/папки в дереве или откройте папку');
         }
+      } catch (e) {
+        showLog(e.message || String(e));
       } finally {
+        stopProgress();
         btn.disabled = false;
+        btn.textContent = 'Конвертировать на сервере';
         loadTree(currentPath);
       }
     };
@@ -245,9 +521,14 @@
     document.getElementById('btn-download').onclick = async () => {
       if (!uploadFiles.length) { alert('Загрузите файлы с компьютера'); return; }
       const merge = document.getElementById('merge').checked;
+      const number_pages = document.getElementById('number-pages').checked;
+      const numbering_from_page = parseInt(document.getElementById('page-start').value, 10) || 1;
+      const numbering_start = parseInt(document.getElementById('num-start').value, 10) || 1;
       const btn = document.getElementById('btn-download');
       btn.disabled = true;
-      showLog('Конвертация…');
+      btn.textContent = 'Обработка…';
+      const fileCount = merge && mergeOrder.length ? mergeOrder.length : uploadFiles.length;
+      startProgress(progressMessage(merge, fileCount));
       try {
         if (uploadFiles.length === 1 && !merge) {
           const fd = new FormData();
@@ -261,9 +542,15 @@
           a.click();
           showLog('PDF скачан');
         } else {
-          if (uploadFiles.length > maxMerge) { alert('Максимум ' + maxMerge + ' файлов'); return; }
+          const filesToSend = merge && mergeOrder.length
+            ? mergeOrder.map(item => item.file || uploadFiles.find(f => f.name === item.name)).filter(Boolean)
+            : uploadFiles;
+          if (filesToSend.length > maxMerge) { alert('Максимум ' + maxMerge + ' файлов'); return; }
           const fd = new FormData();
-          uploadFiles.forEach(f => fd.append('files', f));
+          filesToSend.forEach(f => fd.append('files', f));
+          fd.append('number_pages', number_pages ? 'true' : 'false');
+          fd.append('numbering_from_page', String(numbering_from_page));
+          fd.append('numbering_start', String(numbering_start));
           const r = await fetch('/api/convert-merge', { method: 'POST', body: fd });
           if (!r.ok) { showLog(await r.text()); return; }
           const blob = await r.blob();
@@ -271,10 +558,13 @@
           a.href = URL.createObjectURL(blob);
           a.download = document.getElementById('output-name').value.trim() || 'сборка.pdf';
           a.click();
-          showLog('Сборка PDF скачана');
+          showLog('Сборка PDF скачана' + (number_pages
+            ? (' (с ' + numbering_from_page + '-й стр., числа с ' + numbering_start + ')') : ''));
         }
       } finally {
+        stopProgress();
         btn.disabled = false;
+        btn.textContent = 'Скачать PDF';
       }
     };
 
@@ -293,11 +583,17 @@
         const j = await r.json();
         if (j.mounted && j.convert_path) {
           smbStatus.textContent = 'SMB: подключено → ' + j.convert_path;
+          document.getElementById('smb-root-hint').textContent =
+            'Работа с файлами: ' + j.convert_path;
           if (!currentPath) loadTree('');
         } else if (j.configured) {
           smbStatus.textContent = 'SMB: настроено, не смонтировано';
+          document.getElementById('smb-root-hint').textContent =
+            'Подключите SMB-шару для доступа к файлам';
         } else {
           smbStatus.textContent = 'SMB: не подключено';
+          document.getElementById('smb-root-hint').textContent =
+            'Подключите SMB-шару для доступа к файлам';
         }
       } catch (e) {
         smbStatus.textContent = 'SMB: статус недоступен';

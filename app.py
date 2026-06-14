@@ -23,6 +23,7 @@ from converter import (
     convert_folder,
     convert_paths,
     convert_uploads_to_merged_pdf,
+    resolve_ordered_inputs,
     _convert_with_libreoffice,
 )
 
@@ -41,12 +42,24 @@ class FolderRequest(BaseModel):
     recursive: bool = True
     merge: bool = False
     output_name: str = "сборка.pdf"
+    number_pages: bool = False
+    numbering_from_page: int = 1
+    numbering_start: int = 1
 
 
 class PathsRequest(BaseModel):
     paths: list[str]
     merge: bool = False
     output_name: str = "сборка.pdf"
+    recursive: bool = True
+    number_pages: bool = False
+    numbering_from_page: int = 1
+    numbering_start: int = 1
+
+
+class ResolveRequest(BaseModel):
+    paths: list[str]
+    recursive: bool = True
 
 
 @app.get("/health")
@@ -107,11 +120,35 @@ async def api_browse(path: str = ""):
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+@app.post("/api/resolve-paths")
+async def api_resolve_paths(body: ResolveRequest):
+    try:
+        files = resolve_ordered_inputs(body.paths, recursive=body.recursive)
+        return JSONResponse(
+            {
+                "files": [
+                    {"path": str(f), "name": f.name, "parent": f.parent.name}
+                    for f in files
+                ]
+            }
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @app.post("/api/convert-paths")
 async def api_convert_paths(body: PathsRequest):
     try:
         return JSONResponse(
-            convert_paths(body.paths, merge=body.merge, output_name=body.output_name)
+            convert_paths(
+                body.paths,
+                merge=body.merge,
+                output_name=body.output_name,
+                recursive=body.recursive,
+                number_pages=body.number_pages,
+                numbering_from_page=body.numbering_from_page,
+                numbering_start=body.numbering_start,
+            )
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -128,6 +165,9 @@ async def api_convert_folder(body: FolderRequest):
                 body.recursive,
                 merge=body.merge,
                 output_name=body.output_name,
+                number_pages=body.number_pages,
+                numbering_from_page=body.numbering_from_page,
+                numbering_start=body.numbering_start,
             )
         )
     except ValueError as e:
@@ -153,6 +193,9 @@ async def api_convert_folder_form(
 @app.post("/api/convert-merge")
 async def api_convert_merge(
     files: Annotated[list[UploadFile], File(...)],
+    number_pages: bool = Form(False),
+    numbering_from_page: int = Form(1),
+    numbering_start: int = Form(1),
 ):
     if not files:
         raise HTTPException(status_code=400, detail="Передайте хотя бы один файл")
@@ -177,7 +220,11 @@ async def api_convert_merge(
             sources.append(dest)
 
         out = tmp / "сборка.pdf"
-        convert_uploads_to_merged_pdf(sources, out)
+        from_page = numbering_from_page if number_pages else None
+        start_num = numbering_start if number_pages else 1
+        convert_uploads_to_merged_pdf(
+            sources, out, numbering_from_page=from_page, numbering_start=start_num
+        )
         return FileResponse(
             path=str(out),
             media_type="application/pdf",

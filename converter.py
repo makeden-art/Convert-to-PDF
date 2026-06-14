@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from contextlib import contextmanager
 from pathlib import Path
@@ -28,11 +29,20 @@ def allowed_roots() -> list[Path]:
 
 def validate_folder(path: str) -> Path:
     folder = Path(path).expanduser().resolve()
+    _ensure_under_allowed_roots(folder)
+    if _is_smb_path(folder) and _smb_mounted():
+        remote_dir, remote_name = _virtual_smb_remote(folder)
+        if remote_name:
+            raise ValueError(f"Это не папка: {folder}")
+        try:
+            _run_smbclient(remote_dir, "ls")
+        except ValueError as e:
+            raise ValueError(f"Папка не найдена на SMB: {folder}") from e
+        return folder
     if not folder.exists():
         raise ValueError(f"Папка не найдена: {folder}")
     if not folder.is_dir():
         raise ValueError(f"Это не папка: {folder}")
-    _ensure_under_allowed_roots(folder)
     return folder
 
 
@@ -74,6 +84,9 @@ def validate_file(path: str) -> Path:
 
 
 BROWSE_TIMEOUT_SEC = float(os.getenv("CONVERT_BROWSE_TIMEOUT_SEC", "5"))
+MERGE_WORKERS = max(1, int(os.getenv("CONVERT_MERGE_WORKERS", "2")))
+OFFICE_WORKERS = max(1, int(os.getenv("CONVERT_OFFICE_WORKERS", "1")))
+_office_sem = threading.Semaphore(OFFICE_WORKERS)
 PLATFORM_STATE = Path("/opt/road-pdf-platform/platform.state.json")
 SMB_ROOT = Path("/data/smb")
 
@@ -249,21 +262,18 @@ def _dir_accessible(folder: Path) -> bool:
 def browse_directory(path: str = "") -> dict:
     """Содержимое каталога для дерева выбора (один уровень)."""
     if not path.strip():
-        entries = []
-        for root in allowed_roots():
-            try:
-                if _dir_accessible(root):
-                    entries.append(
-                        {
-                            "name": root.name or str(root),
-                            "path": str(root),
-                            "type": "dir",
-                        }
-                    )
-            except ValueError:
-                continue
-        entries.sort(key=lambda e: e["name"].lower())
-        return {"path": "", "parent": None, "entries": entries}
+        if not _smb_mounted():
+            return {
+                "path": "",
+                "parent": None,
+                "smb_mounted": False,
+                "entries": [],
+                "message": "SMB не подключён. Подключите сетевую папку выше.",
+            }
+        base = _smb_mount_base()
+        result = _browse_smb_directory(base)
+        result["smb_mounted"] = True
+        return result
 
     folder = Path(path).expanduser().resolve()
     _ensure_under_allowed_roots(folder)
@@ -365,23 +375,26 @@ def convert_paths(
     *,
     merge: bool = False,
     output_name: str = "сборка.pdf",
+    recursive: bool = True,
+    number_pages: bool = False,
+    numbering_from_page: int = 1,
+    numbering_start: int = 1,
 ) -> dict:
-    """Конвертировать выбранные файлы на сервере."""
-    if not paths:
-        raise ValueError("Не выбрано ни одного файла")
-
-    inputs: list[Path] = []
-    for raw in paths:
-        fp = validate_file(raw)
-        if fp.suffix.lower() not in SUPPORTED_ALL:
-            raise ValueError(f"Формат не поддерживается: {fp.name}")
-        inputs.append(fp)
-
-    inputs = sorted(set(inputs), key=lambda p: str(p).lower())
+    """Конвертировать выбранные файлы и папки на сервере."""
+    inputs = resolve_ordered_inputs(paths, recursive=recursive)
 
     if merge:
         folder = inputs[0].parent
-        return _convert_folder_merged(folder, inputs, output_name, recursive=False)
+        from_page = numbering_from_page if number_pages else None
+        start_num = numbering_start if number_pages else 1
+        return _convert_folder_merged(
+            folder,
+            inputs,
+            output_name,
+            recursive=False,
+            numbering_from_page=from_page,
+            numbering_start=start_num,
+        )
 
     results = []
     stats = {"ok": 0, "skipped": 0, "error": 0}
@@ -400,21 +413,22 @@ def convert_paths(
 
 
 def _convert_with_libreoffice(src: Path, out_dir: Path) -> Path:
-    proc = subprocess.run(
-        [
-            "soffice",
-            "--headless",
-            "--norestore",
-            "--convert-to",
-            "pdf",
-            "--outdir",
-            str(out_dir),
-            str(src),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
+    with _office_sem:
+        proc = subprocess.run(
+            [
+                "soffice",
+                "--headless",
+                "--norestore",
+                "--convert-to",
+                "pdf",
+                "--outdir",
+                str(out_dir),
+                str(src),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
     if proc.returncode != 0:
         raise RuntimeError((proc.stderr or proc.stdout or "LibreOffice error").strip())
     pdf = out_dir / f"{src.stem}.pdf"
@@ -423,7 +437,13 @@ def _convert_with_libreoffice(src: Path, out_dir: Path) -> Path:
     return pdf
 
 
-def merge_pdfs(sources: list[Path], dest: Path) -> Path:
+def merge_pdfs(
+    sources: list[Path],
+    dest: Path,
+    *,
+    numbering_from_page: int | None = None,
+    numbering_start: int = 1,
+) -> Path:
     """Склеить PDF-файлы в один (порядок — как в списке sources)."""
     import fitz
 
@@ -437,6 +457,21 @@ def merge_pdfs(sources: list[Path], dest: Path) -> Path:
             doc = fitz.open(pdf)
             out.insert_pdf(doc)
             doc.close()
+        if numbering_from_page is not None and numbering_from_page > 0:
+            first_num = max(1, numbering_start)
+            for i, page in enumerate(out):
+                page_num = i + 1
+                if page_num < numbering_from_page:
+                    continue
+                num = str(first_num + (page_num - numbering_from_page))
+                rect = page.rect
+                page.insert_text(
+                    (rect.width - 36, 18),
+                    num,
+                    fontsize=10,
+                    fontname="helv",
+                    color=(0, 0, 0),
+                )
         out.save(dest)
     finally:
         out.close()
@@ -444,7 +479,7 @@ def merge_pdfs(sources: list[Path], dest: Path) -> Path:
 
 
 def convert_file_to_pdf(src: Path, dest: Path) -> None:
-    """Конвертировать один файл в указанный PDF."""
+    """Конвертировать один локальный файл в указанный PDF."""
     src = src.resolve()
     suffix = src.suffix.lower()
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -468,6 +503,25 @@ def convert_file_to_pdf(src: Path, dest: Path) -> None:
             shutil.move(str(pdf_tmp), str(dest))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _convert_source_to_temp_pdf(src: Path, dest: Path) -> None:
+    """Конвертировать файл с сервера (локальный или SMB) во временный PDF."""
+    if _is_smb_path(src) and _smb_mounted():
+        with _smb_local_file(src) as local_src:
+            convert_file_to_pdf(local_src, dest)
+        return
+    convert_file_to_pdf(src, dest)
+
+
+def _save_merged_pdf(local_pdf: Path, dest: Path) -> Path:
+    """Сохранить собранный PDF в целевую папку (SMB или локально)."""
+    if _is_smb_path(dest) and _smb_mounted():
+        _smb_put_file(local_pdf, dest)
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(local_pdf, dest)
+    return dest
 
 
 def convert_file_in_place(src: Path) -> dict:
@@ -523,7 +577,36 @@ def iter_files(folder: Path, recursive: bool) -> list[Path]:
     return sorted(files, key=lambda p: str(p).lower())
 
 
+def _collect_smb_inputs(folder: Path, recursive: bool) -> list[Path]:
+    base = _smb_mount_base()
+    remote_dir, remote_name = _virtual_smb_remote(folder)
+    if remote_name:
+        return []
+
+    files: list[Path] = []
+
+    def walk(remote: str, virtual: Path) -> None:
+        output = _run_smbclient(remote, "ls")
+        for item in _parse_smbclient_ls(output):
+            vpath = virtual / item["name"]
+            if item["type"] == "dir":
+                if recursive:
+                    sub_remote = (
+                        f"{remote}/{item['name']}"
+                        if remote not in (".", "")
+                        else item["name"]
+                    )
+                    walk(sub_remote, vpath)
+            elif Path(item["name"]).suffix.lower() in SUPPORTED_ALL:
+                files.append(vpath)
+
+    walk(remote_dir, folder if folder.resolve() != base else base)
+    return sorted(files, key=lambda p: str(p).lower())
+
+
 def _collect_inputs(folder: Path, recursive: bool) -> list[Path]:
+    if _is_smb_path(folder) and _smb_mounted():
+        return _collect_smb_inputs(folder, recursive)
     files: list[Path] = []
     for f in iter_files(folder, recursive):
         if f.name.startswith("."):
@@ -534,18 +617,73 @@ def _collect_inputs(folder: Path, recursive: bool) -> list[Path]:
     return files
 
 
+def resolve_ordered_inputs(
+    paths: list[str],
+    *,
+    recursive: bool = True,
+) -> list[Path]:
+    """Развернуть выбранные файлы и папки в упорядоченный список файлов."""
+    if not paths:
+        raise ValueError("Не выбрано ни одного файла или папки")
+
+    inputs: list[Path] = []
+    seen: set[str] = set()
+
+    for raw in paths:
+        p = Path(raw).expanduser().resolve()
+        _ensure_under_allowed_roots(p)
+        is_dir = False
+        if _is_smb_path(p) and _smb_mounted():
+            _, remote_name = _virtual_smb_remote(p)
+            is_dir = remote_name is None
+        elif p.is_dir():
+            is_dir = True
+
+        if is_dir:
+            folder = validate_folder(str(p))
+            for f in _collect_inputs(folder, recursive):
+                key = str(f)
+                if key not in seen:
+                    seen.add(key)
+                    inputs.append(f)
+        else:
+            fp = validate_file(str(p))
+            if fp.suffix.lower() not in SUPPORTED_ALL:
+                raise ValueError(f"Формат не поддерживается: {fp.name}")
+            key = str(fp)
+            if key not in seen:
+                seen.add(key)
+                inputs.append(fp)
+
+    if not inputs:
+        raise ValueError("Нет поддерживаемых файлов для конвертации")
+    return inputs
+
+
 def convert_folder(
     folder_path: str,
     recursive: bool = True,
     *,
     merge: bool = False,
     output_name: str = "сборка.pdf",
+    number_pages: bool = False,
+    numbering_from_page: int = 1,
+    numbering_start: int = 1,
 ) -> dict:
     folder = validate_folder(folder_path)
     inputs = _collect_inputs(folder, recursive)
 
     if merge:
-        return _convert_folder_merged(folder, inputs, output_name, recursive)
+        from_page = numbering_from_page if number_pages else None
+        start_num = numbering_start if number_pages else 1
+        return _convert_folder_merged(
+            folder,
+            inputs,
+            output_name,
+            recursive,
+            numbering_from_page=from_page,
+            numbering_start=start_num,
+        )
 
     results = []
     stats = {"ok": 0, "skipped": 0, "error": 0}
@@ -565,7 +703,34 @@ def convert_folder(
     }
 
 
-def _convert_folder_merged(folder: Path, inputs: list[Path], output_name: str, recursive: bool) -> dict:
+def _convert_merge_part(idx: int, src: Path, tmp: Path) -> tuple[int, Path | None, dict]:
+    part = tmp / f"{idx:04d}.pdf"
+    try:
+        _convert_source_to_temp_pdf(src, part)
+        return idx, part, {
+            "source": str(src),
+            "pdf": str(part),
+            "status": "ok",
+            "message": "Включён в сборку",
+        }
+    except Exception as e:
+        return idx, None, {
+            "source": str(src),
+            "pdf": None,
+            "status": "error",
+            "message": str(e),
+        }
+
+
+def _convert_folder_merged(
+    folder: Path,
+    inputs: list[Path],
+    output_name: str,
+    recursive: bool,
+    *,
+    numbering_from_page: int | None = None,
+    numbering_start: int = 1,
+) -> dict:
     if not inputs:
         raise ValueError("В папке нет поддерживаемых файлов для сборки")
 
@@ -575,40 +740,49 @@ def _convert_folder_merged(folder: Path, inputs: list[Path], output_name: str, r
 
     merged_path = folder / safe_name
     tmp = Path(tempfile.mkdtemp(prefix="cvt_merge_"))
+    local_merged = tmp / safe_name
     results: list[dict] = []
     pdf_parts: list[Path] = []
     stats = {"ok": 0, "skipped": 0, "error": 0}
 
     try:
-        for idx, src in enumerate(inputs):
-            part = tmp / f"{idx:04d}.pdf"
-            try:
-                convert_file_to_pdf(src, part)
+        workers = min(MERGE_WORKERS, len(inputs))
+        part_results: list[tuple[int, Path | None, dict]] = []
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = [
+                ex.submit(_convert_merge_part, idx, src, tmp)
+                for idx, src in enumerate(inputs)
+            ]
+            for fut in futs:
+                part_results.append(fut.result())
+
+        part_results.sort(key=lambda x: x[0])
+        for _, part, item in part_results:
+            results.append(item)
+            if part is not None:
                 pdf_parts.append(part)
-                results.append(
-                    {
-                        "source": str(src),
-                        "pdf": str(part),
-                        "status": "ok",
-                        "message": "Включён в сборку",
-                    }
-                )
                 stats["ok"] += 1
-            except Exception as e:
-                results.append(
-                    {
-                        "source": str(src),
-                        "pdf": None,
-                        "status": "error",
-                        "message": str(e),
-                    }
-                )
+            else:
                 stats["error"] += 1
 
         if not pdf_parts:
-            raise ValueError("Не удалось сконвертировать ни одного файла для сборки")
+            details = "; ".join(
+                f"{Path(r['source']).name}: {r.get('message', 'ошибка')}"
+                for r in results
+                if r.get("status") == "error"
+            )
+            raise ValueError(
+                "Не удалось сконвертировать ни одного файла для сборки"
+                + (f" ({details})" if details else "")
+            )
 
-        merge_pdfs(pdf_parts, merged_path)
+        merge_pdfs(
+            pdf_parts,
+            local_merged,
+            numbering_from_page=numbering_from_page,
+            numbering_start=numbering_start,
+        )
+        _save_merged_pdf(local_merged, merged_path)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -621,10 +795,18 @@ def _convert_folder_merged(folder: Path, inputs: list[Path], output_name: str, r
         "total": len(results),
         "stats": stats,
         "files": results,
+        "numbering_from_page": numbering_from_page,
+        "numbering_start": numbering_start,
     }
 
 
-def convert_uploads_to_merged_pdf(sources: list[Path], dest: Path) -> dict:
+def convert_uploads_to_merged_pdf(
+    sources: list[Path],
+    dest: Path,
+    *,
+    numbering_from_page: int | None = None,
+    numbering_start: int = 1,
+) -> dict:
     """Сконвертировать загруженные файлы и собрать в один PDF."""
     if not sources:
         raise ValueError("Не передано ни одного файла")
@@ -635,22 +817,42 @@ def convert_uploads_to_merged_pdf(sources: list[Path], dest: Path) -> dict:
     stats = {"ok": 0, "error": 0}
 
     try:
-        for idx, src in enumerate(sources):
-            part = tmp / f"{idx:04d}.pdf"
-            try:
-                convert_file_to_pdf(src, part)
+        workers = min(MERGE_WORKERS, len(sources))
+        part_results: list[tuple[int, Path | None, dict]] = []
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = [
+                ex.submit(_convert_merge_part, idx, src, tmp)
+                for idx, src in enumerate(sources)
+            ]
+            for fut in futs:
+                part_results.append(fut.result())
+
+        part_results.sort(key=lambda x: x[0])
+        for _, part, item in part_results:
+            results.append(item)
+            if part is not None:
                 pdf_parts.append(part)
-                results.append({"source": src.name, "status": "ok"})
                 stats["ok"] += 1
-            except Exception as e:
-                results.append({"source": src.name, "status": "error", "message": str(e)})
+            else:
                 stats["error"] += 1
 
         if not pdf_parts:
             raise ValueError("Не удалось сконвертировать ни одного файла")
 
-        merge_pdfs(pdf_parts, dest)
+        merge_pdfs(
+            pdf_parts,
+            dest,
+            numbering_from_page=numbering_from_page,
+            numbering_start=numbering_start,
+        )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-    return {"merged_pdf": str(dest), "pages_from": len(pdf_parts), "stats": stats, "files": results}
+    return {
+        "merged_pdf": str(dest),
+        "pages_from": len(pdf_parts),
+        "stats": stats,
+        "files": results,
+        "numbering_from_page": numbering_from_page,
+        "numbering_start": numbering_start,
+    }
