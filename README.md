@@ -51,3 +51,7 @@ docker compose up -d --build
 ## Платформа
 
 Подключается в `road-pdf-platform/docker-compose.platform.yml` как сервис `convert-to-pdf`.
+
+## План разработки
+
+Дорожная карта модуля (только «Перевод в PDF»): [PLAN.md](PLAN.md)
