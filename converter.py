@@ -8,6 +8,8 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from contextlib import contextmanager
 from pathlib import Path
@@ -25,6 +27,158 @@ def allowed_roots() -> list[Path]:
         "/data,/workspace,/opt/road-pdf-platform",
     )
     return [Path(p.strip()).resolve() for p in raw.split(",") if p.strip()]
+
+
+def server_path_exists(path: Path) -> bool:
+    """Проверить, существует ли файл на сервере (локально или SMB)."""
+    p = path.expanduser().resolve()
+    try:
+        _ensure_under_allowed_roots(p.parent)
+    except ValueError:
+        return False
+
+    if _is_smb_path(p) and _smb_mounted():
+        remote_dir, remote_name = _virtual_smb_remote(p)
+        if not remote_name:
+            return False
+        try:
+            names = {
+                e["name"]
+                for e in _parse_smbclient_ls(_run_smbclient(remote_dir, "ls", timeout=10))
+            }
+            return remote_name in names
+        except ValueError:
+            return False
+    return p.is_file()
+
+
+def check_output_files(
+    *,
+    paths: list[str] | None = None,
+    folder_path: str | None = None,
+    merge: bool = False,
+    output_name: str = "сборка.pdf",
+    recursive: bool = True,
+) -> dict:
+    """Проверить итоговые PDF: существуют ли и можно ли записать до конвертации."""
+    targets_paths: list[Path] = []
+
+    if merge:
+        if paths:
+            inputs = resolve_ordered_inputs(paths, recursive=recursive)
+            folder = inputs[0].parent
+        elif folder_path:
+            folder = validate_folder(folder_path)
+        else:
+            return {"targets": [], "existing": [], "blocked": [], "count": 0, "can_proceed": True}
+        safe_name = Path(output_name).name or "сборка.pdf"
+        if not safe_name.lower().endswith(".pdf"):
+            safe_name += ".pdf"
+        targets_paths.append(folder / safe_name)
+    else:
+        if paths:
+            for raw in resolve_ordered_inputs(paths, recursive=recursive):
+                if raw.suffix.lower() != ".pdf":
+                    targets_paths.append(raw.with_suffix(".pdf"))
+        elif folder_path:
+            folder = validate_folder(folder_path)
+            for f in _collect_inputs(folder, recursive):
+                if f.suffix.lower() != ".pdf":
+                    targets_paths.append(f.with_suffix(".pdf"))
+
+    seen: set[str] = set()
+    targets: list[dict] = []
+    existing: list[dict] = []
+    blocked: list[dict] = []
+
+    for t in targets_paths:
+        key = str(t)
+        if key in seen:
+            continue
+        seen.add(key)
+        info = _check_output_writable(t)
+        targets.append(info)
+        if info["exists"]:
+            existing.append({"path": info["path"], "name": info["name"]})
+        if not info["writable"]:
+            blocked.append(info)
+
+    return {
+        "targets": targets,
+        "existing": existing,
+        "blocked": blocked,
+        "count": len(existing),
+        "can_proceed": len(blocked) == 0,
+    }
+
+
+def _check_output_writable(path: Path) -> dict:
+    """Проверить, можно ли записать итоговый PDF по указанному пути."""
+    p = path.expanduser().resolve()
+    exists = server_path_exists(p)
+    writable, message = _can_write_output(p)
+    return {
+        "path": str(p),
+        "name": p.name,
+        "exists": exists,
+        "writable": writable,
+        "locked": exists and not writable,
+        "message": message,
+    }
+
+
+def _can_write_output(path: Path) -> tuple[bool, str]:
+    if _is_smb_path(path) and _smb_mounted():
+        if server_path_exists(path):
+            return _smb_can_overwrite(path)
+        return _smb_can_create_in_folder(path)
+    parent = path.parent
+    if not parent.exists():
+        return False, "Папка назначения не найдена"
+    if not os.access(parent, os.W_OK):
+        return False, "Нет прав на запись в папку"
+    if path.exists() and not os.access(path, os.W_OK):
+        return False, (
+            "Файл не перезаписан — используется в другой программе. "
+            "Закройте его и повторите."
+        )
+    return True, ""
+
+
+def _smb_can_create_in_folder(virtual_path: Path) -> tuple[bool, str]:
+    remote_dir, remote_name = _virtual_smb_remote(virtual_path)
+    if remote_name:
+        remote_dir, _ = _virtual_smb_remote(virtual_path.parent)
+    probe = f".__wprobe_{uuid.uuid4().hex[:8]}"
+    fd, tmp_name = tempfile.mkstemp(prefix="smb_probe_")
+    os.close(fd)
+    tmp = Path(tmp_name)
+    try:
+        tmp.write_bytes(b"ok")
+        quoted_local = str(tmp).replace('"', '\\"')
+        quoted_probe = probe.replace('"', '\\"')
+        _run_smbclient(remote_dir, f'put "{quoted_local}" "{quoted_probe}"', timeout=15)
+        _run_smbclient(remote_dir, f'del "{quoted_probe}"', timeout=15)
+        return True, ""
+    except ValueError as e:
+        return False, _friendly_smb_error(str(e))
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _smb_can_overwrite(virtual_path: Path) -> tuple[bool, str]:
+    remote_dir, remote_name = _virtual_smb_remote(virtual_path)
+    if not remote_name:
+        return False, "Некорректный путь к файлу"
+    temp_name = f".__lck_{uuid.uuid4().hex[:8]}_{remote_name}"
+    q_old = remote_name.replace('"', '\\"')
+    q_new = temp_name.replace('"', '\\"')
+    try:
+        _run_smbclient(remote_dir, f'rename "{q_old}" "{q_new}"', timeout=15)
+        _run_smbclient(remote_dir, f'rename "{q_new}" "{q_old}"', timeout=15)
+        return True, ""
+    except ValueError as e:
+        return False, _friendly_smb_error(str(e))
 
 
 def validate_folder(path: str) -> Path:
@@ -152,8 +306,17 @@ def _run_smbclient(remote_dir: str, command: str, *, timeout: float = 30) -> str
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "smbclient error").strip()
-        raise ValueError(err)
+        raise ValueError(_friendly_smb_error(err))
     return proc.stdout or ""
+
+
+def _friendly_smb_error(err: str) -> str:
+    if "NT_STATUS_SHARING_VIOLATION" in err or "SHARING_VIOLATION" in err:
+        return (
+            "Файл не перезаписан — используется в другой программе на Windows. "
+            "Закройте его (PDF, Word, проводник) и повторите."
+        )
+    return err
 
 
 _SMB_LS_LINE = re.compile(r"^\s+(.+)\s+([AD])\s+(\d+)\s+\S")
@@ -220,14 +383,44 @@ def _smb_local_file(virtual_path: Path):
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def _smb_put_file(local_path: Path, virtual_path: Path) -> None:
+def _smb_put_file(local_path: Path, virtual_path: Path) -> Path:
+    """Загрузить файл на SMB. Возвращает фактический путь (может отличаться при блокировке)."""
     remote_dir, remote_name = _virtual_smb_remote(virtual_path)
     if not remote_name:
         remote_name = local_path.name
         remote_dir, _ = _virtual_smb_remote(virtual_path.parent)
     quoted_local = str(local_path).replace('"', '\\"')
     quoted_remote = remote_name.replace('"', '\\"')
-    _run_smbclient(remote_dir, f'put "{quoted_local}" "{quoted_remote}"', timeout=120)
+
+    last_err = ""
+    for attempt in range(4):
+        try:
+            _run_smbclient(remote_dir, f'put "{quoted_local}" "{quoted_remote}"', timeout=120)
+            return virtual_path
+        except ValueError as e:
+            last_err = str(e)
+            if "не перезаписан" not in last_err and "SHARING_VIOLATION" not in last_err:
+                raise
+            if attempt < 3:
+                time.sleep(2 * (attempt + 1))
+                continue
+            break
+
+    stem = Path(remote_name).stem
+    suffix = Path(remote_name).suffix or ".pdf"
+    for n in range(1, 100):
+        alt_name = f"{stem}_{n}{suffix}"
+        quoted_alt = alt_name.replace('"', '\\"')
+        try:
+            _run_smbclient(remote_dir, f'put "{quoted_local}" "{quoted_alt}"', timeout=120)
+            return virtual_path.parent / alt_name
+        except ValueError as e:
+            last_err = str(e)
+            if "не перезаписан" not in last_err and "SHARING_VIOLATION" not in last_err:
+                raise
+            continue
+
+    raise ValueError(last_err or "Не удалось сохранить файл на SMB")
 
 
 def _is_smb_path(folder: Path) -> bool:
@@ -458,15 +651,19 @@ def merge_pdfs(
             out.insert_pdf(doc)
             doc.close()
         if numbering_from_page is not None and numbering_from_page > 0:
-            first_num = max(1, numbering_start)
+            total = out.page_count
+            from_page = max(1, min(int(numbering_from_page), total))
+            first_num = max(1, int(numbering_start))
             for i, page in enumerate(out):
                 page_num = i + 1
-                if page_num < numbering_from_page:
+                if page_num < from_page:
                     continue
-                num = str(first_num + (page_num - numbering_from_page))
+                num = str(first_num + (page_num - from_page))
                 rect = page.rect
+                mask = fitz.Rect(rect.width - 56, 8, rect.width - 4, 28)
+                page.draw_rect(mask, color=(1, 1, 1), fill=(1, 1, 1))
                 page.insert_text(
-                    (rect.width - 36, 18),
+                    (rect.width - 40, 20),
                     num,
                     fontsize=10,
                     fontname="helv",
@@ -517,8 +714,7 @@ def _convert_source_to_temp_pdf(src: Path, dest: Path) -> None:
 def _save_merged_pdf(local_pdf: Path, dest: Path) -> Path:
     """Сохранить собранный PDF в целевую папку (SMB или локально)."""
     if _is_smb_path(dest) and _smb_mounted():
-        _smb_put_file(local_pdf, dest)
-        return dest
+        return _smb_put_file(local_pdf, dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(local_pdf, dest)
     return dest
@@ -551,14 +747,21 @@ def convert_file_in_place(src: Path) -> dict:
             with _smb_local_file(src) as local_src:
                 tmp_pdf = local_src.with_suffix(".pdf")
                 convert_file_to_pdf(local_src, tmp_pdf)
-                _smb_put_file(tmp_pdf, dest)
+                saved = _smb_put_file(tmp_pdf, dest)
         else:
             convert_file_to_pdf(src, dest)
+            saved = dest
+        msg = "Сконвертировано"
+        if str(saved) != str(dest):
+            msg = (
+                f"Файл «{dest.name}» не перезаписан — используется в другой программе. "
+                f"Сохранено как «{saved.name}»"
+            )
         return {
             "source": str(src),
-            "pdf": str(dest),
+            "pdf": str(saved),
             "status": "ok",
-            "message": "Сконвертировано",
+            "message": msg,
         }
     except Exception as e:
         return {
@@ -782,15 +985,18 @@ def _convert_folder_merged(
             numbering_from_page=numbering_from_page,
             numbering_start=numbering_start,
         )
-        _save_merged_pdf(local_merged, merged_path)
+        saved_path = _save_merged_pdf(local_merged, merged_path)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
+    alt_name = str(saved_path) != str(merged_path)
     return {
         "folder": str(folder),
         "recursive": recursive,
         "merge": True,
-        "merged_pdf": str(merged_path),
+        "merged_pdf": str(saved_path),
+        "merged_pdf_requested": str(merged_path),
+        "saved_as_alt": alt_name,
         "pages_from": len(pdf_parts),
         "total": len(results),
         "stats": stats,

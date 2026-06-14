@@ -20,6 +20,7 @@ from converter import (
     SUPPORTED_ALL,
     allowed_roots,
     browse_directory,
+    check_output_files,
     convert_folder,
     convert_paths,
     convert_uploads_to_merged_pdf,
@@ -59,6 +60,14 @@ class PathsRequest(BaseModel):
 
 class ResolveRequest(BaseModel):
     paths: list[str]
+    recursive: bool = True
+
+
+class CheckOutputRequest(BaseModel):
+    paths: list[str] | None = None
+    folder_path: str | None = None
+    merge: bool = False
+    output_name: str = "сборка.pdf"
     recursive: bool = True
 
 
@@ -116,6 +125,22 @@ async def convert_page() -> str:
 async def api_browse(path: str = ""):
     try:
         return JSONResponse(browse_directory(path))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.post("/api/check-output")
+async def api_check_output(body: CheckOutputRequest):
+    try:
+        return JSONResponse(
+            check_output_files(
+                paths=body.paths,
+                folder_path=body.folder_path,
+                merge=body.merge,
+                output_name=body.output_name,
+                recursive=body.recursive,
+            )
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

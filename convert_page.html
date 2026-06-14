@@ -53,6 +53,7 @@
     .merge-item button { padding: 2px 8px; font-size: 11px; }
     .num-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
     .num-row input[type=number] { width: 72px; margin: 0; padding: 6px 8px; }
+    .num-preview { font-size: 12px; color: #94a3b8; margin: 4px 0 0; }
     .tree-item .chk-box { flex-shrink: 0; }
   </style>
 </head>
@@ -114,10 +115,11 @@
           <div class="num-row" id="num-row" style="display:none">
             <div class="chk" style="margin:0"><input type="checkbox" id="number-pages" /><label for="number-pages" style="margin:0">Нумеровать страницы</label></div>
             <label for="page-start" style="margin:0;color:#9ca3af">с страницы</label>
-            <input type="number" id="page-start" min="1" value="1" title="Страница документа, на которой появятся цифры" />
+            <input type="number" id="page-start" min="1" max="9999" value="1" autocomplete="off" title="Страница документа, на которой появятся цифры" />
             <label for="num-start" style="margin:0;color:#9ca3af">с числа</label>
-            <input type="number" id="num-start" min="1" value="1" title="Первое число на выбранной странице" />
+            <input type="number" id="num-start" min="1" max="9999" value="1" autocomplete="off" title="Первое число на выбранной странице" />
             <span class="hint" style="margin:0">(раньше — без цифр)</span>
+            <p class="num-preview" id="num-preview"></p>
           </div>
           <label for="output-name">Имя итогового PDF (при сборке)</label>
           <input type="text" id="output-name" value="сборка.pdf" />
@@ -233,9 +235,11 @@
       if (!mergeOn) {
         mergePanel.classList.remove('visible');
         mergeOrder = [];
+        document.getElementById('num-preview').textContent = '';
         return;
       }
       mergePanel.classList.add('visible');
+      updateNumberingPreview();
 
       const hasServer = orderedSelections.length > 0;
       const hasUpload = uploadFiles.length > 0;
@@ -312,6 +316,51 @@
 
     document.getElementById('merge').onchange = refreshMergePanel;
     document.getElementById('recursive').onchange = refreshMergePanel;
+
+    function updateNumberingPreview() {
+      const el = document.getElementById('num-preview');
+      if (!document.getElementById('number-pages').checked) {
+        el.textContent = '';
+        return;
+      }
+      const fromPage = Math.max(1, parseInt(document.getElementById('page-start').value, 10) || 1);
+      const fromNum = Math.max(1, parseInt(document.getElementById('num-start').value, 10) || 1);
+      el.textContent = 'Пример: стр. ' + fromPage + ' → «' + fromNum + '», стр. ' +
+        (fromPage + 1) + ' → «' + (fromNum + 1) + '»… (старые номера в углу закрашиваются)';
+    }
+    document.getElementById('number-pages').onchange = () => {
+      updateNumberingPreview();
+      refreshMergePanel();
+    };
+    document.getElementById('page-start').oninput = updateNumberingPreview;
+    document.getElementById('num-start').oninput = updateNumberingPreview;
+
+    async function confirmOverwrite(payload) {
+      const r = await fetch('/api/check-output', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.detail || 'Ошибка проверки записи');
+
+      if (j.blocked && j.blocked.length) {
+        const lines = j.blocked.map(b =>
+          '«' + b.name + '»: ' + (b.message || 'файл используется в другой программе')
+        ).join('\n');
+        alert(
+          'Запись невозможна — конвертация не запущена.\n\n' + lines +
+          '\n\nЗакройте файл на Windows и повторите.'
+        );
+        return false;
+      }
+
+      if (j.existing && j.existing.length) {
+        const names = j.existing.map(e => e.name).join('\n');
+        return confirm('Файл уже существует, перезаписать?\n\n' + names);
+      }
+      return true;
+    }
     function updateUploadCount() {
       uploadCountEl.textContent = 'С компьютера: ' + uploadFiles.length;
       dropUpload.textContent = uploadFiles.length
@@ -442,6 +491,14 @@
       return s;
     }
 
+    function mergeSaveLog(j) {
+      if (!j.saved_as_alt) return '';
+      const requested = (j.merged_pdf_requested || j.merged_pdf || '').split('/').pop();
+      const saved = (j.merged_pdf || '').split('/').pop();
+      return '\n⚠ Файл «' + requested + '» не перезаписан — используется в другой программе.\n' +
+        'Сохранено как «' + saved + '»';
+    }
+
     function progressMessage(merge, fileCount) {
       if (merge && fileCount > 1) {
         const estMin = Math.max(1, Math.round(fileCount * 0.4));
@@ -467,9 +524,40 @@
       btn.disabled = true;
       btn.textContent = 'Обработка…';
       const fileCount = merge && mergeOrder.length ? mergeOrder.length : resolvedFileCount;
-      startProgress(progressMessage(merge, fileCount || orderedSelections.length || 1));
 
       try {
+        let checkPayload = null;
+        if (merge && mergeOrder.length > 0) {
+          checkPayload = {
+            paths: mergeOrder.map(f => f.path),
+            merge: true,
+            output_name,
+            recursive: document.getElementById('recursive').checked
+          };
+        } else if (orderedSelections.length > 0) {
+          checkPayload = {
+            paths: orderedSelections.map(s => s.path),
+            merge: false,
+            recursive: document.getElementById('recursive').checked
+          };
+        } else if (currentPath) {
+          checkPayload = {
+            folder_path: currentPath,
+            merge,
+            output_name,
+            recursive: document.getElementById('recursive').checked
+          };
+        }
+        if (checkPayload) {
+          const ok = await confirmOverwrite(checkPayload);
+          if (!ok) {
+            showLog('Отменено — конвертация не запущена.');
+            return;
+          }
+        }
+
+        startProgress(progressMessage(merge, fileCount || orderedSelections.length || 1));
+
         if (merge && mergeOrder.length > 0) {
           const j = await apiPost('/api/convert-paths', {
             paths: mergeOrder.map(f => f.path),
@@ -480,7 +568,7 @@
             numbering_start
           });
           showLog('Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) +
-            ', ошибок: ' + j.stats.error);
+            mergeSaveLog(j) + ', ошибок: ' + j.stats.error);
         } else if (orderedSelections.length > 0) {
           const j = await apiPost('/api/convert-paths', {
             paths: orderedSelections.map(s => s.path),
@@ -500,7 +588,7 @@
             numbering_start
           });
           if (j.merge) {
-            showLog('Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j));
+            showLog('Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) + mergeSaveLog(j));
           } else {
             showLog('Готово: ' + j.stats.ok + ' файлов\n' +
               j.files.map(f => f.status + ' | ' + f.source).join('\n'));
