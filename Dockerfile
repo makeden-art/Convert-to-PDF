@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY app.py converter.py cad_converter.py VERSION ./
+COPY app.py converter.py cad_converter.py format_detect.py convert_page.html VERSION ./
 
 ENV PYTHONUNBUFFERED=1
 
