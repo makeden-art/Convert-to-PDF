@@ -15,8 +15,17 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from cad_converter import CAD_EXTENSIONS, convert_cad_to_pdf, oda_available
+from format_detect import (
+    FormatInfo,
+    detect_format_from_bytes,
+    format_from_extension,
+    inspect_from_extension_only,
+    validation_error_message,
+)
 
 SUPPORTED_OFFICE = {".doc", ".docx", ".xls", ".xlsx", ".odt", ".ods", ".rtf"}
+MAGIC_INSPECT_MAX_BYTES = 8192
+MAGIC_INSPECT_MAX_SIZE = int(os.getenv("CONVERT_MAGIC_MAX_SIZE", str(5 * 1024 * 1024)))
 SUPPORTED_CAD = CAD_EXTENSIONS
 SUPPORTED_ALL = SUPPORTED_OFFICE | SUPPORTED_CAD | {".pdf"}
 
@@ -322,6 +331,110 @@ def _friendly_smb_error(err: str) -> str:
 _SMB_LS_LINE = re.compile(r"^\s+(.+)\s+([AD])\s+(\d+)\s+\S")
 
 
+def _smb_file_size(virtual_path: Path) -> int | None:
+    remote_dir, remote_name = _virtual_smb_remote(virtual_path)
+    if not remote_name:
+        return None
+    try:
+        output = _run_smbclient(remote_dir, "ls", timeout=10)
+        for item in _parse_smbclient_ls(output):
+            if item["name"] == remote_name:
+                return int(item["size"])
+    except ValueError:
+        return None
+    return None
+
+
+def _read_file_header(path: Path, limit: int = MAGIC_INSPECT_MAX_BYTES) -> bytes:
+    if _is_smb_path(path) and _smb_mounted():
+        with _smb_local_file(path) as local:
+            with local.open("rb") as fh:
+                return fh.read(limit)
+    with path.open("rb") as fh:
+        return fh.read(limit)
+
+
+def inspect_file_format(
+    path: Path,
+    *,
+    file_size: int | None = None,
+    light: bool = False,
+) -> FormatInfo:
+    """Определить реальный формат файла (magic bytes или по расширению для крупных SMB)."""
+    ext = path.suffix.lower()
+    if ext not in SUPPORTED_ALL:
+        return inspect_from_extension_only(ext)
+
+    if light:
+        return inspect_from_extension_only(ext)
+
+    if _is_smb_path(path) and _smb_mounted():
+        size = file_size if file_size is not None else _smb_file_size(path)
+        if size == 0:
+            info = inspect_from_extension_only(ext)
+            info.valid = False
+            info.error = "Файл пустой"
+            info.extension_ok = False
+            return info
+        if size is not None and size > MAGIC_INSPECT_MAX_SIZE:
+            return inspect_from_extension_only(ext)
+    elif path.is_file():
+        try:
+            if path.stat().st_size == 0:
+                info = inspect_from_extension_only(ext)
+                info.valid = False
+                info.error = "Файл пустой"
+                info.extension_ok = False
+                return info
+        except OSError:
+            info = inspect_from_extension_only(ext)
+            info.valid = False
+            info.error = "Не удалось прочитать файл"
+            return info
+    else:
+        info = inspect_from_extension_only(ext)
+        info.valid = False
+        info.error = "Файл не найден"
+        return info
+
+    try:
+        data = _read_file_header(path)
+    except Exception as e:
+        info = inspect_from_extension_only(ext)
+        info.valid = False
+        info.error = f"Не удалось прочитать файл: {e}"
+        return info
+
+    return detect_format_from_bytes(data, ext)
+
+
+def _format_entry_fields(path: Path, *, file_size: int | None = None, light: bool = False) -> dict:
+    info = inspect_file_format(path, file_size=file_size, light=light)
+    return info.to_dict()
+
+
+def _validate_file_format_or_raise(path: Path) -> FormatInfo:
+    info = inspect_file_format(path)
+    err = validation_error_message(info, path.name)
+    if err:
+        expected = info.expected or format_from_extension(path.suffix.lower()) or "?"
+        detected = info.detected
+        print(
+            f"[convert] format reject {path.name}: "
+            f"expected={expected} detected={detected} "
+            f"valid={info.valid} ext_ok={info.extension_ok} "
+            f"err={info.error or info.warning}",
+            flush=True,
+        )
+        raise ValueError(err)
+    if info.warning:
+        print(
+            f"[convert] format warn {path.name}: {info.warning}",
+            flush=True,
+        )
+    return info
+
+
 def _parse_smbclient_ls(output: str) -> list[dict]:
     entries: list[dict] = []
     for line in output.splitlines():
@@ -355,6 +468,10 @@ def _browse_smb_directory(folder: Path) -> dict:
             suffix = Path(item["name"]).suffix.lower()
             entry["convertible"] = suffix in SUPPORTED_ALL
             entry["size"] = item["size"]
+            if suffix in SUPPORTED_ALL:
+                entry.update(
+                    _format_entry_fields(item_path, file_size=int(item["size"]), light=True)
+                )
         entries.append(entry)
 
     parent: str | None = None
@@ -530,15 +647,16 @@ def browse_directory(path: str = "") -> dict:
                 )
             elif item.is_file():
                 suffix = item.suffix.lower()
-                entries.append(
-                    {
-                        "name": item.name,
-                        "path": str(item.resolve()),
-                        "type": "file",
-                        "convertible": suffix in SUPPORTED_ALL,
-                        "size": item.stat().st_size,
-                    }
-                )
+                entry = {
+                    "name": item.name,
+                    "path": str(item.resolve()),
+                    "type": "file",
+                    "convertible": suffix in SUPPORTED_ALL,
+                    "size": item.stat().st_size,
+                }
+                if suffix in SUPPORTED_ALL:
+                    entry.update(_format_entry_fields(item, light=True))
+                entries.append(entry)
         except OSError:
             continue
 
@@ -682,11 +800,14 @@ def convert_file_to_pdf(src: Path, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     if suffix == ".pdf":
+        _validate_file_format_or_raise(src)
         shutil.copy2(src, dest)
         return
 
     if suffix not in SUPPORTED_OFFICE and suffix not in SUPPORTED_CAD:
         raise ValueError(f"Формат {suffix} не поддерживается")
+
+    _validate_file_format_or_raise(src)
 
     tmp = Path(tempfile.mkdtemp(prefix="cvt_one_"))
     try:
@@ -861,6 +982,28 @@ def resolve_ordered_inputs(
     if not inputs:
         raise ValueError("Нет поддерживаемых файлов для конвертации")
     return inputs
+
+
+def resolve_ordered_inputs_with_format(
+    paths: list[str],
+    *,
+    recursive: bool = True,
+) -> list[dict]:
+    """Развернуть выбор в список файлов с информацией о формате."""
+    files = resolve_ordered_inputs(paths, recursive=recursive)
+    out: list[dict] = []
+    for f in files:
+        size = _smb_file_size(f) if _is_smb_path(f) and _smb_mounted() else None
+        info = inspect_file_format(f, file_size=size)
+        out.append(
+            {
+                "path": str(f),
+                "name": f.name,
+                "parent": f.parent.name,
+                **info.to_dict(),
+            }
+        )
+    return out
 
 
 def convert_folder(

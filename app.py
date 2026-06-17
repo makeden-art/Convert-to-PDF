@@ -25,6 +25,8 @@ from converter import (
     convert_paths,
     convert_uploads_to_merged_pdf,
     resolve_ordered_inputs,
+    resolve_ordered_inputs_with_format,
+    _validate_file_format_or_raise,
     _convert_with_libreoffice,
 )
 
@@ -148,15 +150,8 @@ async def api_check_output(body: CheckOutputRequest):
 @app.post("/api/resolve-paths")
 async def api_resolve_paths(body: ResolveRequest):
     try:
-        files = resolve_ordered_inputs(body.paths, recursive=body.recursive)
-        return JSONResponse(
-            {
-                "files": [
-                    {"path": str(f), "name": f.name, "parent": f.parent.name}
-                    for f in files
-                ]
-            }
-        )
+        files = resolve_ordered_inputs_with_format(body.paths, recursive=body.recursive)
+        return JSONResponse({"files": files})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
@@ -242,6 +237,7 @@ async def api_convert_merge(
                 )
             dest = tmp / f"{len(sources):04d}_{Path(uf.filename or 'upload').name}"
             dest.write_bytes(await uf.read())
+            _validate_file_format_or_raise(dest)
             sources.append(dest)
 
         out = tmp / "сборка.pdf"
@@ -277,6 +273,7 @@ async def api_convert(file: UploadFile = File(...)):
     try:
         src = tmp / f"{uuid.uuid4().hex}{suffix}"
         src.write_bytes(await file.read())
+        _validate_file_format_or_raise(src)
 
         if suffix == ".pdf":
             out = tmp / "result.pdf"

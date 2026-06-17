@@ -59,7 +59,12 @@
     .num-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
     .num-row input[type=number] { width: 72px; margin: 0; padding: 6px 8px; }
     .num-preview { font-size: 12px; color: #94a3b8; margin: 4px 0 0; }
-    .tree-item .chk-box { flex-shrink: 0; }
+    .tree-item .format-badge { font-size: 10px; color: #94a3b8; margin-left: auto; flex-shrink: 0; white-space: nowrap; }
+    .tree-item.format-warn .format-badge { color: #fbbf24; }
+    .tree-item.format-bad { opacity: .55; }
+    .merge-item .format-badge { font-size: 10px; color: #94a3b8; flex-shrink: 0; }
+    .merge-item.format-warn .format-badge { color: #fbbf24; }
+    .merge-item.format-bad .fname { color: #f87171; }
   </style>
 </head>
 <body>
@@ -202,6 +207,21 @@
       resolveTimer = setTimeout(resolveFileCount, 350);
     }
 
+    function formatBadgeHtml(item) {
+      if (!item || !item.format_label) return '';
+      const warn = item.format_warning && !item.format_valid ? ' title="' + item.format_warning + '"' : '';
+      const title = item.format_warning ? ' title="' + item.format_warning + '"' : warn;
+      const icon = item.format_icon || '📄';
+      return '<span class="format-badge"' + title + '>' + icon + ' ' + item.format_label + '</span>';
+    }
+
+    function formatRowClass(item) {
+      if (!item) return '';
+      if (item.format_valid === false) return ' format-bad';
+      if (item.extension_ok === false || item.format_warning) return ' format-warn';
+      return '';
+    }
+
     async function resolveFileCount() {
       if (!orderedSelections.length) {
         selDetailEl.textContent = '';
@@ -307,13 +327,16 @@
       mergeList.appendChild(header);
       mergeOrder.forEach((item, idx) => {
         const row = document.createElement('div');
-        row.className = 'merge-item draggable-row';
+        row.className = 'merge-item draggable-row' + formatRowClass(item);
         row.draggable = true;
         row.innerHTML =
           '<span class="drag-handle" title="Перетащите">⠿</span>' +
           '<button type="button" class="secondary" data-up="' + idx + '">↑</button>' +
           '<button type="button" class="secondary" data-down="' + idx + '">↓</button>' +
-          '<span class="fname">' + (idx + 1) + '. ' + item.name + '</span>';
+          '<span class="fname">' + (idx + 1) + '. ' + item.name +
+          (item.format_valid === false ? ' ⚠' : (item.extension_ok === false ? ' ⚠' : '')) +
+          '</span>' +
+          formatBadgeHtml(item);
 
         row.addEventListener('dragstart', (e) => {
           if (e.target.closest('button')) {
@@ -423,9 +446,9 @@
       for (const e of j.entries) {
         const row = document.createElement('div');
         const sel = isSelected(e.path);
-        row.className = 'tree-item ' + e.type + (e.type === 'file' && !e.convertible ? ' disabled' : '');
+        row.className = 'tree-item ' + e.type + (e.type === 'file' && !e.convertible ? ' disabled' : '') + (e.type === 'file' ? formatRowClass(e) : '');
         const checked = sel ? 'checked' : '';
-        const canSelect = e.type === 'dir' || e.convertible;
+        const canSelect = e.type === 'dir' || (e.convertible && e.format_valid !== false);
         const cb = canSelect
           ? '<input type="checkbox" class="chk-box" ' + checked + ' />'
           : '<span class="chk-box" style="width:16px"></span>';
@@ -442,7 +465,9 @@
             };
           }
         } else {
-          row.innerHTML = cb + '<span class="icon">📄</span><span class="name">' + e.name + '</span>';
+          const fileIcon = e.format_icon || '📄';
+          row.innerHTML = cb + '<span class="icon">' + fileIcon + '</span><span class="name">' + e.name + '</span>' +
+            (e.format_label ? formatBadgeHtml(e) : '');
           const checkbox = row.querySelector('input[type=checkbox]');
           if (checkbox) {
             checkbox.onclick = ev => {
