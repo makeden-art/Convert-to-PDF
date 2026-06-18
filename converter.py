@@ -10,6 +10,7 @@ import tempfile
 import threading
 import time
 import uuid
+import gc
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from contextlib import contextmanager
 from pathlib import Path
@@ -248,9 +249,11 @@ def validate_file(path: str) -> Path:
 
 
 BROWSE_TIMEOUT_SEC = float(os.getenv("CONVERT_BROWSE_TIMEOUT_SEC", "5"))
-MERGE_WORKERS = max(1, int(os.getenv("CONVERT_MERGE_WORKERS", "2")))
+MERGE_WORKERS = max(1, int(os.getenv("CONVERT_MERGE_WORKERS", "1")))
 OFFICE_WORKERS = max(1, int(os.getenv("CONVERT_OFFICE_WORKERS", "1")))
+CAD_WORKERS = max(1, int(os.getenv("CONVERT_CAD_WORKERS", "1")))
 _office_sem = threading.Semaphore(OFFICE_WORKERS)
+_cad_sem = threading.Semaphore(CAD_WORKERS)
 PLATFORM_STATE = Path("/opt/road-pdf-platform/platform.state.json")
 SMB_ROOT = Path("/data/smb")
 
@@ -768,41 +771,110 @@ def merge_pdfs(
     numbering_start: int = 1,
 ) -> Path:
     """Склеить PDF-файлы в один (порядок — как в списке sources)."""
-    import fitz
-
     if not sources:
         raise ValueError("Нет PDF для сборки")
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-    out = fitz.open()
+    if len(sources) == 1:
+        shutil.copy2(sources[0], dest)
+    elif shutil.which("gs"):
+        _merge_pdfs_ghostscript(sources, dest)
+    else:
+        _merge_pdfs_fitz(sources, dest)
+
+    if numbering_from_page is not None and numbering_from_page > 0:
+        _apply_pdf_numbering(
+            dest,
+            from_page=numbering_from_page,
+            start=numbering_start,
+        )
+    gc.collect()
+    return dest
+
+
+def _merge_pdfs_ghostscript(sources: list[Path], dest: Path) -> None:
+    """Сборка PDF через Ghostscript — не раздувает RAM процесса Python."""
+    cmd = [
+        "gs",
+        "-dBATCH",
+        "-dNOPAUSE",
+        "-q",
+        "-dSAFER",
+        "-sDEVICE=pdfwrite",
+        "-dPDFSETTINGS=/default",
+        f"-sOutputFile={dest}",
+        *[str(p) for p in sources],
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if proc.returncode != 0 or not dest.exists():
+        err = (proc.stderr or proc.stdout or "ghostscript error").strip()
+        raise RuntimeError(f"Ошибка сборки PDF (gs): {err}")
+
+
+def _merge_pdfs_fitz(sources: list[Path], dest: Path) -> None:
+    """Fallback: PyMuPDF, по одному файлу с принудительной очисткой."""
+    import fitz
+
+    out = fitz.open(str(sources[0]))
     try:
-        for pdf in sources:
-            doc = fitz.open(pdf)
-            out.insert_pdf(doc)
-            doc.close()
-        if numbering_from_page is not None and numbering_from_page > 0:
-            total = out.page_count
-            from_page = max(1, min(int(numbering_from_page), total))
-            first_num = max(1, int(numbering_start))
-            for i, page in enumerate(out):
-                page_num = i + 1
-                if page_num < from_page:
-                    continue
-                num = str(first_num + (page_num - from_page))
-                rect = page.rect
-                mask = fitz.Rect(rect.width - 56, 8, rect.width - 4, 28)
-                page.draw_rect(mask, color=(1, 1, 1), fill=(1, 1, 1))
-                page.insert_text(
-                    (rect.width - 40, 20),
-                    num,
-                    fontsize=10,
-                    fontname="helv",
-                    color=(0, 0, 0),
-                )
-        out.save(dest)
+        for pdf in sources[1:]:
+            with fitz.open(str(pdf)) as doc:
+                out.insert_pdf(doc)
+            gc.collect()
+        out.save(dest, garbage=4, deflate=True)
     finally:
         out.close()
-    return dest
+        gc.collect()
+
+
+def _apply_pdf_numbering(path: Path, *, from_page: int, start: int) -> None:
+    import fitz
+
+    tmp = path.with_suffix(".numbered.pdf")
+    doc = fitz.open(str(path))
+    try:
+        total = doc.page_count
+        page_from = max(1, min(int(from_page), total))
+        first_num = max(1, int(start))
+        for i, page in enumerate(doc):
+            page_num = i + 1
+            if page_num < page_from:
+                continue
+            num = str(first_num + (page_num - page_from))
+            rect = page.rect
+            mask = fitz.Rect(rect.width - 56, 8, rect.width - 4, 28)
+            page.draw_rect(mask, color=(1, 1, 1), fill=(1, 1, 1))
+            page.insert_text(
+                (rect.width - 40, 20),
+                num,
+                fontsize=10,
+                fontname="helv",
+                color=(0, 0, 0),
+            )
+        doc.save(tmp, garbage=4, deflate=True)
+    finally:
+        doc.close()
+        gc.collect()
+    tmp.replace(path)
+
+
+def _run_merge_parts(
+    inputs: list[Path], tmp: Path
+) -> list[tuple[int, Path | None, dict]]:
+    """Конвертация частей сборки: по умолчанию последовательно (экономия RAM)."""
+    workers = min(MERGE_WORKERS, len(inputs))
+    part_results: list[tuple[int, Path | None, dict]] = []
+    if workers <= 1:
+        for idx, src in enumerate(inputs):
+            part_results.append(_convert_merge_part(idx, src, tmp))
+            gc.collect()
+        return part_results
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = [ex.submit(_convert_merge_part, idx, src, tmp) for idx, src in enumerate(inputs)]
+        for fut in futs:
+            part_results.append(fut.result())
+            gc.collect()
+    return part_results
 
 
 def convert_file_to_pdf(src: Path, dest: Path) -> None:
@@ -826,7 +898,8 @@ def convert_file_to_pdf(src: Path, dest: Path) -> None:
         if suffix in SUPPORTED_CAD:
             if not oda_available():
                 raise RuntimeError("ODAFileConverter не установлен (DWG/DXF недоступны)")
-            pdf_tmp = convert_cad_to_pdf(str(src))
+            with _cad_sem:
+                pdf_tmp = convert_cad_to_pdf(str(src))
             shutil.move(str(pdf_tmp), str(dest))
         else:
             pdf_tmp = _convert_with_libreoffice(src, tmp)
@@ -1105,15 +1178,7 @@ def _convert_folder_merged(
     stats = {"ok": 0, "skipped": 0, "error": 0}
 
     try:
-        workers = min(MERGE_WORKERS, len(inputs))
-        part_results: list[tuple[int, Path | None, dict]] = []
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            futs = [
-                ex.submit(_convert_merge_part, idx, src, tmp)
-                for idx, src in enumerate(inputs)
-            ]
-            for fut in futs:
-                part_results.append(fut.result())
+        part_results = _run_merge_parts(inputs, tmp)
 
         part_results.sort(key=lambda x: x[0])
         for _, part, item in part_results:
@@ -1211,15 +1276,7 @@ def convert_uploads_to_merged_pdf(
     stats = {"ok": 0, "error": 0}
 
     try:
-        workers = min(MERGE_WORKERS, len(sources))
-        part_results: list[tuple[int, Path | None, dict]] = []
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            futs = [
-                ex.submit(_convert_merge_part, idx, src, tmp)
-                for idx, src in enumerate(sources)
-            ]
-            for fut in futs:
-                part_results.append(fut.result())
+        part_results = _run_merge_parts(sources, tmp)
 
         part_results.sort(key=lambda x: x[0])
         for _, part, item in part_results:

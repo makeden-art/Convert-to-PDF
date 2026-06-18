@@ -1,12 +1,15 @@
 """Конвертация DWG/DXF в PDF: DWG→DXF через ODA (как в lisp_Nikolay), DXF→PDF через ezdxf."""
 from __future__ import annotations
 
+import gc
+import os
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
 CAD_EXTENSIONS = {".dwg", ".dxf"}
+CAD_RENDER_DPI = max(72, int(os.getenv("CONVERT_CAD_DPI", "120")))
 
 
 def oda_available() -> bool:
@@ -76,15 +79,20 @@ def convert_dxf_to_pdf(dxf_path: Path, pdf_path: Path) -> Path:
 
         doc, _ = recover.readfile(str(dxf_path))
 
-    fig = plt.figure(figsize=(11.69, 8.27), dpi=150)
+    fig = plt.figure(figsize=(11.69, 8.27), dpi=CAD_RENDER_DPI)
     ax = fig.add_axes([0, 0, 1, 1])
     ax.set_aspect("equal")
     ax.axis("off")
     ctx = RenderContext(doc)
     out = MatplotlibBackend(ax)
-    Frontend(ctx, out).draw_layout(doc.modelspace())
-    fig.savefig(str(pdf_path), format="pdf", bbox_inches="tight", pad_inches=0.05)
-    plt.close(fig)
+    try:
+        Frontend(ctx, out).draw_layout(doc.modelspace())
+        fig.savefig(str(pdf_path), format="pdf", bbox_inches="tight", pad_inches=0.05)
+    finally:
+        plt.close(fig)
+        plt.close("all")
+        del doc
+        gc.collect()
 
     if not pdf_path.exists():
         raise RuntimeError("PDF не создан после рендера DXF.")

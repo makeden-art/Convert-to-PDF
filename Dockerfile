@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 \
     libfontconfig1 libfreetype6 libgl1 libglib2.0-0 \
     fonts-dejavu-core \
-    curl ca-certificates smbclient \
+    curl ca-certificates smbclient ghostscript \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/lib/x86_64-linux-gnu/libxcb-util.so.1 /usr/lib/x86_64-linux-gnu/libxcb-util.so.0 || true
 
