@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu-core \
     curl \
     ca-certificates \
+    smbclient \
     && rm -rf /var/lib/apt/lists/*
 
 COPY app.py converter.py cad_converter.py format_detect.py convert_page.html VERSION ./
