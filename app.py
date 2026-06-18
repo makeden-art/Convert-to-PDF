@@ -86,6 +86,11 @@ async def health():
     }
 
 
+@app.get("/version")
+async def version():
+    return {"version": _version(), "service": "convert-to-pdf"}
+
+
 @app.get("/api/check_update")
 async def check_update():
     import os
