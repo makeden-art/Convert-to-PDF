@@ -412,7 +412,7 @@ def inspect_file_format(
         return info
 
     info = detect_format_from_bytes(data, ext)
-    if not info.valid and ext in SUPPORTED_ALL and info.detected == "unknown":
+    if not info.valid and ext in SUPPORTED_ALL and info.detected in ("unknown", "zip"):
         return _extension_fallback(
             ext,
             reason=info.error or "Содержимое не распознано, конвертация по расширению",

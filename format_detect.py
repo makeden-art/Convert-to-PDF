@@ -252,6 +252,16 @@ def detect_format_from_bytes(data: bytes, extension: str) -> FormatInfo:
     if data[:4] == b"PK\x03\x04":
         detected, err = _detect_zip_subtype(data)
         if err:
+            office_zip = format_from_extension(ext)
+            if office_zip in ("docx", "xlsx", "odt", "ods"):
+                return _result(
+                    office_zip,
+                    ext,
+                    warning=(
+                        f"{err}; сигнатура ZIP и расширение {ext} "
+                        "(центральный каталог мог не попасть в выборку)"
+                    ),
+                )
             return _result(
                 detected,
                 ext,
