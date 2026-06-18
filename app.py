@@ -1,6 +1,7 @@
 """Convert-to-PDF — конвертация редактируемых форматов в PDF."""
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import tempfile
@@ -156,7 +157,9 @@ async def api_check_output(body: CheckOutputRequest):
 @app.post("/api/resolve-paths")
 async def api_resolve_paths(body: ResolveRequest):
     try:
-        files = resolve_ordered_inputs_with_format(body.paths, recursive=body.recursive)
+        files = await asyncio.to_thread(
+            resolve_ordered_inputs_with_format, body.paths, recursive=body.recursive
+        )
         return JSONResponse({"files": files})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -165,17 +168,17 @@ async def api_resolve_paths(body: ResolveRequest):
 @app.post("/api/convert-paths")
 async def api_convert_paths(body: PathsRequest):
     try:
-        return JSONResponse(
-            convert_paths(
-                body.paths,
-                merge=body.merge,
-                output_name=body.output_name,
-                recursive=body.recursive,
-                number_pages=body.number_pages,
-                numbering_from_page=body.numbering_from_page,
-                numbering_start=body.numbering_start,
-            )
+        result = await asyncio.to_thread(
+            convert_paths,
+            body.paths,
+            merge=body.merge,
+            output_name=body.output_name,
+            recursive=body.recursive,
+            number_pages=body.number_pages,
+            numbering_from_page=body.numbering_from_page,
+            numbering_start=body.numbering_start,
         )
+        return JSONResponse(result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
@@ -191,7 +194,8 @@ async def api_convert_merge_download(body: PathsRequest):
     try:
         from_page = body.numbering_from_page if body.number_pages else None
         start_num = body.numbering_start if body.number_pages else 1
-        dest, tmp_parent, _ = convert_paths_merged_download(
+        dest, tmp_parent, _ = await asyncio.to_thread(
+            convert_paths_merged_download,
             body.paths,
             body.output_name,
             recursive=body.recursive,
@@ -220,17 +224,17 @@ async def api_convert_merge_download(body: PathsRequest):
 @app.post("/api/convert-folder")
 async def api_convert_folder(body: FolderRequest):
     try:
-        return JSONResponse(
-            convert_folder(
-                body.path,
-                body.recursive,
-                merge=body.merge,
-                output_name=body.output_name,
-                number_pages=body.number_pages,
-                numbering_from_page=body.numbering_from_page,
-                numbering_start=body.numbering_start,
-            )
+        result = await asyncio.to_thread(
+            convert_folder,
+            body.path,
+            body.recursive,
+            merge=body.merge,
+            output_name=body.output_name,
+            number_pages=body.number_pages,
+            numbering_from_page=body.numbering_from_page,
+            numbering_start=body.numbering_start,
         )
+        return JSONResponse(result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
@@ -284,8 +288,12 @@ async def api_convert_merge(
         out = tmp / "сборка.pdf"
         from_page = numbering_from_page if number_pages else None
         start_num = numbering_start if number_pages else 1
-        convert_uploads_to_merged_pdf(
-            sources, out, numbering_from_page=from_page, numbering_start=start_num
+        await asyncio.to_thread(
+            convert_uploads_to_merged_pdf,
+            sources,
+            out,
+            numbering_from_page=from_page,
+            numbering_start=start_num,
         )
         return FileResponse(
             path=str(out),

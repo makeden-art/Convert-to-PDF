@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY ODAFileConverter*.deb /tmp/oda.deb
 RUN dpkg -i /tmp/oda.deb || (apt-get update && apt-get install -f -y) && rm -f /tmp/oda.deb
 
-COPY app.py converter.py cad_converter.py format_detect.py convert_page.html VERSION ./
+COPY app.py converter.py cad_converter.py format_detect.py convert_page.html convert_worker.py VERSION ./
 
 ENV PYTHONUNBUFFERED=1
 

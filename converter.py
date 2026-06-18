@@ -252,6 +252,9 @@ BROWSE_TIMEOUT_SEC = float(os.getenv("CONVERT_BROWSE_TIMEOUT_SEC", "5"))
 MERGE_WORKERS = max(1, int(os.getenv("CONVERT_MERGE_WORKERS", "1")))
 OFFICE_WORKERS = max(1, int(os.getenv("CONVERT_OFFICE_WORKERS", "1")))
 CAD_WORKERS = max(1, int(os.getenv("CONVERT_CAD_WORKERS", "1")))
+CONVERT_ISOLATE = os.getenv("CONVERT_ISOLATE", "1").strip().lower() in ("1", "true", "yes")
+FILE_CONVERT_TIMEOUT_SEC = int(os.getenv("CONVERT_FILE_TIMEOUT_SEC", "300"))
+_WORKER_SCRIPT = Path(__file__).with_name("convert_worker.py")
 _office_sem = threading.Semaphore(OFFICE_WORKERS)
 _cad_sem = threading.Semaphore(CAD_WORKERS)
 PLATFORM_STATE = Path("/opt/road-pdf-platform/platform.state.json")
@@ -877,6 +880,39 @@ def _run_merge_parts(
     return part_results
 
 
+def convert_file_to_pdf_isolated(src: Path, dest: Path) -> None:
+    """Конвертация в отдельном процессе — OOM дочернего не роняет uvicorn."""
+    import sys
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, str(_WORKER_SCRIPT), str(src), str(dest)],
+            capture_output=True,
+            text=True,
+            timeout=FILE_CONVERT_TIMEOUT_SEC,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(
+            f"Таймаут конвертации {src.name} ({FILE_CONVERT_TIMEOUT_SEC} с)"
+        ) from e
+    if proc.returncode != 0:
+        msg = (proc.stderr or proc.stdout or "ошибка конвертации").strip()
+        if proc.returncode < 0:
+            raise RuntimeError(
+                f"Процесс конвертации прерван ({src.name}): нехватка памяти или сбой ODA"
+            )
+        raise RuntimeError(msg)
+    if not dest.is_file():
+        raise RuntimeError(f"PDF не создан: {src.name}")
+
+
+def _convert_local_file_to_pdf(src: Path, dest: Path) -> None:
+    if CONVERT_ISOLATE:
+        convert_file_to_pdf_isolated(src, dest)
+    else:
+        convert_file_to_pdf(src, dest)
+
+
 def convert_file_to_pdf(src: Path, dest: Path) -> None:
     """Конвертировать один локальный файл в указанный PDF."""
     src = src.resolve()
@@ -912,9 +948,9 @@ def _convert_source_to_temp_pdf(src: Path, dest: Path) -> None:
     """Конвертировать файл с сервера (локальный или SMB) во временный PDF."""
     if _is_smb_path(src) and _smb_mounted():
         with _smb_local_file(src) as local_src:
-            convert_file_to_pdf(local_src, dest)
+            _convert_local_file_to_pdf(local_src, dest)
         return
-    convert_file_to_pdf(src, dest)
+    _convert_local_file_to_pdf(src, dest)
 
 
 def _save_merged_pdf(local_pdf: Path, dest: Path) -> Path:
