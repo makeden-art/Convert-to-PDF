@@ -152,6 +152,17 @@ def _detect_zip_subtype(data: bytes) -> tuple[str, str | None]:
                 return "docx", None
             if "xl/workbook.xml" in names or any(n.startswith("xl/") for n in names):
                 return "xlsx", None
+            if "[Content_Types].xml" in names:
+                try:
+                    ct = zf.read("[Content_Types].xml").decode("utf-8", errors="ignore").lower()
+                except Exception:
+                    ct = ""
+                if "wordprocessingml" in ct:
+                    return "docx", None
+                if "spreadsheetml" in ct:
+                    return "xlsx", None
+                if "presentationml" in ct:
+                    return "docx", None
             if "mimetype" in names:
                 try:
                     mt = zf.read("mimetype").decode("utf-8", errors="ignore").strip().lower()
@@ -224,6 +235,18 @@ def detect_format_from_bytes(data: bytes, extension: str) -> FormatInfo:
 
     if data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
         detected = _detect_ole_subtype(data)
+        if ext == ".docx" and detected in ("doc", "ole"):
+            return _result(
+                "doc",
+                ext,
+                warning="Файл .docx фактически в старом формате Word (.doc)",
+            )
+        if ext == ".xlsx" and detected in ("xls", "ole"):
+            return _result(
+                "xls",
+                ext,
+                warning="Файл .xlsx фактически в старом формате Excel (.xls)",
+            )
         return _result(detected, ext)
 
     if data[:4] == b"PK\x03\x04":
@@ -272,6 +295,13 @@ def detect_format_from_bytes(data: bytes, extension: str) -> FormatInfo:
         source="magic",
         error="Формат файла не распознан",
     )
+
+
+def _extension_fallback(ext: str, *, reason: str) -> FormatInfo:
+    """Доверять расширению, если magic не сработал (часто на SMB)."""
+    info = inspect_from_extension_only(ext)
+    info.warning = reason
+    return info
 
 
 def validation_error_message(info: FormatInfo, filename: str) -> str | None:

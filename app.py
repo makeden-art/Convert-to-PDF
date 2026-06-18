@@ -23,6 +23,7 @@ from converter import (
     check_output_files,
     convert_folder,
     convert_paths,
+    convert_paths_merged_download,
     convert_uploads_to_merged_pdf,
     resolve_ordered_inputs,
     resolve_ordered_inputs_with_format,
@@ -173,6 +174,41 @@ async def api_convert_paths(body: PathsRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/convert-merge-download")
+async def api_convert_merge_download(body: PathsRequest):
+    """Сборка PDF с сервера (SMB) и отдача файла для скачивания."""
+    if not body.paths:
+        raise HTTPException(status_code=400, detail="Укажите файлы для сборки")
+    tmp_parent: Path | None = None
+    try:
+        from_page = body.numbering_from_page if body.number_pages else None
+        start_num = body.numbering_start if body.number_pages else 1
+        dest, tmp_parent, _ = convert_paths_merged_download(
+            body.paths,
+            body.output_name,
+            recursive=body.recursive,
+            numbering_from_page=from_page,
+            numbering_start=start_num,
+        )
+        filename = Path(body.output_name).name or "сборка.pdf"
+        if not filename.lower().endswith(".pdf"):
+            filename += ".pdf"
+        return FileResponse(
+            path=str(dest),
+            media_type="application/pdf",
+            filename=filename,
+            background=BackgroundTask(lambda: shutil.rmtree(tmp_parent, ignore_errors=True)),
+        )
+    except ValueError as e:
+        if tmp_parent:
+            shutil.rmtree(tmp_parent, ignore_errors=True)
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        if tmp_parent:
+            shutil.rmtree(tmp_parent, ignore_errors=True)
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

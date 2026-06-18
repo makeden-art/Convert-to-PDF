@@ -56,6 +56,7 @@
     .merge-item .drag-handle { color: #64748b; font-size: 14px; flex-shrink: 0; user-select: none; padding: 0 2px; }
     .merge-item .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .merge-item button { padding: 2px 8px; font-size: 11px; }
+    .merge-item button.btn-remove { padding: 2px 6px; color: #f87171; border-color: rgba(248,113,113,.35); }
     .num-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
     .num-row input[type=number] { width: 72px; margin: 0; padding: 6px 8px; }
     .num-preview { font-size: 12px; color: #94a3b8; margin: 4px 0 0; }
@@ -312,6 +313,21 @@
       renderMergeList();
     }
 
+    function removeMergeItem(idx) {
+      mergeOrder.splice(idx, 1);
+      resolvedFileCount = mergeOrder.length;
+      if (selDetailEl) {
+        selDetailEl.textContent = mergeOrder.length
+          ? ('К обработке: ' + mergeOrder.length + ' ' + plural(mergeOrder.length, 'файл', 'файла', 'файлов'))
+          : 'Нет файлов в сборке';
+      }
+      renderMergeList();
+    }
+
+    function hasServerMergeQueue() {
+      return mergeOrder.length > 0 && mergeOrder[0].path && !mergeOrder[0].upload;
+    }
+
     function renderMergeList() {
       mergeList.innerHTML = '';
       if (!mergeOrder.length) {
@@ -333,6 +349,7 @@
           '<span class="drag-handle" title="Перетащите">⠿</span>' +
           '<button type="button" class="secondary" data-up="' + idx + '">↑</button>' +
           '<button type="button" class="secondary" data-down="' + idx + '">↓</button>' +
+          '<button type="button" class="secondary btn-remove" data-remove="' + idx + '" title="Исключить из сборки">✕</button>' +
           '<span class="fname">' + (idx + 1) + '. ' + item.name +
           (item.format_valid === false ? ' ⚠' : (item.extension_ok === false ? ' ⚠' : '')) +
           '</span>' +
@@ -368,6 +385,7 @@
 
         row.querySelector('[data-up]').onclick = () => { if (idx > 0) moveMergeItem(idx, idx - 1); };
         row.querySelector('[data-down]').onclick = () => { if (idx < mergeOrder.length - 1) moveMergeItem(idx, idx + 1); };
+        row.querySelector('[data-remove]').onclick = () => removeMergeItem(idx);
         mergeList.appendChild(row);
       });
     }
@@ -667,18 +685,60 @@
     };
 
     document.getElementById('btn-download').onclick = async () => {
-      if (!uploadFiles.length) { alert('Загрузите файлы с компьютера'); return; }
       const merge = document.getElementById('merge').checked;
       const number_pages = document.getElementById('number-pages').checked;
       const numbering_from_page = parseInt(document.getElementById('page-start').value, 10) || 1;
       const numbering_start = parseInt(document.getElementById('num-start').value, 10) || 1;
+      const output_name = document.getElementById('output-name').value.trim() || 'сборка.pdf';
+      const serverMerge = merge && hasServerMergeQueue();
+      const hasUpload = uploadFiles.length > 0;
+
+      if (!serverMerge && !hasUpload) {
+        alert('Выберите файлы на сервере (сборка) или загрузите с компьютера');
+        return;
+      }
+      if (serverMerge && !mergeOrder.length) {
+        alert('Нет файлов в сборке');
+        return;
+      }
+
       const btn = document.getElementById('btn-download');
       btn.disabled = true;
       btn.textContent = 'Обработка…';
       const fileCount = merge && mergeOrder.length ? mergeOrder.length : uploadFiles.length;
       startProgress(progressMessage(merge, fileCount));
       try {
-        if (uploadFiles.length === 1 && !merge) {
+        if (serverMerge) {
+          const r = await fetch('/api/convert-merge-download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              paths: mergeOrder.map(f => f.path),
+              merge: true,
+              output_name,
+              recursive: document.getElementById('recursive').checked,
+              number_pages,
+              numbering_from_page,
+              numbering_start
+            })
+          });
+          if (!r.ok) {
+            let msg = await r.text();
+            try { msg = JSON.parse(msg).detail || msg; } catch (_) {}
+            showLog(msg);
+            return;
+          }
+          const blob = await r.blob();
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = output_name.endsWith('.pdf') ? output_name : output_name + '.pdf';
+          a.click();
+          URL.revokeObjectURL(a.href);
+          showLog('Сборка PDF скачана' + numberingLog({
+            numbering_from_page: number_pages ? numbering_from_page : null,
+            numbering_start: number_pages ? numbering_start : null
+          }));
+        } else if (uploadFiles.length === 1 && !merge) {
           const fd = new FormData();
           fd.append('file', uploadFiles[0]);
           const r = await fetch('/api/convert', { method: 'POST', body: fd });

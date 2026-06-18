@@ -17,6 +17,7 @@ from pathlib import Path
 from cad_converter import CAD_EXTENSIONS, convert_cad_to_pdf, oda_available
 from format_detect import (
     FormatInfo,
+    _extension_fallback,
     detect_format_from_bytes,
     format_from_extension,
     inspect_from_extension_only,
@@ -400,12 +401,23 @@ def inspect_file_format(
     try:
         data = _read_file_header(path)
     except Exception as e:
+        if ext in SUPPORTED_ALL:
+            return _extension_fallback(
+                ext,
+                reason=f"Не удалось прочитать заголовок ({e}), конвертация по расширению",
+            )
         info = inspect_from_extension_only(ext)
         info.valid = False
         info.error = f"Не удалось прочитать файл: {e}"
         return info
 
-    return detect_format_from_bytes(data, ext)
+    info = detect_format_from_bytes(data, ext)
+    if not info.valid and ext in SUPPORTED_ALL and info.detected == "unknown":
+        return _extension_fallback(
+            ext,
+            reason=info.error or "Содержимое не распознано, конвертация по расширению",
+        )
+    return info
 
 
 def _format_entry_fields(path: Path, *, file_size: int | None = None, light: bool = False) -> dict:
@@ -1076,6 +1088,7 @@ def _convert_folder_merged(
     *,
     numbering_from_page: int | None = None,
     numbering_start: int = 1,
+    download_to: Path | None = None,
 ) -> dict:
     if not inputs:
         raise ValueError("В папке нет поддерживаемых файлов для сборки")
@@ -1086,7 +1099,7 @@ def _convert_folder_merged(
 
     merged_path = folder / safe_name
     tmp = Path(tempfile.mkdtemp(prefix="cvt_merge_"))
-    local_merged = tmp / safe_name
+    local_merged = download_to if download_to else (tmp / safe_name)
     results: list[dict] = []
     pdf_parts: list[Path] = []
     stats = {"ok": 0, "skipped": 0, "error": 0}
@@ -1128,25 +1141,57 @@ def _convert_folder_merged(
             numbering_from_page=numbering_from_page,
             numbering_start=numbering_start,
         )
-        saved_path = _save_merged_pdf(local_merged, merged_path)
+        if download_to:
+            saved_path = download_to
+        else:
+            saved_path = _save_merged_pdf(local_merged, merged_path)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-    alt_name = str(saved_path) != str(merged_path)
     return {
         "folder": str(folder),
         "recursive": recursive,
         "merge": True,
         "merged_pdf": str(saved_path),
-        "merged_pdf_requested": str(merged_path),
-        "saved_as_alt": alt_name,
+        "merged_pdf_requested": str(download_to or merged_path),
+        "saved_as_alt": not download_to and str(saved_path) != str(merged_path),
         "pages_from": len(pdf_parts),
         "total": len(results),
         "stats": stats,
         "files": results,
         "numbering_from_page": numbering_from_page,
         "numbering_start": numbering_start,
+        "download": download_to is not None,
     }
+
+
+def convert_paths_merged_download(
+    paths: list[str],
+    output_name: str = "сборка.pdf",
+    *,
+    recursive: bool = True,
+    numbering_from_page: int | None = None,
+    numbering_start: int = 1,
+) -> tuple[Path, Path, dict]:
+    """Собрать PDF во временный файл для скачивания (без записи на SMB)."""
+    inputs = resolve_ordered_inputs(paths, recursive=recursive)
+    if not inputs:
+        raise ValueError("Нет файлов для сборки")
+    safe_name = Path(output_name).name or "сборка.pdf"
+    if not safe_name.lower().endswith(".pdf"):
+        safe_name += ".pdf"
+    tmp_parent = Path(tempfile.mkdtemp(prefix="cvt_dl_"))
+    dest = tmp_parent / safe_name
+    result = _convert_folder_merged(
+        inputs[0].parent,
+        inputs,
+        safe_name,
+        False,
+        numbering_from_page=numbering_from_page,
+        numbering_start=numbering_start,
+        download_to=dest,
+    )
+    return dest, tmp_parent, result
 
 
 def convert_uploads_to_merged_pdf(
