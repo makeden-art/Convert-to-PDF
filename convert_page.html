@@ -98,9 +98,9 @@
         <label for="smb-server">Сервер</label>
         <input type="text" id="smb-server" placeholder="192.168.88.14" />
         <label for="smb-share">Имя шары</label>
-        <input type="text" id="smb-share" placeholder="share_test" />
+        <input type="text" id="smb-share" placeholder="scan или scan/pdf" />
         <label for="smb-user">Логин</label>
-        <input type="text" id="smb-user" placeholder="DESKTOP-ND5KD72\makeden" />
+        <input type="text" id="smb-user" placeholder="DOMAIN\user или user@domain.local" />
         <label for="smb-pass">Пароль</label>
         <input type="password" id="smb-pass" placeholder="••••••" />
         <div class="chk"><input type="checkbox" id="smb-anon" /><label for="smb-anon" style="margin:0">Анонимный доступ (guest)</label></div>
@@ -894,7 +894,7 @@
     function formatSmbConnected(mount) {
       if (!mount) return '';
       const host = mount.server || (mount.unc || '').replace(/^\/\//, '').split('/')[0] || '';
-      const share = mount.share || (mount.unc || '').split('/').filter(Boolean)[1] || '';
+      const share = mount.share_label || mount.share || (mount.unc || '').split('/').filter(Boolean)[1] || '';
       if (host && share) return host + ' → ' + share;
       return host || share || '';
     }

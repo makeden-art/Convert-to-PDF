@@ -295,16 +295,29 @@ def _smb_mount_base() -> Path:
     return (SMB_ROOT / mount_id).resolve()
 
 
+def _smb_share_path_prefix() -> str:
+    return (_smb_config().get("share_path") or "").strip().strip("/")
+
+
+def _join_remote_dir(*parts: str) -> str:
+    clean = [p.strip("/\\").replace("\\", "/") for p in parts if p and p not in (".", "")]
+    if not clean:
+        return "."
+    return "/".join(clean).replace("/", "\\")
+
+
 def _virtual_smb_remote(path: Path) -> tuple[str, str | None]:
     """Путь в UI → (каталог на шаре, имя файла или None для каталога)."""
     base = _smb_mount_base()
+    share_prefix = _smb_share_path_prefix()
     rel = path.resolve().relative_to(base)
-    if not rel.parts:
-        return ".", None
+    rel_str = "/".join(rel.parts) if rel.parts else ""
+    if path.suffix and rel.parts:
+        parent_rel = "/".join(rel.parent.parts) if rel.parent.parts else ""
+        return _join_remote_dir(share_prefix, parent_rel), rel.name
     if path.suffix:
-        remote_dir = "/".join(rel.parent.parts) if rel.parent.parts else "."
-        return remote_dir, rel.name
-    return "/".join(rel.parts), None
+        return _join_remote_dir(share_prefix), rel.name
+    return _join_remote_dir(share_prefix, rel_str), None
 
 
 def _run_smbclient(remote_dir: str, command: str, *, timeout: float = 30) -> str:
@@ -342,6 +355,10 @@ def _friendly_smb_error(err: str) -> str:
         return (
             "Файл не перезаписан — используется в другой программе на Windows. "
             "Закройте его (PDF, Word, проводник) и повторите."
+        )
+    if "BAD_NETWORK_NAME" in err:
+        return (
+            "Шара не найдена. Укажите имя шары и подпапку через слэш: scan/pdf."
         )
     return err
 
@@ -490,8 +507,7 @@ def _browse_smb_directory(folder: Path) -> dict:
     base = _smb_mount_base()
     entries: list[dict] = []
     for item in _parse_smbclient_ls(output):
-        virtual = base if remote_dir in (".", "") else base / remote_dir.replace("\\", "/")
-        item_path = virtual / item["name"]
+        item_path = folder / item["name"]
         entry = {"name": item["name"], "path": str(item_path), "type": item["type"]}
         if item["type"] == "file":
             suffix = Path(item["name"]).suffix.lower()
