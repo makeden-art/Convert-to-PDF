@@ -254,6 +254,7 @@ OFFICE_WORKERS = max(1, int(os.getenv("CONVERT_OFFICE_WORKERS", "1")))
 CAD_WORKERS = max(1, int(os.getenv("CONVERT_CAD_WORKERS", "1")))
 CONVERT_ISOLATE = os.getenv("CONVERT_ISOLATE", "1").strip().lower() in ("1", "true", "yes")
 FILE_CONVERT_TIMEOUT_SEC = int(os.getenv("CONVERT_FILE_TIMEOUT_SEC", "300"))
+CAD_CONVERT_TIMEOUT_SEC = int(os.getenv("CONVERT_CAD_TIMEOUT_SEC", "1800"))
 CONVERT_CHILD_MEM_MB = int(os.getenv("CONVERT_CHILD_MEM_MB", "4096"))
 _WORKER_SCRIPT = Path(__file__).with_name("convert_worker.py")
 _office_sem = threading.Semaphore(OFFICE_WORKERS)
@@ -894,21 +895,28 @@ def _child_memory_limit() -> None:
         pass
 
 
+def _convert_timeout_for(src: Path) -> int:
+    if src.suffix.lower() in SUPPORTED_CAD:
+        return CAD_CONVERT_TIMEOUT_SEC
+    return FILE_CONVERT_TIMEOUT_SEC
+
+
 def convert_file_to_pdf_isolated(src: Path, dest: Path) -> None:
     """Конвертация в отдельном процессе — OOM дочернего не роняет uvicorn."""
     import sys
 
+    timeout_sec = _convert_timeout_for(src)
     try:
         proc = subprocess.run(
             [sys.executable, str(_WORKER_SCRIPT), str(src), str(dest)],
             capture_output=True,
             text=True,
-            timeout=FILE_CONVERT_TIMEOUT_SEC,
+            timeout=timeout_sec,
             preexec_fn=_child_memory_limit,
         )
     except subprocess.TimeoutExpired as e:
         raise RuntimeError(
-            f"Таймаут конвертации {src.name} ({FILE_CONVERT_TIMEOUT_SEC} с)"
+            f"Таймаут конвертации {src.name} ({timeout_sec} с)"
         ) from e
     if proc.returncode != 0:
         msg = (proc.stderr or proc.stdout or "ошибка конвертации").strip()
