@@ -284,6 +284,9 @@ def _smb_config() -> dict:
 
 
 def _smb_creds_path(mount_id: str = "default") -> Path:
+    tmp = Path(f"/tmp/smb-{mount_id}.creds")
+    if tmp.exists():
+        return tmp
     return Path(f"/opt/road-pdf-platform/secrets/smb/{mount_id}.creds")
 
 
@@ -329,6 +332,12 @@ def _run_smbclient(remote_dir: str, command: str, *, timeout: float = 30) -> str
 
 
 def _friendly_smb_error(err: str) -> str:
+    low = err.lower()
+    if "authentication file" in low or "credentials file" in low:
+        return (
+            "SMB: не найден файл учётных данных. "
+            "Переподключите сетевую папку в блоке «Сетевая папка (SMB)»."
+        )
     if "NT_STATUS_SHARING_VIOLATION" in err or "SHARING_VIOLATION" in err:
         return (
             "Файл не перезаписан — используется в другой программе на Windows. "
