@@ -477,6 +477,10 @@
       currentPath = j.path || '';
       treePathEl.textContent = currentPath || '/';
       treeList.innerHTML = '';
+      if (!j.entries.length && j.message) {
+        treeList.innerHTML = '<div class="tree-item">' + j.message + '</div>';
+        return;
+      }
       for (const e of j.entries) {
         const row = document.createElement('div');
         const sel = isSelected(e.path);

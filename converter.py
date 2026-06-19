@@ -264,6 +264,8 @@ SMB_ROOT = Path("/data/smb")
 
 
 def _smb_mounted() -> bool:
+    if _smb_configured():
+        return True
     if not PLATFORM_STATE.exists():
         return False
     try:
@@ -281,6 +283,12 @@ def _smb_config() -> dict:
         return dict(state.get("smb_mount") or {})
     except Exception:
         return {}
+
+
+def _smb_configured() -> bool:
+    cfg = _smb_config()
+    mount_id = cfg.get("mount_id", "default")
+    return bool(cfg.get("unc") and _smb_creds_path(mount_id).exists())
 
 
 def _smb_creds_path(mount_id: str = "default") -> Path:
@@ -327,15 +335,15 @@ def _run_smbclient(remote_dir: str, command: str, *, timeout: float = 30) -> str
     creds = _smb_creds_path(mount_id)
     if not unc or not creds.exists():
         raise ValueError("SMB не настроен — подключите сетевую папку выше")
+    remote = remote_dir.replace("/", "\\").strip("\\") if remote_dir not in (".", "") else ""
+    full_command = f'cd "{remote}"; {command}' if remote else command
     cmd = [
         "smbclient",
         unc,
         "-A",
         str(creds),
-        "-D",
-        remote_dir.replace("/", "\\") if remote_dir not in (".", "") else ".",
         "-c",
-        command,
+        full_command,
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if proc.returncode != 0:
@@ -617,7 +625,7 @@ def _dir_accessible(folder: Path) -> bool:
 def browse_directory(path: str = "") -> dict:
     """Содержимое каталога для дерева выбора (один уровень)."""
     if not path.strip():
-        if not _smb_mounted():
+        if not _smb_configured():
             return {
                 "path": "",
                 "parent": None,
@@ -628,17 +636,22 @@ def browse_directory(path: str = "") -> dict:
         base = _smb_mount_base()
         result = _browse_smb_directory(base)
         result["smb_mounted"] = True
+        if not result.get("entries"):
+            result.setdefault(
+                "message",
+                "Папка пуста или нет доступа к файлам. Проверьте путь шары (scan/pdf).",
+            )
         return result
 
     folder = Path(path).expanduser().resolve()
     _ensure_under_allowed_roots(folder)
 
-    if _is_smb_path(folder) and not _smb_mounted():
+    if _is_smb_path(folder) and not _smb_configured():
         raise ValueError(
             "SMB не подключён. Подключите сетевую папку в блоке «Сетевая папка (SMB)» выше."
         )
 
-    if _is_smb_path(folder) and _smb_mounted():
+    if _is_smb_path(folder) and _smb_configured():
         base = _smb_mount_base()
         if folder.resolve() == SMB_ROOT.resolve():
             mount_id = _smb_config().get("mount_id", "default")
