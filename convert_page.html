@@ -647,6 +647,9 @@
         if (e.name === 'AbortError') {
           throw new Error('Превышено время ожидания (30 мин).\nОбновите страницу и попробуйте меньше файлов.');
         }
+        if (e instanceof TypeError) {
+          throw new Error('Сеть недоступна или сервис перезапускается.\nОбновите страницу (Ctrl+F5) и откройте /convert через портал.');
+        }
         throw e;
       } finally {
         clearTimeout(timer);
@@ -903,9 +906,30 @@
       return host || share || '';
     }
 
+    function portalApiBases() {
+      const p = window.location.port;
+      if (!p || p === '80' || p === '443' || p === '8080') return [''];
+      const { protocol, hostname } = window.location;
+      if (p === '8084') return [`${protocol}//${hostname}:8080`, `${protocol}//${hostname}`];
+      return [`${protocol}//${hostname}`];
+    }
+    async function portalFetch(path, init) {
+      let lastErr = null;
+      for (const base of portalApiBases()) {
+        try {
+          const r = await fetch(base + path, init);
+          if (r.status === 404 && portalApiBases().length > 1 && base === portalApiBases()[0]) continue;
+          return r;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      throw lastErr || new Error('Портал недоступен. Откройте страницу через /convert на порту 80 или 8080.');
+    }
+
     async function refreshSmb() {
       try {
-        const r = await fetch('/api/platform/smb/status');
+        const r = await portalFetch('/api/platform/smb/status');
         const j = await r.json();
         const label = formatSmbConnected(j.mount);
         if (j.mounted && label) {
@@ -935,29 +959,37 @@
       if (!server || !share) { alert('Укажите сервер и шару'); return; }
       logSmb.style.display = 'block';
       logSmb.textContent = 'Подключение…';
-      const r = await fetch('/api/platform/smb/mount', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          server, share,
-          username: document.getElementById('smb-user').value,
-          password: document.getElementById('smb-pass').value,
-          anonymous: document.getElementById('smb-anon').checked,
-          mount_id: 'default'
-        })
-      });
-      const j = await r.json();
-      logSmb.textContent = r.ok
-        ? ('Подключено: ' + (formatSmbConnected(j.mount) || j.mount.convert_path || ''))
-        : (j.detail || JSON.stringify(j));
-      if (r.ok) { refreshSmb(); if (j.mount.convert_path) loadTree(''); }
+      try {
+        const r = await portalFetch('/api/platform/smb/mount', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            server, share,
+            username: document.getElementById('smb-user').value,
+            password: document.getElementById('smb-pass').value,
+            anonymous: document.getElementById('smb-anon').checked,
+            mount_id: 'default'
+          })
+        });
+        const j = await r.json();
+        logSmb.textContent = r.ok
+          ? ('Подключено: ' + (formatSmbConnected(j.mount) || j.mount.convert_path || ''))
+          : (j.detail || JSON.stringify(j));
+        if (r.ok) { refreshSmb(); if (j.mount.convert_path) loadTree(''); }
+      } catch (e) {
+        logSmb.textContent = e.message || String(e);
+      }
     };
     document.getElementById('btn-smb-unmount').onclick = async () => {
       logSmb.style.display = 'block';
-      const r = await fetch('/api/platform/smb/unmount', { method: 'POST' });
-      const j = await r.json();
-      logSmb.textContent = r.ok ? 'Отключено' : (j.detail || JSON.stringify(j));
-      refreshSmb();
+      try {
+        const r = await portalFetch('/api/platform/smb/unmount', { method: 'POST' });
+        const j = await r.json();
+        logSmb.textContent = r.ok ? 'Отключено' : (j.detail || JSON.stringify(j));
+        refreshSmb();
+      } catch (e) {
+        logSmb.textContent = e.message || String(e);
+      }
     };
 
     loadTree('');
