@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 CAD_EXTENSIONS = {".dwg", ".dxf"}
-CAD_RENDER_DPI = max(72, int(os.getenv("CONVERT_CAD_DPI", "96")))
+CAD_RENDER_DPI = max(72, int(os.getenv("CONVERT_CAD_DPI", "72")))
 
 
 def oda_available() -> bool:

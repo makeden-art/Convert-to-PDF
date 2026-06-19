@@ -22,10 +22,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY ODAFileConverter*.deb /tmp/oda.deb
 RUN dpkg -i /tmp/oda.deb || (apt-get update && apt-get install -f -y) && rm -f /tmp/oda.deb
 
-COPY app.py converter.py cad_converter.py format_detect.py convert_page.html convert_worker.py VERSION ./
+COPY app.py converter.py cad_converter.py format_detect.py convert_page.html convert_worker.py convert_jobs.py VERSION ./
 
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--limit-concurrency", "4"]

@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from cad_converter import CAD_EXTENSIONS, convert_cad_to_pdf, oda_available
+from convert_jobs import create_job, get_job
 from converter import (
     SUPPORTED_OFFICE,
     SUPPORTED_CAD,
@@ -165,20 +166,34 @@ async def api_resolve_paths(body: ResolveRequest):
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+@app.get("/api/convert-jobs/{job_id}")
+async def api_convert_job(job_id: str):
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Задача не найдена")
+    payload: dict = {"job_id": job_id, "status": job.get("status", "unknown")}
+    if job.get("status") == "done":
+        payload["result"] = job.get("result")
+    elif job.get("status") == "error":
+        payload["error"] = job.get("error", "ошибка конвертации")
+    return JSONResponse(payload)
+
+
 @app.post("/api/convert-paths")
 async def api_convert_paths(body: PathsRequest):
     try:
-        result = await asyncio.to_thread(
-            convert_paths,
-            body.paths,
-            merge=body.merge,
-            output_name=body.output_name,
-            recursive=body.recursive,
-            number_pages=body.number_pages,
-            numbering_from_page=body.numbering_from_page,
-            numbering_start=body.numbering_start,
+        job_id = create_job(
+            lambda: convert_paths(
+                body.paths,
+                merge=body.merge,
+                output_name=body.output_name,
+                recursive=body.recursive,
+                number_pages=body.number_pages,
+                numbering_from_page=body.numbering_from_page,
+                numbering_start=body.numbering_start,
+            )
         )
-        return JSONResponse(result)
+        return JSONResponse({"job_id": job_id, "status": "queued"}, status_code=202)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
@@ -224,17 +239,18 @@ async def api_convert_merge_download(body: PathsRequest):
 @app.post("/api/convert-folder")
 async def api_convert_folder(body: FolderRequest):
     try:
-        result = await asyncio.to_thread(
-            convert_folder,
-            body.path,
-            body.recursive,
-            merge=body.merge,
-            output_name=body.output_name,
-            number_pages=body.number_pages,
-            numbering_from_page=body.numbering_from_page,
-            numbering_start=body.numbering_start,
+        job_id = create_job(
+            lambda: convert_folder(
+                body.path,
+                body.recursive,
+                merge=body.merge,
+                output_name=body.output_name,
+                number_pages=body.number_pages,
+                numbering_from_page=body.numbering_from_page,
+                numbering_start=body.numbering_start,
+            )
         )
-        return JSONResponse(result)
+        return JSONResponse({"job_id": job_id, "status": "queued"}, status_code=202)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:

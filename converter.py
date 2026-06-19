@@ -254,6 +254,7 @@ OFFICE_WORKERS = max(1, int(os.getenv("CONVERT_OFFICE_WORKERS", "1")))
 CAD_WORKERS = max(1, int(os.getenv("CONVERT_CAD_WORKERS", "1")))
 CONVERT_ISOLATE = os.getenv("CONVERT_ISOLATE", "1").strip().lower() in ("1", "true", "yes")
 FILE_CONVERT_TIMEOUT_SEC = int(os.getenv("CONVERT_FILE_TIMEOUT_SEC", "300"))
+CONVERT_CHILD_MEM_MB = int(os.getenv("CONVERT_CHILD_MEM_MB", "4096"))
 _WORKER_SCRIPT = Path(__file__).with_name("convert_worker.py")
 _office_sem = threading.Semaphore(OFFICE_WORKERS)
 _cad_sem = threading.Semaphore(CAD_WORKERS)
@@ -880,6 +881,19 @@ def _run_merge_parts(
     return part_results
 
 
+def _child_memory_limit() -> None:
+    """Ограничить RAM дочернего процесса (OOM убивает ребёнка, не uvicorn)."""
+    if os.name != "posix":
+        return
+    import resource
+
+    limit = CONVERT_CHILD_MEM_MB * 1024 * 1024
+    try:
+        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+    except (ValueError, OSError):
+        pass
+
+
 def convert_file_to_pdf_isolated(src: Path, dest: Path) -> None:
     """Конвертация в отдельном процессе — OOM дочернего не роняет uvicorn."""
     import sys
@@ -890,6 +904,7 @@ def convert_file_to_pdf_isolated(src: Path, dest: Path) -> None:
             capture_output=True,
             text=True,
             timeout=FILE_CONVERT_TIMEOUT_SEC,
+            preexec_fn=_child_memory_limit,
         )
     except subprocess.TimeoutExpired as e:
         raise RuntimeError(
