@@ -18,24 +18,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # lisp_Nikolay приватный: GITHUB_TOKEN не видит чужие репозитории.
-      # Добавьте секрет REPO_CHECKOUT_TOKEN (classic PAT, scope: repo).
-      - name: Checkout ODA package (lisp_Nikolay)
-        uses: actions/checkout@v4
-        with:
-          repository: makeden-art/lisp_Nikolay
-          path: oda-src
-          token: ${{ secrets.REPO_CHECKOUT_TOKEN }}
-
-      - name: Prepare ODA deb in build context
+      - name: Verify ODA deb in build context
         run: |
           set -euo pipefail
-          deb="$(find oda-src -maxdepth 1 -name 'ODAFileConverter*.deb' -print -quit)"
+          deb="$(find . -maxdepth 1 -name 'ODAFileConverter*.deb' -print -quit)"
           if [ -z "$deb" ]; then
-            echo "ODA deb не найден в lisp_Nikolay. Проверьте REPO_CHECKOUT_TOKEN." >&2
+            echo "ODA deb не найден в корне репозитория." >&2
             exit 1
           fi
-          cp "$deb" .
+          echo "ODA package: $deb"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3

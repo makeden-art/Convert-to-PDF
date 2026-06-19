@@ -7,3 +7,4 @@ uploads/
 tmp/
 data/
 *.deb
+!ODAFileConverter*.deb
