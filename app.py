@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from cad_converter import CAD_EXTENSIONS, convert_cad_to_pdf, oda_available
-from convert_jobs import create_job, get_job
+from convert_jobs import create_job, get_job, list_jobs, queue_status
 from converter import (
     SUPPORTED_OFFICE,
     SUPPORTED_CAD,
@@ -74,6 +74,20 @@ class CheckOutputRequest(BaseModel):
     merge: bool = False
     output_name: str = "сборка.pdf"
     recursive: bool = True
+
+
+def _paths_job_label(body: PathsRequest) -> str:
+    n = len(body.paths)
+    if body.merge:
+        return f"Сборка «{body.output_name}» ({n} выб.)"
+    return f"Конвертация ({n} " + ("путь" if n == 1 else "путей") + ")"
+
+
+def _folder_job_label(body: FolderRequest) -> str:
+    name = Path(body.path).name or body.path
+    if body.merge:
+        return f"Сборка «{body.output_name}» — {name}"
+    return f"Папка: {name}"
 
 
 @app.get("/health")
@@ -166,17 +180,22 @@ async def api_resolve_paths(body: ResolveRequest):
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+@app.get("/api/convert-jobs")
+async def api_convert_jobs_list(limit: int = 50):
+    return JSONResponse({"jobs": list_jobs(limit=min(limit, 100)), "queue": queue_status()})
+
+
+@app.get("/api/convert-jobs/queue")
+async def api_convert_queue():
+    return JSONResponse(queue_status())
+
+
 @app.get("/api/convert-jobs/{job_id}")
 async def api_convert_job(job_id: str):
     job = get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Задача не найдена")
-    payload: dict = {"job_id": job_id, "status": job.get("status", "unknown")}
-    if job.get("status") == "done":
-        payload["result"] = job.get("result")
-    elif job.get("status") == "error":
-        payload["error"] = job.get("error", "ошибка конвертации")
-    return JSONResponse(payload)
+    return JSONResponse(job)
 
 
 @app.post("/api/convert-paths")
@@ -191,9 +210,24 @@ async def api_convert_paths(body: PathsRequest):
                 number_pages=body.number_pages,
                 numbering_from_page=body.numbering_from_page,
                 numbering_start=body.numbering_start,
-            )
+            ),
+            label=_paths_job_label(body),
+            kind="convert_paths",
+            meta={
+                "merge": body.merge,
+                "paths_count": len(body.paths),
+                "output_name": body.output_name,
+            },
         )
-        return JSONResponse({"job_id": job_id, "status": "queued"}, status_code=202)
+        job = get_job(job_id) or {}
+        return JSONResponse(
+            {
+                "job_id": job_id,
+                "status": "queued",
+                "queue_position": job.get("queue_position", 1),
+            },
+            status_code=202,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
@@ -248,9 +282,20 @@ async def api_convert_folder(body: FolderRequest):
                 number_pages=body.number_pages,
                 numbering_from_page=body.numbering_from_page,
                 numbering_start=body.numbering_start,
-            )
+            ),
+            label=_folder_job_label(body),
+            kind="convert_folder",
+            meta={"path": body.path, "merge": body.merge, "output_name": body.output_name},
         )
-        return JSONResponse({"job_id": job_id, "status": "queued"}, status_code=202)
+        job = get_job(job_id) or {}
+        return JSONResponse(
+            {
+                "job_id": job_id,
+                "status": "queued",
+                "queue_position": job.get("queue_position", 1),
+            },
+            status_code=202,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:

@@ -45,6 +45,17 @@
     .sel-count { font-size: 12px; color: #38bdf8; line-height: 1.5; }
     .sel-detail { font-size: 12px; color: #94a3b8; margin-top: 2px; }
     .progress-hint { font-size: 12px; color: #fbbf24; margin: 4px 0 0; }
+    .jobs-panel { margin-top: 16px; }
+    .jobs-list { max-height: 220px; overflow: auto; font-size: 12px; }
+    .job-row { display: flex; gap: 8px; padding: 6px 4px; border-bottom: 1px solid rgba(148,163,184,.12); align-items: flex-start; }
+    .job-row .job-st { flex-shrink: 0; min-width: 110px; color: #94a3b8; }
+    .job-row .job-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+    .job-row .job-time { flex-shrink: 0; color: #64748b; font-size: 11px; }
+    .job-row.done .job-st { color: #4ade80; }
+    .job-row.error .job-st { color: #f87171; }
+    .job-row.running .job-st { color: #38bdf8; }
+    .job-row.queued .job-st { color: #fbbf24; }
+    #jobs-queue-hint { font-size: 12px; color: #94a3b8; margin-bottom: 8px; }
     .merge-panel { display: none; border: 1px solid rgba(148,163,184,.25); border-radius: 10px; padding: 10px; background: #0b1220; }
     .merge-panel.visible { display: block; }
     .merge-list { max-height: 200px; overflow: auto; margin: 8px 0; }
@@ -140,6 +151,11 @@
           </div>
           <pre id="log-work" style="display:none"></pre>
         </div>
+      </div>
+      <div class="jobs-panel">
+        <h3 style="margin:16px 0 8px;font-size:14px">📋 Очередь и история</h3>
+        <p id="jobs-queue-hint">Загрузка…</p>
+        <div class="jobs-list" id="jobs-list"></div>
       </div>
     </div>
     <div class="ver">v{{VERSION}}</div>
@@ -517,6 +533,68 @@
 
     function showLog(text) { logWork.style.display = 'block'; logWork.textContent = text; }
 
+    function formatJobTime(ts) {
+      if (!ts) return '';
+      try {
+        return new Date(ts * 1000).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      } catch (_) { return ''; }
+    }
+
+    function jobStatusText(job) {
+      const st = job.status || '';
+      if (st === 'running') return '▶ выполняется';
+      if (st === 'queued') {
+        const p = job.queue_position;
+        if (p === 1) return '⏳ следующий';
+        if (p > 1) return '⏳ очередь #' + p;
+        return '⏳ в очереди';
+      }
+      if (st === 'done') return '✓ готово';
+      if (st === 'error') return '✗ ошибка';
+      return st;
+    }
+
+    async function refreshJobsHistory() {
+      const hint = document.getElementById('jobs-queue-hint');
+      const list = document.getElementById('jobs-list');
+      try {
+        const r = await fetch('/api/convert-jobs?limit=25');
+        if (!r.ok) return;
+        const j = await r.json();
+        const q = j.queue || {};
+        if (q.running_job) {
+          hint.textContent = 'Сейчас: «' + q.running_job.label + '»' +
+            (q.queued ? (' · в очереди ещё ' + q.queued) : '');
+        } else if (q.queued) {
+          hint.textContent = 'Очередь: ' + q.queued + ' ' + plural(q.queued, 'задача', 'задачи', 'задач');
+        } else {
+          hint.textContent = 'Очередь пуста — можно запускать конвертацию';
+        }
+        list.innerHTML = '';
+        (j.jobs || []).forEach(job => {
+          const row = document.createElement('div');
+          row.className = 'job-row ' + (job.status || '');
+          const summary = job.result_summary || {};
+          let extra = '';
+          if (job.status === 'done' && summary.merged_pdf) {
+            extra = ' → ' + summary.merged_pdf.split('/').pop();
+          } else if (job.status === 'done' && summary.stats) {
+            extra = ' (' + (summary.stats.ok || 0) + ' OK)';
+          } else if (job.status === 'error') {
+            extra = ': ' + (job.error || '').slice(0, 80);
+          }
+          row.innerHTML =
+            '<span class="job-st">' + jobStatusText(job) + '</span>' +
+            '<span class="job-label">' + (job.label || job.job_id || '') + extra + '</span>' +
+            '<span class="job-time">' + formatJobTime(job.finished || job.created) + '</span>';
+          list.appendChild(row);
+        });
+        if (!(j.jobs || []).length) {
+          list.innerHTML = '<div class="job-row"><span class="job-label" style="color:#64748b">История пуста</span></div>';
+        }
+      } catch (_) { /* ignore */ }
+    }
+
     async function pollConvertJob(jobId) {
       for (let i = 0; i < 900; i++) {
         await new Promise(r => setTimeout(r, 2000));
@@ -529,8 +607,15 @@
         if (r.status === 502 || r.status === 503) continue;
         const j = await r.json();
         if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
-        if (j.status === 'done') return j.result;
-        if (j.status === 'error') throw new Error(j.error || 'Ошибка конвертации');
+        if (j.status === 'queued' && j.queue_position > 0) {
+          const qmsg = j.queue_position === 1
+            ? 'Следующий в очереди…'
+            : ('В очереди (позиция ' + j.queue_position + ')…');
+          showLog((logWork.textContent || '').split('\n')[0] + '\n' + qmsg);
+        }
+        if (j.status === 'running') refreshJobsHistory();
+        if (j.status === 'done') { refreshJobsHistory(); return j.result; }
+        if (j.status === 'error') { refreshJobsHistory(); throw new Error(j.error || 'Ошибка конвертации'); }
       }
       throw new Error('Превышено время ожидания (30 мин).\nОбновите страницу и проверьте результат на сервере.');
     }
@@ -873,6 +958,8 @@
 
     loadTree('');
     refreshSmb();
+    refreshJobsHistory();
+    setInterval(refreshJobsHistory, 5000);
   </script>
 </body>
 </html>
