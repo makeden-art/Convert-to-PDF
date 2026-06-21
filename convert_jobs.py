@@ -1,7 +1,6 @@
 """Очередь задач конвертации + история на диске."""
 from __future__ import annotations
 
-import gc
 import json
 import os
 import queue
@@ -10,6 +9,8 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable
+
+from converter import release_memory
 
 JOBS_DIR = Path(os.getenv("CONVERT_JOBS_DIR", "/data/convert-jobs"))
 HISTORY_FILE = JOBS_DIR / "history.json"
@@ -34,10 +35,20 @@ def _load_history() -> None:
     try:
         data = json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
         if isinstance(data, list):
+            changed = False
+            now = time.time()
             with _lock:
                 for item in data:
-                    if isinstance(item, dict) and item.get("id"):
-                        _jobs[item["id"]] = item
+                    if not isinstance(item, dict) or not item.get("id"):
+                        continue
+                    if item.get("status") in ("running", "queued"):
+                        item["status"] = "error"
+                        item["error"] = "Прервано перезапуском сервиса"
+                        item["finished"] = now
+                        changed = True
+                    _jobs[item["id"]] = item
+            if changed:
+                _save_history()
     except (json.JSONDecodeError, OSError):
         pass
 
@@ -135,7 +146,7 @@ def _run_job(job_id: str) -> None:
     except Exception as e:
         _update_job(job_id, status="error", error=str(e), finished=time.time())
     finally:
-        gc.collect()
+        release_memory()
 
 
 def _queue_worker() -> None:
@@ -145,7 +156,7 @@ def _queue_worker() -> None:
             _run_job(job_id)
         finally:
             _queue.task_done()
-            gc.collect()
+            release_memory()
 
 
 def _ensure_worker() -> None:

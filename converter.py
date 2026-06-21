@@ -32,6 +32,19 @@ SUPPORTED_CAD = CAD_EXTENSIONS
 SUPPORTED_ALL = SUPPORTED_OFFICE | SUPPORTED_CAD | {".pdf"}
 
 
+def release_memory() -> None:
+    """Вернуть неиспользуемую RAM процессу ОС (Python сам этого не делает)."""
+    gc.collect()
+    if os.name != "posix":
+        return
+    try:
+        import ctypes
+
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
 def allowed_roots() -> list[Path]:
     raw = os.getenv(
         "CONVERT_ALLOWED_ROOTS",
@@ -831,7 +844,7 @@ def merge_pdfs(
             from_page=numbering_from_page,
             start=numbering_start,
         )
-    gc.collect()
+    release_memory()
     return dest
 
 
@@ -867,7 +880,7 @@ def _merge_pdfs_fitz(sources: list[Path], dest: Path) -> None:
         out.save(dest, garbage=4, deflate=True)
     finally:
         out.close()
-        gc.collect()
+        release_memory()
 
 
 def _apply_pdf_numbering(path: Path, *, from_page: int, start: int) -> None:
@@ -910,13 +923,13 @@ def _run_merge_parts(
     if workers <= 1:
         for idx, src in enumerate(inputs):
             part_results.append(_convert_merge_part(idx, src, tmp))
-            gc.collect()
+            release_memory()
         return part_results
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = [ex.submit(_convert_merge_part, idx, src, tmp) for idx, src in enumerate(inputs)]
         for fut in futs:
             part_results.append(fut.result())
-            gc.collect()
+            release_memory()
     return part_results
 
 
@@ -1309,6 +1322,9 @@ def _convert_folder_merged(
             saved_path = _save_merged_pdf(local_merged, merged_path)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+        pdf_parts.clear()
+        results.clear()
+        release_memory()
 
     return {
         "folder": str(folder),
