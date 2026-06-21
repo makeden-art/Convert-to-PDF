@@ -28,4 +28,4 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "exec uvicorn app:app --host 0.0.0.0 --port 8000 --limit-concurrency ${CONVERT_UVICORN_CONCURRENCY:-32}"]
+CMD ["sh", "-c", "exec uvicorn app:app --host 0.0.0.0 --port 8000 --limit-concurrency ${CONVERT_UVICORN_CONCURRENCY:-16}"]
