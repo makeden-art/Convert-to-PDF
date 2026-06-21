@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from typing import Iterable
 
+from job_control import check_cancelled, run_monitored
+
 logger = logging.getLogger("convert.cad")
 
 CAD_EXTENSIONS = {".dwg", ".dxf"}
@@ -49,7 +51,7 @@ def _oda_convert(
             glob_pattern,
         ]
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            result = run_monitored(cmd, timeout=timeout)
         except subprocess.TimeoutExpired as e:
             raise RuntimeError(
                 f"Превышено время ожидания ODA ({out_format}, {timeout} сек)."
@@ -224,6 +226,7 @@ def convert_dxf_to_pdf(dxf_path: Path, pdf_path: Path) -> Path:
 
     with PdfPages(str(pdf_path)) as pdf:
         for layout in render_targets:
+            check_cancelled()
             figsize = _layout_figsize(layout)
             fig = plt.figure(figsize=figsize, dpi=CAD_RENDER_DPI)
             ax = fig.add_axes([0, 0, 1, 1])

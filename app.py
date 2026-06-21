@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from cad_converter import CAD_EXTENSIONS, convert_cad_to_pdf, oda_available
-from convert_jobs import create_job, get_job, list_jobs, queue_status
+from convert_jobs import cancel_job, create_job, get_job, list_jobs, queue_status
 from converter import (
     SUPPORTED_OFFICE,
     SUPPORTED_CAD,
@@ -188,6 +188,14 @@ async def api_convert_jobs_list(limit: int = 50):
 @app.get("/api/convert-jobs/queue")
 async def api_convert_queue():
     return JSONResponse(queue_status())
+
+
+@app.post("/api/convert-jobs/{job_id}/cancel")
+async def api_convert_job_cancel(job_id: str):
+    result = await asyncio.to_thread(cancel_job, job_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Не удалось отменить"))
+    return JSONResponse(result)
 
 
 @app.get("/api/convert-jobs/{job_id}")

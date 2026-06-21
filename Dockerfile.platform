@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY lisp_Nikolay/ODAFileConverter*.deb /tmp/oda.deb
 RUN dpkg -i /tmp/oda.deb || (apt-get update && apt-get install -f -y) && rm -f /tmp/oda.deb
 
-COPY convert-to-pdf/app.py convert-to-pdf/converter.py convert-to-pdf/cad_converter.py convert-to-pdf/format_detect.py convert-to-pdf/convert_page.html convert-to-pdf/convert_worker.py convert-to-pdf/convert_jobs.py convert-to-pdf/VERSION ./
+COPY convert-to-pdf/app.py convert-to-pdf/converter.py convert-to-pdf/cad_converter.py convert-to-pdf/format_detect.py convert-to-pdf/convert_page.html convert-to-pdf/convert_worker.py convert-to-pdf/convert_jobs.py convert-to-pdf/job_control.py convert-to-pdf/VERSION ./
 
 ENV PYTHONUNBUFFERED=1
 

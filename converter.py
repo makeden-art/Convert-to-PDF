@@ -24,6 +24,7 @@ from format_detect import (
     inspect_from_extension_only,
     validation_error_message,
 )
+from job_control import JobCancelledError, check_cancelled, run_monitored
 
 SUPPORTED_OFFICE = {".doc", ".docx", ".xls", ".xlsx", ".odt", ".ods", ".rtf"}
 MAGIC_INSPECT_MAX_BYTES = 8192
@@ -781,6 +782,7 @@ def convert_paths(
     results = []
     stats = {"ok": 0, "skipped": 0, "error": 0}
     for src in inputs:
+        check_cancelled()
         item = convert_file_in_place(src)
         results.append(item)
         stats[item["status"]] = stats.get(item["status"], 0) + 1
@@ -796,7 +798,7 @@ def convert_paths(
 
 def _convert_with_libreoffice(src: Path, out_dir: Path) -> Path:
     with _office_sem:
-        proc = subprocess.run(
+        proc = run_monitored(
             [
                 "soffice",
                 "--headless",
@@ -807,8 +809,6 @@ def _convert_with_libreoffice(src: Path, out_dir: Path) -> Path:
                 str(out_dir),
                 str(src),
             ],
-            capture_output=True,
-            text=True,
             timeout=300,
         )
     if proc.returncode != 0:
@@ -861,7 +861,7 @@ def _merge_pdfs_ghostscript(sources: list[Path], dest: Path) -> None:
         f"-sOutputFile={dest}",
         *[str(p) for p in sources],
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    proc = run_monitored(cmd, timeout=600)
     if proc.returncode != 0 or not dest.exists():
         err = (proc.stderr or proc.stdout or "ghostscript error").strip()
         raise RuntimeError(f"Ошибка сборки PDF (gs): {err}")
@@ -922,12 +922,14 @@ def _run_merge_parts(
     part_results: list[tuple[int, Path | None, dict]] = []
     if workers <= 1:
         for idx, src in enumerate(inputs):
+            check_cancelled()
             part_results.append(_convert_merge_part(idx, src, tmp))
             release_memory()
         return part_results
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = [ex.submit(_convert_merge_part, idx, src, tmp) for idx, src in enumerate(inputs)]
         for fut in futs:
+            check_cancelled()
             part_results.append(fut.result())
             release_memory()
     return part_results
@@ -958,10 +960,8 @@ def convert_file_to_pdf_isolated(src: Path, dest: Path) -> None:
 
     timeout_sec = _convert_timeout_for(src)
     try:
-        proc = subprocess.run(
+        proc = run_monitored(
             [sys.executable, str(_WORKER_SCRIPT), str(src), str(dest)],
-            capture_output=True,
-            text=True,
             timeout=timeout_sec,
             preexec_fn=_child_memory_limit,
         )
@@ -1230,6 +1230,7 @@ def convert_folder(
     stats = {"ok": 0, "skipped": 0, "error": 0}
 
     for f in inputs:
+        check_cancelled()
         item = convert_file_in_place(f)
         results.append(item)
         stats[item["status"]] = stats.get(item["status"], 0) + 1
@@ -1310,6 +1311,7 @@ def _convert_folder_merged(
                 + (f" ({details})" if details else "")
             )
 
+        check_cancelled()
         merge_pdfs(
             pdf_parts,
             local_merged,

@@ -11,6 +11,15 @@ from pathlib import Path
 from typing import Any, Callable
 
 from converter import release_memory
+from job_control import (
+    JobCancelledError,
+    begin_job,
+    clear_cancelled,
+    end_job,
+    is_cancelled,
+    kill_children,
+    mark_cancelled,
+)
 
 JOBS_DIR = Path(os.getenv("CONVERT_JOBS_DIR", "/data/convert-jobs"))
 HISTORY_FILE = JOBS_DIR / "history.json"
@@ -22,6 +31,7 @@ _lock = threading.Lock()
 _queue: queue.Queue[str] = queue.Queue()
 _worker_lock = threading.Lock()
 _worker_started = False
+_pending_ids: list[str] = []
 
 
 def _ensure_dir() -> None:
@@ -61,7 +71,6 @@ def _save_history() -> None:
             key=lambda j: float(j.get("created", 0)),
             reverse=True,
         )[:_HISTORY_MAX]
-        # Не сохраняем полный result — только summary
         out = []
         for job in items:
             row = {k: v for k, v in job.items() if k != "result"}
@@ -124,6 +133,8 @@ def _public_job(job_id: str, *, include_result: bool = False) -> dict[str, Any] 
         out["result"] = job["result"]
     elif include_result and job.get("status") == "error":
         out["error"] = job.get("error", "ошибка")
+    elif include_result and job.get("status") == "cancelled":
+        out["error"] = job.get("error", "Отменено пользователем")
     out.pop("id", None)
     return out
 
@@ -131,11 +142,34 @@ def _public_job(job_id: str, *, include_result: bool = False) -> dict[str, Any] 
 def _run_job(job_id: str) -> None:
     fn = _fns.pop(job_id, None)
     if not fn:
-        _update_job(job_id, status="error", error="Задача не найдена", finished=time.time())
+        if is_cancelled(job_id):
+            _update_job(
+                job_id,
+                status="cancelled",
+                error="Отменено пользователем",
+                finished=time.time(),
+            )
+            clear_cancelled(job_id)
+        else:
+            _update_job(job_id, status="error", error="Задача не найдена", finished=time.time())
         return
+
+    if is_cancelled(job_id):
+        _update_job(
+            job_id,
+            status="cancelled",
+            error="Отменено пользователем",
+            finished=time.time(),
+        )
+        clear_cancelled(job_id)
+        return
+
+    begin_job(job_id)
     _update_job(job_id, status="running", started=time.time())
     try:
         result = fn()
+        if is_cancelled(job_id):
+            raise JobCancelledError("Отменено пользователем")
         _update_job(
             job_id,
             status="done",
@@ -143,9 +177,26 @@ def _run_job(job_id: str) -> None:
             result_summary=_summarize_result(result),
             finished=time.time(),
         )
+    except JobCancelledError as e:
+        _update_job(
+            job_id,
+            status="cancelled",
+            error=str(e),
+            finished=time.time(),
+        )
     except Exception as e:
-        _update_job(job_id, status="error", error=str(e), finished=time.time())
+        if is_cancelled(job_id):
+            _update_job(
+                job_id,
+                status="cancelled",
+                error="Отменено пользователем",
+                finished=time.time(),
+            )
+        else:
+            _update_job(job_id, status="error", error=str(e), finished=time.time())
     finally:
+        end_job(job_id)
+        clear_cancelled(job_id)
         release_memory()
 
 
@@ -195,6 +246,36 @@ def create_job(
     _queue.put(job_id)
     _ensure_worker()
     return job_id
+
+
+def cancel_job(job_id: str) -> dict[str, Any]:
+    with _lock:
+        job = _jobs.get(job_id)
+        if not job:
+            return {"ok": False, "error": "Задача не найдена"}
+        status = job.get("status")
+
+    if status in ("done", "error", "cancelled"):
+        return {"ok": False, "error": f"Задача уже завершена ({status})"}
+
+    mark_cancelled(job_id)
+
+    if status == "queued":
+        _fns.pop(job_id, None)
+        _update_job(
+            job_id,
+            status="cancelled",
+            error="Отменено пользователем",
+            finished=time.time(),
+        )
+        clear_cancelled(job_id)
+        return {"ok": True, "job_id": job_id, "status": "cancelled"}
+
+    if status == "running":
+        kill_children()
+        return {"ok": True, "job_id": job_id, "status": "cancelling"}
+
+    return {"ok": False, "error": f"Нельзя отменить задачу в статусе {status}"}
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:
