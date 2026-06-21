@@ -93,6 +93,23 @@ def _summarize_result(result: Any) -> dict[str, Any]:
             summary[key] = result[key]
     if "stats" in result and isinstance(result["stats"], dict):
         summary["stats"] = dict(result["stats"])
+    for key in ("engine", "render_mode", "frames_rendered", "fallback"):
+        if key in result:
+            summary[key] = result[key]
+    raw_files = result.get("files")
+    if isinstance(raw_files, list):
+        summary["files"] = [
+            {
+                "path": str(item.get("source") or item.get("path") or ""),
+                "name": Path(str(item.get("source") or item.get("path") or "")).name,
+                "status": item.get("status"),
+                "message": (item.get("message") or "")[:120],
+            }
+            for item in raw_files[:500]
+            if isinstance(item, dict)
+        ]
+        if len(raw_files) > 500:
+            summary["files_truncated"] = True
     return summary
 
 

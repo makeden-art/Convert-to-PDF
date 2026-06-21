@@ -7,15 +7,23 @@ import shutil
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
-from cad_converter import CAD_EXTENSIONS, convert_cad_to_pdf, oda_available
+from cad_converter import CAD_EXTENSIONS, convert_cad_to_pdf, inspect_cad_frames, oda_available
 from convert_jobs import cancel_job, create_job, get_job, list_jobs, queue_status
+from file_preview import (
+    preview_info,
+    preview_timeout_sec,
+    render_preview_png,
+    resolve_view_document,
+    view_document_timeout_sec,
+)
 from converter import (
     SUPPORTED_OFFICE,
     SUPPORTED_CAD,
@@ -29,6 +37,7 @@ from converter import (
     convert_uploads_to_merged_pdf,
     resolve_ordered_inputs,
     resolve_ordered_inputs_with_format,
+    validate_file,
     _validate_file_format_or_raise,
     _convert_with_libreoffice,
 )
@@ -90,6 +99,49 @@ def _folder_job_label(body: FolderRequest) -> str:
     return f"Папка: {name}"
 
 
+def _preview_job_files(paths: list[str], *, recursive: bool = True, limit: int = 500) -> dict[str, Any]:
+    """Список файлов задания для UI (до старта конвертации)."""
+    files = resolve_ordered_inputs_with_format(paths, recursive=recursive)
+    truncated = len(files) > limit
+    items = []
+    for row in files[:limit]:
+        items.append(
+            {
+                "path": row["path"],
+                "name": row["name"],
+                "format": row.get("format_label") or row.get("format") or "",
+            }
+        )
+    return {
+        "files": items,
+        "files_count": len(files),
+        "truncated": truncated,
+        "selection": list(paths),
+    }
+
+
+def _paths_job_meta(body: PathsRequest) -> dict[str, Any]:
+    preview = _preview_job_files(body.paths, recursive=body.recursive)
+    return {
+        "merge": body.merge,
+        "paths_count": len(body.paths),
+        "output_name": body.output_name,
+        "recursive": body.recursive,
+        **preview,
+    }
+
+
+def _folder_job_meta(body: FolderRequest) -> dict[str, Any]:
+    preview = _preview_job_files([body.path], recursive=body.recursive)
+    return {
+        "path": body.path,
+        "merge": body.merge,
+        "output_name": body.output_name,
+        "recursive": body.recursive,
+        **preview,
+    }
+
+
 @app.get("/health")
 async def health():
     return {
@@ -145,6 +197,12 @@ async def convert_page() -> str:
     )
 
 
+@app.get("/convert/view", response_class=HTMLResponse)
+async def viewer_page() -> str:
+    template_path = Path(__file__).parent / "viewer_page.html"
+    return template_path.read_text(encoding="utf-8")
+
+
 @app.get("/api/browse")
 async def api_browse(path: str = ""):
     try:
@@ -178,6 +236,113 @@ async def api_resolve_paths(body: ResolveRequest):
         return JSONResponse({"files": files})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@app.get("/api/detect-frames")
+async def api_detect_frames(path: str):
+    try:
+        file_path = validate_file(path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if file_path.suffix.lower() not in CAD_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Только DWG/DXF")
+    try:
+        from converter import _is_smb_path, _smb_local_file, _smb_mounted
+
+        if _is_smb_path(file_path) and _smb_mounted():
+            def work():
+                with _smb_local_file(file_path) as local:
+                    return inspect_cad_frames(str(local))
+
+            result = await asyncio.to_thread(work)
+            result["path"] = str(file_path)
+        else:
+            result = await asyncio.to_thread(inspect_cad_frames, str(file_path))
+        return JSONResponse(result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/preview-info")
+async def api_preview_info(path: str):
+    try:
+        result = await asyncio.to_thread(preview_info, path)
+        return JSONResponse(result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/preview")
+async def api_preview(path: str, page: int = 1, variant: str = "source"):
+    try:
+        timeout = preview_timeout_sec(path, variant)
+        png, meta = await asyncio.wait_for(
+            asyncio.to_thread(
+                render_preview_png, path, page=max(1, page), variant=variant
+            ),
+            timeout=timeout,
+        )
+        return Response(
+            content=png,
+            media_type="image/png",
+            headers={"X-Preview-Pages": str(meta.get("pages", 1))},
+        )
+    except (asyncio.TimeoutError, TimeoutError) as e:
+        raise HTTPException(
+            status_code=504,
+            detail="Превышено время ожидания предпросмотра. Попробуйте PDF рядом или выполните конвертацию.",
+        ) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/view-document")
+async def api_view_document(path: str, variant: str = "source"):
+    tmp_parent: Path | None = None
+    try:
+        timeout = view_document_timeout_sec(path, variant)
+        pdf_path, tmp_parent = await asyncio.wait_for(
+            asyncio.to_thread(resolve_view_document, path, variant),
+            timeout=timeout,
+        )
+        filename = pdf_path.name or "document.pdf"
+        cleanup_dir = tmp_parent
+        safe_ascii = "document.pdf"
+        disposition = f"inline; filename=\"{safe_ascii}\"; filename*=UTF-8''{quote(filename)}"
+
+        def _cleanup() -> None:
+            if cleanup_dir:
+                shutil.rmtree(cleanup_dir, ignore_errors=True)
+
+        return FileResponse(
+            path=str(pdf_path),
+            media_type="application/pdf",
+            headers={"Content-Disposition": disposition},
+            background=BackgroundTask(_cleanup),
+        )
+    except asyncio.TimeoutError as e:
+        if tmp_parent:
+            shutil.rmtree(tmp_parent, ignore_errors=True)
+        raise HTTPException(
+            status_code=504,
+            detail="Превышено время ожидания подготовки документа для просмотра.",
+        ) from e
+    except ValueError as e:
+        if tmp_parent:
+            shutil.rmtree(tmp_parent, ignore_errors=True)
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        if tmp_parent:
+            shutil.rmtree(tmp_parent, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/convert-jobs")
@@ -221,11 +386,7 @@ async def api_convert_paths(body: PathsRequest):
             ),
             label=_paths_job_label(body),
             kind="convert_paths",
-            meta={
-                "merge": body.merge,
-                "paths_count": len(body.paths),
-                "output_name": body.output_name,
-            },
+            meta=_paths_job_meta(body),
         )
         job = get_job(job_id) or {}
         return JSONResponse(
@@ -293,7 +454,7 @@ async def api_convert_folder(body: FolderRequest):
             ),
             label=_folder_job_label(body),
             kind="convert_folder",
-            meta={"path": body.path, "merge": body.merge, "output_name": body.output_name},
+            meta=_folder_job_meta(body),
         )
         job = get_job(job_id) or {}
         return JSONResponse(
@@ -400,7 +561,7 @@ async def api_convert(file: UploadFile = File(...)):
             if not oda_available():
                 raise HTTPException(status_code=503, detail="ODAFileConverter не установлен")
             out = tmp / "result.pdf"
-            pdf_tmp = convert_cad_to_pdf(str(src))
+            pdf_tmp, _cad_meta = convert_cad_to_pdf(str(src))
             shutil.move(str(pdf_tmp), str(out))
         else:
             out = _convert_with_libreoffice(src, tmp)

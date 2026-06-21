@@ -1,6 +1,8 @@
 """Отмена фоновых задач конвертации (очередь + прерывание subprocess)."""
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
 import threading
 import time
@@ -56,15 +58,27 @@ def check_cancelled() -> None:
         raise JobCancelledError("Отменено пользователем")
 
 
+def _terminate_process_tree(proc: subprocess.Popen[Any]) -> None:
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except Exception:
+            pass
+    try:
+        proc.wait(timeout=5)
+    except Exception:
+        pass
+
+
 def kill_children() -> None:
     with _lock:
         procs = list(_child_procs)
     for proc in procs:
-        try:
-            if proc.poll() is None:
-                proc.kill()
-        except Exception:
-            pass
+        _terminate_process_tree(proc)
 
 
 def register_popen(proc: subprocess.Popen[Any]) -> None:
@@ -95,22 +109,21 @@ def run_monitored(
         stderr=subprocess.PIPE,
         text=text,
         preexec_fn=preexec_fn,
+        start_new_session=True,
     )
     register_popen(proc)
     started = time.time()
     try:
         while True:
             if is_cancelled(_active_job_id):
-                proc.kill()
-                proc.wait(timeout=5)
+                _terminate_process_tree(proc)
                 raise JobCancelledError("Отменено пользователем")
             try:
                 stdout, stderr = proc.communicate(timeout=0.5)
                 break
             except subprocess.TimeoutExpired:
                 if timeout is not None and time.time() - started > timeout:
-                    proc.kill()
-                    proc.wait(timeout=5)
+                    _terminate_process_tree(proc)
                     raise subprocess.TimeoutExpired(cmd, timeout) from None
         return subprocess.CompletedProcess(
             cmd, proc.returncode or 0, stdout, stderr

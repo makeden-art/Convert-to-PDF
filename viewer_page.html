@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Просмотр документа</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #0f172a; color: #e5e7eb; margin: 0; min-height: 100vh; display: flex; flex-direction: column; }
+    header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 16px; background: #111827; border-bottom: 1px solid rgba(148,163,184,.25); }
+    header a { color: #38bdf8; text-decoration: none; font-size: 14px; }
+    header a:hover { color: #7dd3fc; }
+    h1 { margin: 0; font-size: 15px; font-weight: 600; flex: 1; min-width: 160px; word-break: break-all; }
+    .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .tab { padding: 5px 12px; font-size: 12px; border-radius: 6px; border: 1px solid rgba(148,163,184,.35); background: transparent; color: #94a3b8; cursor: pointer; }
+    .tab.active { border-color: #38bdf8; color: #38bdf8; background: rgba(56,189,248,.1); }
+    .nav { display: flex; align-items: center; gap: 6px; }
+    .nav button { padding: 5px 12px; font-size: 12px; border-radius: 6px; border: 1px solid rgba(148,163,184,.35); background: #1e293b; color: #e5e7eb; cursor: pointer; }
+    .nav button:disabled { opacity: .4; cursor: default; }
+    .nav span { font-size: 12px; color: #94a3b8; min-width: 72px; text-align: center; }
+    main { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
+    #pdf-view { flex: 1; width: 100%; border: none; background: #1e293b; display: none; min-height: calc(100vh - 56px); }
+    #pdf-view.visible { display: block; }
+    #img-view { display: none; max-width: 100%; max-height: calc(100vh - 56px); margin: auto; object-fit: contain; }
+    #img-view.visible { display: block; }
+    .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; color: #94a3b8; font-size: 14px; gap: 12px; }
+    .overlay.error { color: #f87171; }
+    .overlay.hidden { display: none; }
+    .overlay a { color: #38bdf8; }
+    .img-wrap { flex: 1; overflow: auto; display: none; align-items: center; justify-content: center; padding: 12px; background: #0b1220; }
+    .img-wrap.visible { display: flex; }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/convert">← Конвертация</a>
+    <h1 id="title">Загрузка…</h1>
+    <div class="tabs" id="tabs"></div>
+    <div class="nav" id="nav" style="display:none">
+      <button type="button" id="btn-prev">◀</button>
+      <span id="page-label">—</span>
+      <button type="button" id="btn-next">▶</button>
+    </div>
+  </header>
+  <main>
+    <iframe id="pdf-view" title="PDF"></iframe>
+    <div class="img-wrap" id="img-wrap">
+      <img id="img-view" alt="Предпросмотр" />
+    </div>
+    <div class="overlay" id="loading">Загрузка документа…</div>
+    <div class="overlay error hidden" id="error"></div>
+  </main>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const filePath = params.get('path') || '';
+    const fileName = params.get('name') || '';
+
+    const state = { path: filePath, page: 1, pages: 1, variant: 'source', variants: [], mode: 'pdf', format: '', loadToken: 0, renderTimeoutSec: 130 };
+
+    const titleEl = document.getElementById('title');
+    const tabsEl = document.getElementById('tabs');
+    const navEl = document.getElementById('nav');
+    const pageLabel = document.getElementById('page-label');
+    const pdfView = document.getElementById('pdf-view');
+    const imgView = document.getElementById('img-view');
+    const imgWrap = document.getElementById('img-wrap');
+    const loadingEl = document.getElementById('loading');
+    const errorEl = document.getElementById('error');
+
+    async function fetchJson(url, timeoutMs) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const r = await fetch(url, { signal: ctrl.signal });
+        let j = {};
+        try { j = await r.json(); } catch (_) {}
+        if (!r.ok) throw new Error(j.detail || ('HTTP ' + r.status));
+        return j;
+      } catch (e) {
+        if (e.name === 'AbortError') throw new Error('Превышено время ожидания. Сервер занят — попробуйте позже.');
+        throw e;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    function showError(msg) {
+      loadingEl.classList.add('hidden');
+      errorEl.innerHTML = escapeHtml(msg).replace(/\n/g, '<br>') +
+        '<br><br><a href="/convert">← Вернуться к конвертации</a>';
+      errorEl.classList.remove('hidden');
+    }
+
+    function escapeHtml(s) {
+      return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function hideOverlay() {
+      loadingEl.classList.add('hidden');
+      errorEl.classList.add('hidden');
+    }
+
+    function modeForVariant(variant) {
+      if (variant === 'source' && (state.format === 'dwg' || state.format === 'dxf')) {
+        return 'image';
+      }
+      return 'pdf';
+    }
+
+    function renderTabs() {
+      tabsEl.innerHTML = '';
+      (state.variants || []).forEach(v => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'tab' + (state.variant === v.id ? ' active' : '');
+        btn.textContent = v.label;
+        btn.onclick = () => {
+          state.variant = v.id;
+          state.page = 1;
+          state.mode = modeForVariant(v.id);
+          renderTabs();
+          loadDocument();
+        };
+        tabsEl.appendChild(btn);
+      });
+    }
+
+    function updateNav() {
+      const multi = state.pages > 1 && state.mode === 'image';
+      navEl.style.display = multi ? 'flex' : 'none';
+      pageLabel.textContent = multi ? (state.page + ' / ' + state.pages) : '';
+      document.getElementById('btn-prev').disabled = state.page <= 1;
+      document.getElementById('btn-next').disabled = state.page >= state.pages;
+    }
+
+    function showPdf() {
+      pdfView.classList.add('visible');
+      imgWrap.classList.remove('visible');
+      imgView.classList.remove('visible');
+    }
+
+    function showImage() {
+      pdfView.classList.remove('visible');
+      imgWrap.classList.add('visible');
+    }
+
+    async function loadDocument() {
+      if (!state.path) {
+        showError('Не указан путь к файлу');
+        return;
+      }
+      const token = ++state.loadToken;
+      loadingEl.classList.remove('hidden');
+      loadingEl.textContent = state.mode === 'image'
+        ? (state.renderHint || 'Рендер чертежа…')
+        : (state.format === 'doc' || state.format === 'docx' ? 'Конвертация для просмотра…' : 'Загрузка PDF…');
+      errorEl.classList.add('hidden');
+      pdfView.classList.remove('visible');
+      imgWrap.classList.remove('visible');
+      pdfView.removeAttribute('src');
+
+      try {
+        if (state.mode === 'pdf') {
+          const url = '/api/view-document?path=' + encodeURIComponent(state.path) +
+            '&variant=' + encodeURIComponent(state.variant) +
+            (state.pages > 1 ? '#page=' + state.page : '');
+          pdfView.onload = () => { if (token === state.loadToken) hideOverlay(); };
+          pdfView.onerror = () => { if (token === state.loadToken) showError('Не удалось открыть PDF'); };
+          pdfView.src = url;
+          showPdf();
+          setTimeout(() => {
+            if (token === state.loadToken) hideOverlay();
+          }, 2000);
+          return;
+        }
+
+        const url = '/api/preview?path=' + encodeURIComponent(state.path) +
+          '&page=' + state.page + '&variant=' + encodeURIComponent(state.variant) +
+          '&_=' + Date.now();
+        const ctrl = new AbortController();
+        const timeoutMs = Math.max(30000, (state.renderTimeoutSec || 130) * 1000 + 10000);
+        const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+        const r = await fetch(url, { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (token !== state.loadToken) return;
+        if (!r.ok) {
+          let msg = 'Не удалось загрузить предпросмотр';
+          try { msg = (await r.json()).detail || msg; } catch (_) {}
+          showError(msg);
+          return;
+        }
+        const pagesHdr = r.headers.get('X-Preview-Pages');
+        if (pagesHdr) state.pages = Math.max(1, parseInt(pagesHdr, 10) || 1);
+        const blob = await r.blob();
+        if (token !== state.loadToken) return;
+        if (imgView.src && imgView.src.startsWith('blob:')) URL.revokeObjectURL(imgView.src);
+        imgView.src = URL.createObjectURL(blob);
+        imgView.classList.add('visible');
+        showImage();
+        updateNav();
+        hideOverlay();
+      } catch (e) {
+        if (token !== state.loadToken) return;
+        showError(e.message || String(e));
+      }
+    }
+
+    async function init() {
+      if (!filePath) {
+        showError('Не указан путь к файлу');
+        return;
+      }
+      titleEl.textContent = fileName || filePath.split('/').pop() || filePath;
+      document.title = 'Просмотр: ' + titleEl.textContent;
+
+      try {
+        const j = await fetchJson('/api/preview-info?path=' + encodeURIComponent(filePath), 30000);
+        if (!j.previewable) {
+          throw new Error(j.message || 'Просмотр недоступен для этого файла');
+        }
+
+        state.pages = j.pages || 1;
+        state.format = j.format || '';
+        state.renderTimeoutSec = j.render_timeout_sec || (j.viewer_mode === 'image' ? 480 : 45);
+        state.renderHint = j.message || '';
+        state.variants = j.variants && j.variants.length ? j.variants : [{ id: 'source', label: 'Исходник' }];
+        state.variant = j.default_variant || (state.variants.some(v => v.id === 'pdf') ? 'pdf' : 'source');
+        state.mode = modeForVariant(state.variant);
+        renderTabs();
+        updateNav();
+        await loadDocument();
+      } catch (e) {
+        showError(e.message || String(e));
+      }
+    }
+
+    document.getElementById('btn-prev').onclick = () => {
+      if (state.page > 1) {
+        state.page -= 1;
+        updateNav();
+        loadDocument();
+      }
+    };
+    document.getElementById('btn-next').onclick = () => {
+      if (state.page < state.pages) {
+        state.page += 1;
+        updateNav();
+        loadDocument();
+      }
+    };
+
+    init();
+  </script>
+</body>
+</html>

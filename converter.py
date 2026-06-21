@@ -987,8 +987,8 @@ def _convert_local_file_to_pdf(src: Path, dest: Path) -> None:
         convert_file_to_pdf(src, dest)
 
 
-def convert_file_to_pdf(src: Path, dest: Path) -> None:
-    """Конвертировать один локальный файл в указанный PDF."""
+def convert_file_to_pdf(src: Path, dest: Path) -> dict | None:
+    """Конвертировать один локальный файл в указанный PDF. Для CAD возвращает meta."""
     src = src.resolve()
     suffix = src.suffix.lower()
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -996,7 +996,7 @@ def convert_file_to_pdf(src: Path, dest: Path) -> None:
     if suffix == ".pdf":
         _validate_file_format_or_raise(src)
         shutil.copy2(src, dest)
-        return
+        return None
 
     if suffix not in SUPPORTED_OFFICE and suffix not in SUPPORTED_CAD:
         raise ValueError(f"Формат {suffix} не поддерживается")
@@ -1009,11 +1009,12 @@ def convert_file_to_pdf(src: Path, dest: Path) -> None:
             if not oda_available():
                 raise RuntimeError("ODAFileConverter не установлен (DWG/DXF недоступны)")
             with _cad_sem:
-                pdf_tmp = convert_cad_to_pdf(str(src))
+                pdf_tmp, cad_meta = convert_cad_to_pdf(str(src))
             shutil.move(str(pdf_tmp), str(dest))
-        else:
-            pdf_tmp = _convert_with_libreoffice(src, tmp)
-            shutil.move(str(pdf_tmp), str(dest))
+            return cad_meta
+        pdf_tmp = _convert_with_libreoffice(src, tmp)
+        shutil.move(str(pdf_tmp), str(dest))
+        return None
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -1059,15 +1060,22 @@ def convert_file_in_place(src: Path) -> dict:
         }
 
     try:
+        cad_meta: dict | None = None
         if _is_smb_path(src) and _smb_mounted():
             with _smb_local_file(src) as local_src:
                 tmp_pdf = local_src.with_suffix(".pdf")
-                convert_file_to_pdf(local_src, tmp_pdf)
+                cad_meta = convert_file_to_pdf(local_src, tmp_pdf)
                 saved = _smb_put_file(tmp_pdf, dest)
         else:
-            convert_file_to_pdf(src, dest)
+            cad_meta = convert_file_to_pdf(src, dest)
             saved = dest
         msg = "Сконвертировано"
+        if cad_meta and cad_meta.get("engine") == "ezdxf" and cad_meta.get("fallback"):
+            msg = "Сконвертировано (запасной режим ezdxf — качество может быть ниже ODA)"
+        if cad_meta and cad_meta.get("render_mode") == "frames":
+            n = cad_meta.get("frames_rendered") or 0
+            if n:
+                msg += f", рамок: {n}"
         if str(saved) != str(dest):
             msg = (
                 f"Файл «{dest.name}» не перезаписан — используется в другой программе. "
@@ -1078,6 +1086,7 @@ def convert_file_in_place(src: Path) -> dict:
             "pdf": str(saved),
             "status": "ok",
             "message": msg,
+            **({"cad": cad_meta} if cad_meta else {}),
         }
     except Exception as e:
         return {

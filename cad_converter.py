@@ -1,4 +1,4 @@
-"""Конвертация DWG/DXF в PDF: ODA DWG→PDF, иначе DWG→DXF→PDF (ezdxf, по листу на страницу)."""
+"""Конвертация DWG/DXF в PDF: ODA, затем рендер по рамкам или layout."""
 from __future__ import annotations
 
 import gc
@@ -8,16 +8,27 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
+from frame_detect import CadFrame, choose_render_frames, detect_frames_in_doc, frames_summary
 from job_control import check_cancelled, run_monitored
 
 logger = logging.getLogger("convert.cad")
 
 CAD_EXTENSIONS = {".dwg", ".dxf"}
 CAD_RENDER_DPI = max(72, int(os.getenv("CONVERT_CAD_DPI", "150")))
+CAD_RENDER_MODE = os.getenv("CONVERT_CAD_RENDER_MODE", "auto").strip().lower()
 ODA_DXF_TIMEOUT_SEC = int(os.getenv("CONVERT_ODA_DXF_TIMEOUT_SEC", "180"))
-ODA_PDF_TIMEOUT_SEC = int(os.getenv("CONVERT_ODA_PDF_TIMEOUT_SEC", "300"))
+ODA_PDF_TIMEOUT_SEC = int(os.getenv("CONVERT_ODA_PDF_TIMEOUT_SEC", "1800"))
+CAD_FALLBACK_MIN_MB = float(os.getenv("CONVERT_CAD_FALLBACK_MIN_MB", "0"))
+CAD_ALLOW_EZDXF_FALLBACK = os.getenv("CONVERT_CAD_ALLOW_EZDXF_FALLBACK", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+)
+PREVIEW_MAX_ENTITIES = max(1000, int(os.getenv("CONVERT_PREVIEW_MAX_ENTITIES", "25000")))
+PREVIEW_CAD_MAX_MB = float(os.getenv("CONVERT_PREVIEW_CAD_MAX_MB", "20"))
+PREVIEW_DXF_CACHE_DIR = Path(os.getenv("CONVERT_PREVIEW_DXF_CACHE", "/tmp/cad_preview_dxf_cache"))
 
 
 def oda_available() -> bool:
@@ -116,18 +127,32 @@ def _load_dxf_document(dxf_path: Path):
         return doc
 
 
+def _preview_dxf_cache_path(input_path: Path) -> Path:
+    PREVIEW_DXF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    st = input_path.stat()
+    safe_name = input_path.stem.replace("/", "_")[:80]
+    return PREVIEW_DXF_CACHE_DIR / f"{st.st_mtime_ns}_{st.st_size}_{safe_name}.dxf"
+
+
+def _dwg_to_dxf_for_preview(input_path: Path) -> Path:
+    cached = _preview_dxf_cache_path(input_path)
+    if cached.exists() and cached.stat().st_size > 0:
+        logger.info("Preview DXF cache hit: %s", input_path.name)
+        return cached
+    dxf_path = convert_dwg_to_dxf(str(input_path))
+    try:
+        shutil.copy2(dxf_path, cached)
+    finally:
+        shutil.rmtree(dxf_path.parent, ignore_errors=True)
+    return cached
+
+
 def _paper_layouts(doc) -> list:
     layouts = []
     for name in doc.layouts.names():
         if name.upper() != "MODEL":
             layouts.append(doc.layouts.get(name))
     return layouts
-
-
-def _render_targets(doc) -> list:
-    """Каждый лист (paperspace) — отдельная страница PDF."""
-    paper = _paper_layouts(doc)
-    return paper if paper else [doc.modelspace()]
 
 
 def _layout_figsize(layout) -> tuple[float, float]:
@@ -137,18 +162,27 @@ def _layout_figsize(layout) -> tuple[float, float]:
         width = float(getattr(page, "paper_width", 0) or 0)
         height = float(getattr(page, "paper_height", 0) or 0)
         if width > 1 and height > 1:
-            # DXF: мм → дюймы для matplotlib
             w_in = width / 25.4
             h_in = height / 25.4
             if w_in > 0.5 and h_in > 0.5:
                 return (w_in, h_in)
     except Exception:
         pass
-    return (16.54, 11.69)  # A3 landscape
+    return (16.54, 11.69)
+
+
+def _frame_figsize(frame: CadFrame) -> tuple[float, float]:
+    w_mm = max(frame.width_mm, frame.xmax - frame.xmin)
+    h_mm = max(frame.height_mm, frame.ymax - frame.ymin)
+    if frame.orientation == "landscape" and w_mm < h_mm:
+        w_mm, h_mm = h_mm, w_mm
+    elif frame.orientation == "portrait" and w_mm > h_mm:
+        w_mm, h_mm = h_mm, w_mm
+    return (max(w_mm, 50) / 25.4, max(h_mm, 50) / 25.4)
 
 
 class SafeFrontend:
-    """Обёртка над ezdxf Frontend: пропускает битые сущности в блоках (MLEADER и т.п.)."""
+    """Обёртка над ezdxf Frontend: пропускает битые сущности в блоках."""
 
     def __init__(self, frontend) -> None:
         self._frontend = frontend
@@ -196,6 +230,32 @@ def _patch_frontend(frontend) -> SafeFrontend:
     return safe
 
 
+def _modelspace_entity_count(doc) -> int:
+    try:
+        return len(list(doc.modelspace()))
+    except Exception:
+        return 0
+
+
+def _render_modelspace(doc, ax, *, max_entities: int | None = None) -> None:
+    if max_entities is not None:
+        count = _modelspace_entity_count(doc)
+        if count > max_entities:
+            raise RuntimeError(
+                f"Слишком много объектов в модели ({count} > {max_entities}) для предпросмотра. "
+                "Выполните конвертацию в PDF и откройте «PDF рядом»."
+            )
+
+    from ezdxf.addons.drawing import Frontend, RenderContext
+    from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
+
+    ctx = RenderContext(doc)
+    out = MatplotlibBackend(ax)
+    frontend = Frontend(ctx, out)
+    _patch_frontend(frontend)
+    frontend.draw_entities(doc.modelspace())
+
+
 def _render_single_layout(doc, layout, ax) -> None:
     from ezdxf.addons.drawing import Frontend, RenderContext
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
@@ -207,8 +267,50 @@ def _render_single_layout(doc, layout, ax) -> None:
     frontend.draw_layout(layout)
 
 
-def convert_dxf_to_pdf(dxf_path: Path, pdf_path: Path) -> Path:
-    """Рендер DXF в PDF: один layout = одна страница (без наложения листов)."""
+def _apply_frame_crop(ax, frame: CadFrame) -> None:
+    ax.set_xlim(frame.xmin, frame.xmax)
+    ax.set_ylim(frame.ymin, frame.ymax)
+    ax.set_aspect("equal", adjustable="box")
+    ax.margins(0)
+
+
+def _render_frame(doc, frame: CadFrame, ax, *, preview: bool = False) -> None:
+    entity_limit = PREVIEW_MAX_ENTITIES if preview else None
+
+    if frame.source == "viewport_model":
+        _render_modelspace(doc, ax, max_entities=entity_limit)
+        _apply_frame_crop(ax, frame)
+        return
+
+    if frame.layout.upper() == "MODEL":
+        _render_modelspace(doc, ax, max_entities=entity_limit)
+        _apply_frame_crop(ax, frame)
+        return
+
+    layout = doc.layouts.get(frame.layout)
+    _render_single_layout(doc, layout, ax)
+    if frame.source in (
+        "viewport",
+        "polyline",
+        "block",
+        "sheet_border",
+        "viewport_union",
+        "stamp_frame",
+    ):
+        _apply_frame_crop(ax, frame)
+
+
+def _save_figure(pdf, fig) -> None:
+    pdf.savefig(fig, bbox_inches=None, pad_inches=0)
+
+
+def convert_dxf_to_pdf(
+    dxf_path: Path,
+    pdf_path: Path,
+    *,
+    meta: dict[str, Any] | None = None,
+) -> Path:
+    """Рендер DXF в PDF: по рамкам (приоритет) или по layout."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -216,27 +318,60 @@ def convert_dxf_to_pdf(dxf_path: Path, pdf_path: Path) -> Path:
     from matplotlib.backends.backend_pdf import PdfPages
 
     doc = _load_dxf_document(dxf_path)
-    render_targets = _render_targets(doc)
-    logger.info(
-        "DXF %s: рендер %d layout(s), dpi=%s",
-        dxf_path.name,
-        len(render_targets),
-        CAD_RENDER_DPI,
-    )
+    all_frames = detect_frames_in_doc(doc)
+    render_frames = choose_render_frames(doc, all_frames) if CAD_RENDER_MODE != "layouts" else []
+    use_frames = bool(render_frames) and CAD_RENDER_MODE in ("auto", "frames")
+
+    if meta is not None:
+        meta["frames_detected"] = len(all_frames)
+        meta["frames_rendered"] = len(render_frames) if use_frames else 0
+        meta["render_mode"] = "frames" if use_frames else "layouts"
+        if all_frames:
+            meta["frames"] = frames_summary(all_frames)
 
     with PdfPages(str(pdf_path)) as pdf:
-        for layout in render_targets:
-            check_cancelled()
-            figsize = _layout_figsize(layout)
-            fig = plt.figure(figsize=figsize, dpi=CAD_RENDER_DPI)
-            ax = fig.add_axes([0, 0, 1, 1])
-            ax.set_aspect("equal")
-            ax.axis("off")
-            try:
-                _render_single_layout(doc, layout, ax)
-                pdf.savefig(fig, bbox_inches="tight", pad_inches=0.05)
-            finally:
-                plt.close(fig)
+        if use_frames:
+            logger.info(
+                "DXF %s: рендер %d рамок, dpi=%s",
+                dxf_path.name,
+                len(render_frames),
+                CAD_RENDER_DPI,
+            )
+            for frame in render_frames:
+                check_cancelled()
+                figsize = _frame_figsize(frame)
+                fig = plt.figure(figsize=figsize, dpi=CAD_RENDER_DPI)
+                ax = fig.add_axes([0, 0, 1, 1])
+                ax.axis("off")
+                try:
+                    _render_frame(doc, frame, ax)
+                    _save_figure(pdf, fig)
+                finally:
+                    plt.close(fig)
+        else:
+            paper = _paper_layouts(doc)
+            render_targets = paper if paper else [doc.modelspace()]
+            logger.info(
+                "DXF %s: рендер %d layout(s), dpi=%s",
+                dxf_path.name,
+                len(render_targets),
+                CAD_RENDER_DPI,
+            )
+            for layout in render_targets:
+                check_cancelled()
+                figsize = _layout_figsize(layout) if hasattr(layout, "page_setup") else (16.54, 11.69)
+                fig = plt.figure(figsize=figsize, dpi=CAD_RENDER_DPI)
+                ax = fig.add_axes([0, 0, 1, 1])
+                ax.set_aspect("equal")
+                ax.axis("off")
+                try:
+                    if hasattr(layout, "page_setup"):
+                        _render_single_layout(doc, layout, ax)
+                    else:
+                        _render_modelspace(doc, ax)
+                    _save_figure(pdf, fig)
+                finally:
+                    plt.close(fig)
 
     plt.close("all")
     del doc
@@ -247,28 +382,179 @@ def convert_dxf_to_pdf(dxf_path: Path, pdf_path: Path) -> Path:
     return pdf_path
 
 
-def convert_cad_to_pdf(input_file: str) -> Path:
+def _cad_render_targets(doc) -> tuple[list[Any], str, list[CadFrame]]:
+    """Цели рендера: рамки или layout'ы."""
+    all_frames = detect_frames_in_doc(doc)
+    render_frames = choose_render_frames(doc, all_frames) if CAD_RENDER_MODE != "layouts" else []
+    use_frames = bool(render_frames) and CAD_RENDER_MODE in ("auto", "frames")
+    if use_frames:
+        return render_frames, "frames", all_frames
+    paper = _paper_layouts(doc)
+    targets: list[Any] = paper if paper else [doc.modelspace()]
+    return targets, "layouts", all_frames
+
+
+def render_cad_preview_png(
+    input_file: str,
+    *,
+    page: int = 1,
+    dpi: int | None = None,
+) -> tuple[bytes, int, dict[str, Any]]:
+    """Один кадр CAD (DWG/DXF) в PNG для предпросмотра. Возвращает (png, pages, meta)."""
+    import io
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    preview_dpi = max(48, min(120, dpi or int(os.getenv("CONVERT_PREVIEW_DPI", "96"))))
+    input_path = Path(input_file)
+    suffix = input_path.suffix.lower()
+    if suffix not in CAD_EXTENSIONS:
+        raise ValueError(f"Ожидается DWG или DXF, получено: {suffix}")
+
+    size_mb = input_path.stat().st_size / (1024 * 1024) if input_path.exists() else 0
+    if size_mb > PREVIEW_CAD_MAX_MB:
+        raise RuntimeError(
+            f"Файл слишком большой ({size_mb:.0f} МБ) для предпросмотра исходника. "
+            f"Сначала выполните конвертацию в PDF на странице «Конвертация» "
+            f"(лимит предпросмотра — {PREVIEW_CAD_MAX_MB:.0f} МБ)."
+        )
+
+    tmp = Path(tempfile.mkdtemp(prefix="cad_preview_"))
+    try:
+        if suffix == ".dwg":
+            if not oda_available():
+                raise RuntimeError("ODAFileConverter не установлен")
+            cached_dxf = _dwg_to_dxf_for_preview(input_path)
+            work_dxf = tmp / cached_dxf.name
+            shutil.copy2(cached_dxf, work_dxf)
+        else:
+            work_dxf = tmp / input_path.name
+            shutil.copy2(input_path, work_dxf)
+
+        doc = _load_dxf_document(work_dxf)
+        targets, mode, all_frames = _cad_render_targets(doc)
+        total = max(1, len(targets))
+        page_idx = max(1, min(page, total)) - 1
+        target = targets[page_idx]
+
+        if mode == "frames":
+            frame = target
+            figsize = _frame_figsize(frame)
+            fig = plt.figure(figsize=figsize, dpi=preview_dpi)
+            ax = fig.add_axes([0, 0, 1, 1])
+            ax.axis("off")
+            try:
+                _render_frame(doc, frame, ax, preview=True)
+            finally:
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.05, facecolor="white")
+                plt.close(fig)
+            caption = frame.label or frame.layout
+            if frame.layer:
+                caption = f"{caption} ({frame.layer})"
+        else:
+            figsize = _layout_figsize(target) if hasattr(target, "page_setup") else (16.54, 11.69)
+            fig = plt.figure(figsize=figsize, dpi=preview_dpi)
+            ax = fig.add_axes([0, 0, 1, 1])
+            ax.set_aspect("equal")
+            ax.axis("off")
+            try:
+                if hasattr(target, "page_setup"):
+                    _render_single_layout(doc, target, ax)
+                else:
+                    _render_modelspace(doc, ax)
+            finally:
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.05, facecolor="white")
+                plt.close(fig)
+            caption = getattr(target, "name", None) or "Model"
+
+        plt.close("all")
+        meta = {
+            "render_mode": mode,
+            "page": page_idx + 1,
+            "pages": total,
+            "caption": caption,
+            "frames_detected": len(all_frames),
+        }
+        return buf.getvalue(), total, meta
+    finally:
+        plt.close("all")
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def inspect_cad_frames(input_file: str) -> dict[str, Any]:
+    """Список рамок для DWG/DXF (для UI/API)."""
+    input_path = Path(input_file)
+    suffix = input_path.suffix.lower()
+    if suffix not in CAD_EXTENSIONS:
+        raise ValueError(f"Ожидается DWG или DXF, получено: {suffix}")
+
+    tmp = Path(tempfile.mkdtemp(prefix="cad_frames_"))
+    try:
+        if suffix == ".dwg":
+            if not oda_available():
+                raise RuntimeError("ODAFileConverter не установлен")
+            dxf_path = convert_dwg_to_dxf(str(input_path))
+            work_dxf = tmp / dxf_path.name
+            shutil.copy2(dxf_path, work_dxf)
+            shutil.rmtree(dxf_path.parent, ignore_errors=True)
+        else:
+            work_dxf = tmp / input_path.name
+            shutil.copy2(input_path, work_dxf)
+
+        doc = _load_dxf_document(work_dxf)
+        frames = detect_frames_in_doc(doc)
+        chosen = choose_render_frames(doc, frames)
+        return {
+            "path": str(input_path),
+            "detected": frames_summary(frames),
+            "will_render": frames_summary(chosen),
+        }
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def convert_cad_to_pdf(input_file: str) -> tuple[Path, dict[str, Any]]:
     """
     DWG/DXF → PDF.
-    DWG: сначала ODA → PDF; при ошибке — DWG → DXF → ezdxf (по листу на страницу).
+    DWG: ODA → PDF; при ошибке — DWG → DXF → рендер по рамкам/layout (ezdxf).
     """
     input_path = Path(input_file)
     suffix = input_path.suffix.lower()
     if suffix not in CAD_EXTENSIONS:
         raise ValueError(f"Ожидается DWG или DXF, получено: {suffix}")
 
+    meta: dict[str, Any] = {"engine": None, "fallback": False}
     tmp = Path(tempfile.mkdtemp(prefix="cad_pdf_"))
     pdf_path = tmp / f"{input_path.stem}.pdf"
+    size_mb = input_path.stat().st_size / (1024 * 1024) if input_path.exists() else 0
 
     if suffix == ".dwg":
         try:
             oda_pdf = convert_dwg_to_pdf_oda(str(input_path))
             shutil.copy2(oda_pdf, pdf_path)
             shutil.rmtree(oda_pdf.parent, ignore_errors=True)
+            meta["engine"] = "oda"
             logger.info("DWG %s: ODA PDF OK", input_path.name)
-            return pdf_path
+            return pdf_path, meta
         except Exception as e:
             logger.warning("DWG %s: ODA PDF failed (%s), fallback DXF+ezdxf", input_path.name, e)
+            meta["oda_error"] = str(e)[:200]
+            if not CAD_ALLOW_EZDXF_FALLBACK:
+                raise RuntimeError(
+                    f"ODA PDF не удался: {e}. Fallback отключён (CONVERT_CAD_ALLOW_EZDXF_FALLBACK=0)."
+                ) from e
+            if CAD_FALLBACK_MIN_MB and size_mb >= CAD_FALLBACK_MIN_MB:
+                raise RuntimeError(
+                    f"ODA PDF не удался для {input_path.name} ({size_mb:.1f} МБ). "
+                    "Повторите позже или увеличьте CONVERT_ODA_PDF_TIMEOUT_SEC."
+                ) from e
+            meta["fallback"] = True
+            meta["engine"] = "ezdxf"
 
     try:
         if suffix == ".dwg":
@@ -279,9 +565,10 @@ def convert_cad_to_pdf(input_file: str) -> Path:
         else:
             work_dxf = tmp / input_path.name
             shutil.copy2(input_path, work_dxf)
+            meta.setdefault("engine", "ezdxf")
 
-        convert_dxf_to_pdf(work_dxf, pdf_path)
-        return pdf_path
+        convert_dxf_to_pdf(work_dxf, pdf_path, meta=meta)
+        return pdf_path, meta
     except Exception:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
