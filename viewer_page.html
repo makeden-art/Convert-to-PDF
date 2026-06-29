@@ -4,31 +4,180 @@
   <meta charset="utf-8" />
   <title>Просмотр документа</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; }
-    body { font-family: system-ui, sans-serif; background: #0f172a; color: #e5e7eb; margin: 0; min-height: 100vh; display: flex; flex-direction: column; }
-    header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 16px; background: #111827; border-bottom: 1px solid rgba(148,163,184,.25); }
-    header a { color: #38bdf8; text-decoration: none; font-size: 14px; }
-    header a:hover { color: #7dd3fc; }
-    h1 { margin: 0; font-size: 15px; font-weight: 600; flex: 1; min-width: 160px; word-break: break-all; }
-    .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-    .tab { padding: 5px 12px; font-size: 12px; border-radius: 6px; border: 1px solid rgba(148,163,184,.35); background: transparent; color: #94a3b8; cursor: pointer; }
-    .tab.active { border-color: #38bdf8; color: #38bdf8; background: rgba(56,189,248,.1); }
-    .nav { display: flex; align-items: center; gap: 6px; }
-    .nav button { padding: 5px 12px; font-size: 12px; border-radius: 6px; border: 1px solid rgba(148,163,184,.35); background: #1e293b; color: #e5e7eb; cursor: pointer; }
-    .nav button:disabled { opacity: .4; cursor: default; }
-    .nav span { font-size: 12px; color: #94a3b8; min-width: 72px; text-align: center; }
-    main { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
-    #pdf-view { flex: 1; width: 100%; border: none; background: #1e293b; display: none; min-height: calc(100vh - 56px); }
-    #pdf-view.visible { display: block; }
-    #img-view { display: none; max-width: 100%; max-height: calc(100vh - 56px); margin: auto; object-fit: contain; }
-    #img-view.visible { display: block; }
-    .overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; color: #94a3b8; font-size: 14px; gap: 12px; }
-    .overlay.error { color: #f87171; }
-    .overlay.hidden { display: none; }
-    .overlay a { color: #38bdf8; }
-    .img-wrap { flex: 1; overflow: auto; display: none; align-items: center; justify-content: center; padding: 12px; background: #0b1220; }
-    .img-wrap.visible { display: flex; }
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: radial-gradient(circle at top right, #1e293b, #0f172a);
+      color: #f3f4f6;
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 20px;
+      background: rgba(30, 41, 59, 0.5);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    }
+    header a {
+      color: #06b6d4;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    header a:hover {
+      color: #22d3ee;
+      transform: translateX(-1px);
+    }
+    h1 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+      flex: 1;
+      min-width: 160px;
+      word-break: break-all;
+      color: #f3f4f6;
+    }
+    .tabs {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .tab {
+      padding: 6px 12px;
+      font-size: 12px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.02);
+      color: #9ca3af;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.2s ease;
+    }
+    .tab:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: #e5e7eb;
+    }
+    .tab.active {
+      border-color: #06b6d4;
+      color: #22d3ee;
+      background: rgba(6, 182, 212, 0.08);
+    }
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .nav button {
+      padding: 6px 12px;
+      font-size: 12px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.04);
+      color: #e5e7eb;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .nav button:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+    .nav button:disabled {
+      opacity: 0.3;
+      cursor: not-allowed;
+    }
+    .nav span {
+      font-size: 12px;
+      color: #9ca3af;
+      min-width: 60px;
+      text-align: center;
+      font-weight: 500;
+    }
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      position: relative;
+    }
+    #pdf-view {
+      flex: 1;
+      width: 100%;
+      border: none;
+      background: #090d16;
+      display: none;
+      min-height: calc(100vh - 56px);
+    }
+    #pdf-view.visible {
+      display: block;
+    }
+    #img-view {
+      display: none;
+      max-width: 100%;
+      max-height: calc(100vh - 56px);
+      margin: auto;
+      object-fit: contain;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+      border-radius: 4px;
+    }
+    #img-view.visible {
+      display: block;
+    }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+      color: #9ca3af;
+      font-size: 14px;
+      gap: 12px;
+      background: #090d16;
+      font-weight: 500;
+    }
+    .overlay.error {
+      color: #f87171;
+    }
+    .overlay.hidden {
+      display: none;
+    }
+    .overlay a {
+      color: #06b6d4;
+      text-decoration: none;
+      font-weight: 500;
+    }
+    .overlay a:hover {
+      text-decoration: underline;
+    }
+    .img-wrap {
+      flex: 1;
+      overflow: auto;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: #090d16;
+    }
+    .img-wrap.visible {
+      display: flex;
+    }
   </style>
 </head>
 <body>
