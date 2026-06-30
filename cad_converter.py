@@ -102,15 +102,47 @@ def _safe_virtual_block_reference_entities(
     yield from transform(disassemble(block_layout))
 
 
+def _safe_draw_viewports(frontend, viewports) -> None:
+    # Sort viewports by status
+    viewports.sort(key=lambda e: e.dxf.status)
+    # Remove all invisible viewports:
+    viewports = [vp for vp in viewports if vp.dxf.status > 0]
+    if not viewports:
+        return
+
+    # Find the paper space viewport (ID == 1)
+    ps_vp_idx = None
+    for idx, vp in enumerate(viewports):
+        if vp.dxf.get("id") == 1:
+            ps_vp_idx = idx
+            break
+
+    if ps_vp_idx is not None:
+        viewports.pop(ps_vp_idx)
+    else:
+        # Fallback to ezdxf's original behavior if ID 1 is not found
+        if viewports[0].dxf.get("status", 1) == 1:
+            viewports.pop(0)
+
+    # Draw all remaining viewports
+    for viewport in viewports:
+        try:
+            frontend.draw_viewport(viewport)
+        except Exception as e:
+            logger.warning("Error rendering viewport %s: %s", viewport.dxf.handle, e)
+
+
 # Apply the monkey patch dynamically to all imported ezdxf modules containing it
 try:
     import sys
     import ezdxf.explode
     import ezdxf.entities.insert
+    import ezdxf.addons.drawing.frontend
     for name, module in list(sys.modules.items()):
         if name.startswith("ezdxf") and hasattr(module, "virtual_block_reference_entities"):
             setattr(module, "virtual_block_reference_entities", _safe_virtual_block_reference_entities)
-    logger.info("Successfully applied safe virtual_block_reference_entities monkey-patch to ezdxf.")
+    ezdxf.addons.drawing.frontend._draw_viewports = _safe_draw_viewports
+    logger.info("Successfully applied safe ezdxf block reference and viewport monkey-patches.")
 except Exception as e:
     logger.error("Failed to apply ezdxf monkey-patch: %s", e)
 
