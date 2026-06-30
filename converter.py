@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 import gc
+import hashlib
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from contextlib import contextmanager
 from pathlib import Path
@@ -52,6 +53,54 @@ def allowed_roots() -> list[Path]:
         "/data,/workspace,/opt/road-pdf-platform",
     )
     return [Path(p.strip()).resolve() for p in raw.split(",") if p.strip()]
+
+
+def get_file_content_hash(path: Path) -> str:
+    """Быстрый хэш файла на основе размера, mtime и структуры байт."""
+    try:
+        stat = path.stat()
+        h = hashlib.md5()
+        # Добавляем имя, размер и время изменения
+        h.update(f"{path.name}_{stat.st_size}_{stat.st_mtime}".encode())
+        # Если файл не пустой, берем крайние байты для страховки от коллизий при подмене
+        if stat.st_size > 0:
+            with open(path, "rb") as f:
+                h.update(f.read(8192))
+                if stat.st_size > 8192:
+                    f.seek(-8192, 2)
+                    h.update(f.read(8192))
+        return h.hexdigest()
+    except Exception:
+        return hashlib.md5(f"{path}_{time.time()}".encode()).hexdigest()
+
+
+def get_global_cache_dir() -> Path:
+    """Глобальная папка кэша (резервная)."""
+    d = Path(os.getenv("CONVERT_CACHE_DIR", "/data/cache/convert"))
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        test_file = d / f".test_write_{uuid.uuid4().hex}"
+        test_file.touch()
+        test_file.unlink()
+        return d
+    except Exception:
+        fallback = Path(tempfile.gettempdir()) / "convert_cache"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+
+def get_local_cache_dir(src_file: Path) -> Path:
+    """Локальная папка проекта `.convert_cache`. Если папка read-only, отдает глобальную."""
+    parent = src_file.parent
+    cache_dir = parent / ".convert_cache"
+    try:
+        cache_dir.mkdir(exist_ok=True)
+        test_file = cache_dir / f".test_write_{uuid.uuid4().hex}"
+        test_file.touch()
+        test_file.unlink()
+        return cache_dir
+    except Exception:
+        return get_global_cache_dir()
 
 
 def server_path_exists(path: Path) -> bool:
@@ -1256,13 +1305,38 @@ def convert_folder(
 
 def _convert_merge_part(idx: int, src: Path, tmp: Path) -> tuple[int, Path | None, dict]:
     part = tmp / f"{idx:04d}.pdf"
+    h = get_file_content_hash(src)
+    cache_dir = get_local_cache_dir(src)
+    cached_pdf = cache_dir / f"{h}.pdf"
+
+    # Пытаемся взять готовый PDF из локального кэша
+    if cached_pdf.exists():
+        try:
+            shutil.copy2(cached_pdf, part)
+            return idx, part, {
+                "source": str(src),
+                "pdf": str(part),
+                "status": "ok",
+                "message": "Включён в сборку (из кэша)",
+                "hash": h,
+            }
+        except Exception:
+            pass
+
+    # Стандартная конвертация
     try:
         _convert_source_to_temp_pdf(src, part)
+        # Сохраняем результат в кэш для последующих сборок
+        try:
+            shutil.copy2(part, cached_pdf)
+        except Exception:
+            pass
         return idx, part, {
             "source": str(src),
             "pdf": str(part),
             "status": "ok",
             "message": "Включён в сборку",
+            "hash": h,
         }
     except Exception as e:
         return idx, None, {
@@ -1270,6 +1344,7 @@ def _convert_merge_part(idx: int, src: Path, tmp: Path) -> tuple[int, Path | Non
             "pdf": None,
             "status": "error",
             "message": str(e),
+            "hash": h,
         }
 
 
@@ -1331,6 +1406,24 @@ def _convert_folder_merged(
             saved_path = download_to
         else:
             saved_path = _save_merged_pdf(local_merged, merged_path)
+            # Сохраняем манифест сборки (.cache.json) рядом с итоговым PDF
+            try:
+                manifest_path = saved_path.with_suffix(".pdf.cache.json")
+                manifest_sources = {}
+                for r in results:
+                    if r.get("status") == "ok" and "hash" in r:
+                        src_p = Path(r["source"])
+                        manifest_sources[str(src_p)] = {
+                            "hash": r["hash"],
+                            "mtime": src_p.stat().st_mtime if src_p.exists() else 0.0
+                        }
+                with open(manifest_path, "w", encoding="utf-8") as mf:
+                    json.dump({
+                        "output_file": saved_path.name,
+                        "sources": manifest_sources
+                    }, mf, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
         pdf_parts.clear()
