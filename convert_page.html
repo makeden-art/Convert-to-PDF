@@ -705,6 +705,8 @@
       color: #e5e7eb;
       overflow-y: auto;
       max-height: 180px;
+      min-height: 80px;
+      flex-shrink: 0;
       white-space: pre-wrap;
       margin: 8px 0 0 0;
     }
@@ -1659,44 +1661,48 @@
         }
         list.innerHTML = '';
         (j.jobs || []).forEach(job => {
-          const block = document.createElement('div');
-          block.className = 'job-block';
-          const row = document.createElement('div');
-          row.className = 'job-row ' + (job.status || '');
-          const summary = job.result_summary || {};
-          let extra = '';
-          if (job.status === 'done' && summary.merged_pdf) {
-            extra = ' → ' + summary.merged_pdf.split('/').pop();
-          } else if (job.status === 'done' && summary.stats) {
-            extra = ' (' + (summary.stats.ok || 0) + ' OK)';
-          } else if (job.status === 'error' || job.status === 'cancelled') {
-            extra = ': ' + (job.error || '').slice(0, 80);
+          try {
+            const block = document.createElement('div');
+            block.className = 'job-block';
+            const row = document.createElement('div');
+            row.className = 'job-row ' + (job.status || '');
+            const summary = job.result_summary || {};
+            let extra = '';
+            if (job.status === 'done' && summary.merged_pdf) {
+              extra = ' → ' + summary.merged_pdf.split('/').pop();
+            } else if (job.status === 'done' && summary.stats) {
+              extra = ' (' + (summary.stats.ok || 0) + ' OK)';
+            } else if (job.status === 'error' || job.status === 'cancelled') {
+              extra = ': ' + (job.error || '').slice(0, 80);
+            }
+            const filesInfo = jobFilesInfo(job);
+            const isOpen = expandedJobIds.has(job.job_id);
+            const expandBtn = filesInfo
+              ? '<button type="button" class="job-expand" data-expand-job="' + job.job_id + '" title="Показать файлы">' +
+                (isOpen ? '▾' : '▸') + '</button>'
+              : '<span class="job-expand disabled">·</span>';
+            const cancelBtn = (job.status === 'queued' || job.status === 'running')
+              ? '<button type="button" class="job-cancel" data-cancel-job="' + job.job_id + '">Отменить</button>'
+              : '';
+            row.innerHTML =
+              expandBtn +
+              '<span class="job-st">' + jobStatusText(job) + '</span>' +
+              '<span class="job-label">' + (job.label || job.job_id || '') + extra +
+              (filesInfo && !isOpen ? ' · ' + filesInfo.total + ' файлов' : '') +
+              '</span>' +
+              cancelBtn +
+              '<span class="job-time">' + formatJobTime(job.finished || job.created) + '</span>';
+            block.appendChild(row);
+            if (filesInfo) {
+              const filesEl = document.createElement('div');
+              filesEl.className = 'job-files' + (isOpen ? ' open' : '');
+              filesEl.innerHTML = renderJobFiles(job);
+              block.appendChild(filesEl);
+            }
+            list.appendChild(block);
+          } catch (eItem) {
+            console.error('Error rendering job item:', job, eItem);
           }
-          const filesInfo = jobFilesInfo(job);
-          const isOpen = expandedJobIds.has(job.job_id);
-          const expandBtn = filesInfo
-            ? '<button type="button" class="job-expand" data-expand-job="' + job.job_id + '" title="Показать файлы">' +
-              (isOpen ? '▾' : '▸') + '</button>'
-            : '<span class="job-expand disabled">·</span>';
-          const cancelBtn = (job.status === 'queued' || job.status === 'running')
-            ? '<button type="button" class="job-cancel" data-cancel-job="' + job.job_id + '">Отменить</button>'
-            : '';
-          row.innerHTML =
-            expandBtn +
-            '<span class="job-st">' + jobStatusText(job) + '</span>' +
-            '<span class="job-label">' + (job.label || job.job_id || '') + extra +
-            (filesInfo && !isOpen ? ' · ' + filesInfo.total + ' файлов' : '') +
-            '</span>' +
-            cancelBtn +
-            '<span class="job-time">' + formatJobTime(job.finished || job.created) + '</span>';
-          block.appendChild(row);
-          if (filesInfo) {
-            const filesEl = document.createElement('div');
-            filesEl.className = 'job-files' + (isOpen ? ' open' : '');
-            filesEl.innerHTML = renderJobFiles(job);
-            block.appendChild(filesEl);
-          }
-          list.appendChild(block);
         });
         list.querySelectorAll('[data-cancel-job]').forEach(btn => {
           btn.onclick = () => cancelJob(btn.dataset.cancelJob, btn);
@@ -1710,7 +1716,12 @@
         if (!(j.jobs || []).length) {
           list.innerHTML = '<div class="job-row"><span class="job-label" style="color:#64748b">История пуста</span></div>';
         }
-      } catch (_) { /* ignore */ }
+      } catch (e) {
+        if (hint) {
+          hint.textContent = 'Ошибка отрисовки очереди: ' + e.message;
+        }
+        console.error('Error in refreshJobsHistory:', e);
+      }
     }
 
     async function pollConvertJob(jobId) {
