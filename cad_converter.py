@@ -384,7 +384,7 @@ def _render_modelspace(doc, ax, *, max_entities: int | None = None) -> None:
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
     ctx = RenderContext(doc)
-    out = MatplotlibBackend(ax)
+    out = MatplotlibBackend(ax, adjust_figure=False)
     config = Configuration(color_policy=ColorPolicy.MONOCHROME)
     frontend = Frontend(ctx, out, config=config)
     _patch_frontend(frontend)
@@ -397,7 +397,7 @@ def _render_single_layout(doc, layout, ax) -> None:
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
     ctx = RenderContext(doc)
-    out = MatplotlibBackend(ax)
+    out = MatplotlibBackend(ax, adjust_figure=False)
     config = Configuration(color_policy=ColorPolicy.MONOCHROME)
     frontend = Frontend(ctx, out, config=config)
     _patch_frontend(frontend)
@@ -407,7 +407,7 @@ def _render_single_layout(doc, layout, ax) -> None:
 def _apply_frame_crop(ax, frame: CadFrame) -> None:
     ax.set_xlim(frame.xmin, frame.xmax)
     ax.set_ylim(frame.ymin, frame.ymax)
-    ax.set_aspect("equal", adjustable="box")
+    ax.set_aspect("auto")
     ax.margins(0)
 
 
