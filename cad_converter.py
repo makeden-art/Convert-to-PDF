@@ -172,8 +172,8 @@ def _layout_figsize(layout) -> tuple[float, float]:
 
 
 def _frame_figsize(frame: CadFrame) -> tuple[float, float]:
-    w_mm = max(frame.width_mm, frame.xmax - frame.xmin)
-    h_mm = max(frame.height_mm, frame.ymax - frame.ymin)
+    w_mm = abs(frame.xmax - frame.xmin)
+    h_mm = abs(frame.ymax - frame.ymin)
     if frame.orientation == "landscape" and w_mm < h_mm:
         w_mm, h_mm = h_mm, w_mm
     elif frame.orientation == "portrait" and w_mm > h_mm:
@@ -247,22 +247,26 @@ def _render_modelspace(doc, ax, *, max_entities: int | None = None) -> None:
             )
 
     from ezdxf.addons.drawing import Frontend, RenderContext
+    from ezdxf.addons.drawing.config import Configuration, ColorPolicy
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
     ctx = RenderContext(doc)
     out = MatplotlibBackend(ax)
-    frontend = Frontend(ctx, out)
+    config = Configuration(color_policy=ColorPolicy.MONOCHROME)
+    frontend = Frontend(ctx, out, config=config)
     _patch_frontend(frontend)
     frontend.draw_entities(doc.modelspace())
 
 
 def _render_single_layout(doc, layout, ax) -> None:
     from ezdxf.addons.drawing import Frontend, RenderContext
+    from ezdxf.addons.drawing.config import Configuration, ColorPolicy
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
     ctx = RenderContext(doc)
     out = MatplotlibBackend(ax)
-    frontend = Frontend(ctx, out)
+    config = Configuration(color_policy=ColorPolicy.MONOCHROME)
+    frontend = Frontend(ctx, out, config=config)
     _patch_frontend(frontend)
     frontend.draw_layout(layout)
 
