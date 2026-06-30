@@ -1551,3 +1551,23 @@ def convert_uploads_to_merged_pdf(
         "numbering_from_page": numbering_from_page,
         "numbering_start": numbering_start,
     }
+
+
+def number_pdf_file(
+    file_path: str,
+    numbering_from_page: int = 1,
+    numbering_start: int = 1,
+) -> dict:
+    """Пронумеровать существующий PDF файл на сервере."""
+    fp = validate_file(file_path)
+    if fp.suffix.lower() != ".pdf":
+        raise ValueError("Файл не является PDF")
+
+    _apply_pdf_numbering(fp, from_page=numbering_from_page, start=numbering_start)
+
+    return {
+        "status": "ok",
+        "file_path": str(fp),
+        "numbering_from_page": numbering_from_page,
+        "numbering_start": numbering_start,
+    }

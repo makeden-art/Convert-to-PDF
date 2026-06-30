@@ -1026,7 +1026,7 @@
         </div>
         
         <div class="num-row" id="num-row" style="display:none">
-          <div class="chk" style="width:100%; margin-bottom:8px;">
+          <div class="chk" style="width:100%; margin-bottom:8px;" id="chk-num-wrapper">
             <input type="checkbox" id="number-pages" />
             <label for="number-pages">Нумеровать страницы</label>
           </div>
@@ -1046,6 +1046,7 @@
             <button type="button" id="btn-server">Конвертировать на сервере</button>
             <button type="button" id="btn-download">Скачать PDF</button>
           </div>
+          <button type="button" id="btn-number-pdf" style="display:none; background: linear-gradient(135deg, #0284c7, #0369a1); border: 1px solid rgba(255,255,255,0.15); box-shadow: 0 4px 15px rgba(2, 132, 199, 0.3); font-weight: 600; width: 100%; margin-top: 8px;">Пронумеровать PDF</button>
         </div>
         
         <pre id="log-work" style="display:none"></pre>
@@ -1254,14 +1255,35 @@
 
     async function refreshMergePanel() {
       const mergeOn = document.getElementById('merge').checked;
-      numRow.style.display = mergeOn ? 'flex' : 'none';
-      if (!mergeOn) {
+      const isSinglePdf = (orderedSelections.length === 1 && 
+                           orderedSelections[0].type === 'file' && 
+                           orderedSelections[0].path.toLowerCase().endsWith('.pdf'));
+
+      const chkWrapper = document.getElementById('chk-num-wrapper');
+      const btnNumberPdf = document.getElementById('btn-number-pdf');
+
+      if (isSinglePdf) {
+        numRow.style.display = 'flex';
+        if (chkWrapper) chkWrapper.style.display = 'none';
+        btnNumberPdf.style.display = 'block';
+      } else {
+        numRow.style.display = mergeOn ? 'flex' : 'none';
+        if (chkWrapper) chkWrapper.style.display = 'block';
+        btnNumberPdf.style.display = 'none';
+      }
+
+      if (!mergeOn && !isSinglePdf) {
         mergePanel.classList.remove('visible');
         mergeOrder = [];
         document.getElementById('num-preview').textContent = '';
         return;
       }
-      mergePanel.classList.add('visible');
+      if (mergeOn) {
+        mergePanel.classList.add('visible');
+      } else {
+        mergePanel.classList.remove('visible');
+        return;
+      }
       updateNumberingPreview();
 
       const hasServer = orderedSelections.length > 0;
@@ -1959,6 +1981,41 @@
         stopProgress();
         btn.disabled = false;
         btn.textContent = 'Конвертировать на сервере';
+        loadTree(currentPath);
+      }
+    };
+
+    document.getElementById('btn-number-pdf').onclick = async () => {
+      const isSinglePdf = (orderedSelections.length === 1 && 
+                           orderedSelections[0].type === 'file' && 
+                           orderedSelections[0].path.toLowerCase().endsWith('.pdf'));
+      if (!isSinglePdf) {
+        alert('Выберите ровно один PDF-файл в дереве');
+        return;
+      }
+      const path = orderedSelections[0].path;
+      const numbering_from_page = parseInt(document.getElementById('page-start').value, 10) || 1;
+      const numbering_start = parseInt(document.getElementById('num-start').value, 10) || 1;
+
+      const btn = document.getElementById('btn-number-pdf');
+      btn.disabled = true;
+      btn.textContent = 'Обработка…';
+
+      try {
+        startProgress('Нумерация страниц PDF…');
+        const j = await apiPost('/api/number-pdf', {
+          path,
+          numbering_from_page,
+          numbering_start
+        });
+        showLog('Успешно пронумеровано: ' + j.file_path.split('/').pop() + 
+                '\nС страницы: ' + j.numbering_from_page + ', с числа: ' + j.numbering_start);
+      } catch (e) {
+        showLog(e.message || String(e));
+      } finally {
+        stopProgress();
+        btn.disabled = false;
+        btn.textContent = 'Пронумеровать PDF';
         loadTree(currentPath);
       }
     };

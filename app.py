@@ -35,6 +35,7 @@ from converter import (
     convert_paths,
     convert_paths_merged_download,
     convert_uploads_to_merged_pdf,
+    number_pdf_file,
     resolve_ordered_inputs,
     resolve_ordered_inputs_with_format,
     validate_file,
@@ -83,6 +84,12 @@ class CheckOutputRequest(BaseModel):
     merge: bool = False
     output_name: str = "сборка.pdf"
     recursive: bool = True
+
+
+class NumberPdfRequest(BaseModel):
+    path: str
+    numbering_from_page: int = 1
+    numbering_start: int = 1
 
 
 def _paths_job_label(body: PathsRequest) -> str:
@@ -369,6 +376,39 @@ async def api_convert_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Задача не найдена")
     return JSONResponse(job)
+
+
+@app.post("/api/number-pdf")
+async def api_number_pdf(body: NumberPdfRequest):
+    try:
+        job_id = create_job(
+            lambda: number_pdf_file(
+                body.path,
+                numbering_from_page=body.numbering_from_page,
+                numbering_start=body.numbering_start,
+            ),
+            label=f"Нумерация: {Path(body.path).name}",
+            kind="number_pdf",
+            meta={
+                "path": body.path,
+                "numbering_from_page": body.numbering_from_page,
+                "numbering_start": body.numbering_start,
+                "files": [{"path": body.path, "name": Path(body.path).name, "format": "PDF"}]
+            },
+        )
+        job = get_job(job_id) or {}
+        return JSONResponse(
+            {
+                "job_id": job_id,
+                "status": "queued",
+                "queue_position": job.get("queue_position", 1),
+            },
+            status_code=202,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/convert-paths")
