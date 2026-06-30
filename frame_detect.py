@@ -371,6 +371,40 @@ def _detect_block_frames(layout, layout_name: str, doc) -> list[CadFrame]:
 
 def detect_frames_in_doc(doc) -> list[CadFrame]:
     frames: list[CadFrame] = []
+
+    # 1. Поиск замкнутых прямоугольников на целевом слое _Штамп_рамка
+    target_layers = {"_штамп_рамка", "штамп_рамка", "_штамп_рамк", "штамп_рамк"}
+    for layout_name in doc.layouts.names():
+        layout = doc.layouts.get(layout_name)
+        for xmin, ymin, xmax, ymax, layer, handle in _collect_closed_rects(layout):
+            if layer and layer.strip().lower() in target_layers:
+                w = xmax - xmin
+                h = ymax - ymin
+                if w < 30 or h < 30:
+                    continue
+                label = f"{round(w)}×{round(h)} мм"
+                frames.append(CadFrame(
+                    source="stamp_frame",
+                    layout=layout_name,
+                    label=label,
+                    width_mm=round(max(w, h), 1),
+                    height_mm=round(min(w, h), 1),
+                    xmin=xmin,
+                    ymin=ymin,
+                    xmax=xmax,
+                    ymax=ymax,
+                    layer=layer,
+                    handle=handle,
+                    orientation=_orientation_label(w, h),
+                ))
+
+    # Если рамки на слое _Штамп_рамка найдены, возвращаем только их
+    if frames:
+        deduped = _dedupe(frames)
+        logger.info("Найдено приоритетных рамок на слое _Штамп_рамка: %d", len(deduped))
+        return deduped
+
+    # Иначе выполняем стандартный поиск рамок
     for layout_name in doc.layouts.names():
         layout = doc.layouts.get(layout_name)
         frames.extend(_detect_sheet_border_frames(layout, layout_name))
@@ -426,6 +460,11 @@ def choose_render_frames(doc, frames: list[CadFrame]) -> list[CadFrame]:
     """По одной рамке на каждый layout (лист)."""
     if not frames:
         return []
+
+    # Если есть рамки на приоритетном слое, возвращаем их все напрямую
+    stamp_frames = [f for f in frames if f.source == "stamp_frame"]
+    if stamp_frames:
+        return sorted(stamp_frames, key=lambda f: (f.layout, -f.area, f.ymin, f.xmin))
 
     layout_names = [n for n in doc.layouts.names() if n.upper() != "MODEL"]
     if not layout_names:
