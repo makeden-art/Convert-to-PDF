@@ -1708,6 +1708,9 @@
             list.appendChild(block);
           } catch (eItem) {
             console.error('Error rendering job item:', job, eItem);
+            if (hint) {
+              hint.textContent = 'Ошибка элемента: ' + eItem.message;
+            }
           }
         });
         list.querySelectorAll('[data-cancel-job]').forEach(btn => {
