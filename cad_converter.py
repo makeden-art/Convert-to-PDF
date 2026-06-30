@@ -15,6 +15,105 @@ from job_control import check_cancelled, run_monitored
 
 logger = logging.getLogger("convert.cad")
 
+
+# Monkey patch ezdxf block reference explosion to catch transform/scaling exceptions gracefully.
+# This prevents a single buggy entity (like a ZeroDivisionError in a MLEADER) from breaking 
+# rendering for the entire block (such as an entire table or title stamp).
+def _safe_virtual_block_reference_entities(
+    block_ref,
+    *,
+    skipped_entity_callback=None,
+    redraw_order=False,
+    copy_strategy=None,
+) -> Iterable:
+    import sys
+    import ezdxf.explode
+    from ezdxf.explode import default_copy, default_logging_callback
+    from ezdxf.entities import Ellipse
+    from ezdxf.math import NonUniformScalingError, InsertTransformationError
+
+    if copy_strategy is None:
+        copy_strategy = default_copy
+
+    assert block_ref.dxftype() == "INSERT"
+    skipped_entity_callback = skipped_entity_callback or default_logging_callback
+
+    def disassemble(layout) -> Iterable:
+        for entity in layout.entities_in_redraw_order() if redraw_order else layout:
+            if entity.dxftype() == "ATTDEF":
+                continue
+            try:
+                copy = entity.copy(copy_strategy=copy_strategy)
+            except Exception as e:
+                skipped_entity_callback(entity, f"non copyable: {e}")
+                if hasattr(entity, "virtual_entities"):
+                    try:
+                        yield from entity.virtual_entities()
+                    except Exception:
+                        pass
+            else:
+                if hasattr(copy, "remove_association"):
+                    copy.remove_association()
+                yield copy
+
+    def transform(entities):
+        for entity in entities:
+            try:
+                entity.transform(m)
+            except NotImplementedError:
+                skipped_entity_callback(entity, "non transformable")
+            except NonUniformScalingError:
+                dxftype = entity.dxftype()
+                if dxftype in {"ARC", "CIRCLE"}:
+                    try:
+                        if abs(entity.dxf.radius) > 1e-12:
+                            yield Ellipse.from_arc(entity).transform(m)
+                        else:
+                            skipped_entity_callback(entity, "Invalid radius")
+                    except Exception as e:
+                        skipped_entity_callback(entity, f"arc transform error: {e}")
+                elif dxftype in {"LWPOLYLINE", "POLYLINE"}:
+                    try:
+                        yield from transform(entity.virtual_entities())
+                    except Exception as e:
+                        skipped_entity_callback(entity, f"polyline virtual_entities error: {e}")
+                else:
+                    skipped_entity_callback(entity, "unsupported non-uniform scaling")
+            except InsertTransformationError:
+                try:
+                    yield from transform(
+                        _safe_virtual_block_reference_entities(
+                            entity, skipped_entity_callback=skipped_entity_callback, copy_strategy=copy_strategy
+                        )
+                    )
+                except Exception as e:
+                    skipped_entity_callback(entity, f"insert transform error: {e}")
+            except Exception as e:
+                # Bypasses ZeroDivisionError and other math/structure exceptions inside specific entities
+                skipped_entity_callback(entity, f"transform error: {e}")
+            else:
+                yield entity
+
+    m = block_ref.matrix44()
+    block_layout = block_ref.block()
+    if block_layout is None:
+        return
+
+    yield from transform(disassemble(block_layout))
+
+
+# Apply the monkey patch dynamically to all imported ezdxf modules containing it
+try:
+    import sys
+    import ezdxf.explode
+    import ezdxf.entities.insert
+    for name, module in list(sys.modules.items()):
+        if name.startswith("ezdxf") and hasattr(module, "virtual_block_reference_entities"):
+            setattr(module, "virtual_block_reference_entities", _safe_virtual_block_reference_entities)
+    logger.info("Successfully applied safe virtual_block_reference_entities monkey-patch to ezdxf.")
+except Exception as e:
+    logger.error("Failed to apply ezdxf monkey-patch: %s", e)
+
 CAD_EXTENSIONS = {".dwg", ".dxf"}
 CAD_RENDER_DPI = max(72, int(os.getenv("CONVERT_CAD_DPI", "150")))
 CAD_RENDER_MODE = os.getenv("CONVERT_CAD_RENDER_MODE", "auto").strip().lower()
@@ -329,6 +428,18 @@ def _make_dxf_document_monochrome(doc) -> None:
                 if entity.dxf.hasattr("color_name"):
                     del entity.dxf.color_name
                 entity.dxf.color = 7
+                
+                # Also clean ATTRIB sub-entities on INSERT
+                if entity.dxftype() == "INSERT":
+                    for attrib in entity.attribs:
+                        try:
+                            if attrib.dxf.hasattr("true_color"):
+                                del attrib.dxf.true_color
+                            if attrib.dxf.hasattr("color_name"):
+                                del attrib.dxf.color_name
+                            attrib.dxf.color = 7
+                        except Exception:
+                            pass
             except Exception:
                 pass
 
