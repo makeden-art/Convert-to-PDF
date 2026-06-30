@@ -241,7 +241,7 @@
 
     /* Left Panel: File Explorer */
     .tree-panel {
-      height: 600px;
+      height: 660px;
       background: rgba(30, 41, 59, 0.25);
       border: 1px solid rgba(255, 255, 255, 0.06);
       border-radius: 16px;
@@ -381,7 +381,7 @@
 
     /* Right Panel: Actions */
     .action-panel {
-      height: 600px;
+      height: 660px;
       background: rgba(30, 41, 59, 0.25);
       border: 1px solid rgba(255, 255, 255, 0.06);
       border-radius: 16px;
@@ -712,14 +712,17 @@
     }
     #btn-cancel-active {
       display: none;
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid rgba(239, 68, 68, 0.2);
+      width: 100%;
+      margin-top: 8px;
+      flex-shrink: 0;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
       color: #f87171;
       font-weight: 600;
       box-shadow: 0 4px 12px rgba(239, 68, 68, 0.1);
     }
     #btn-cancel-active.visible {
-      display: inline-flex;
+      display: flex;
     }
     #btn-cancel-active:not(:disabled):hover {
       background: #ef4444;
@@ -1528,6 +1531,16 @@
 
     function showLog(text) { logWork.style.display = 'block'; logWork.textContent = text; }
 
+    function formatDuration(sec) {
+      if (sec === undefined || sec === null || isNaN(sec) || sec < 0) return '';
+      const s = Math.round(sec);
+      if (s < 60) return s + ' сек';
+      const m = Math.floor(s / 60);
+      const leftS = s % 60;
+      if (leftS === 0) return m + ' мин';
+      return m + ' мин ' + leftS + ' сек';
+    }
+
     function formatJobTime(ts) {
       if (!ts) return '';
       try {
@@ -1691,6 +1704,16 @@
             const cancelBtn = (job.status === 'queued' || job.status === 'running')
               ? '<button type="button" class="job-cancel" data-cancel-job="' + job.job_id + '">Отменить</button>'
               : '';
+            let durText = '';
+            if (job.started) {
+              const endTs = job.finished || (job.status === 'running' ? (Date.now() / 1000) : null);
+              if (endTs) {
+                const durSec = endTs - job.started;
+                if (durSec >= 0) {
+                  durText = ' · ' + formatDuration(durSec);
+                }
+              }
+            }
             row.innerHTML =
               expandBtn +
               '<span class="job-st">' + jobStatusText(job) + '</span>' +
@@ -1698,7 +1721,7 @@
               (filesInfo && !isOpen ? ' · ' + filesInfo.total + ' файлов' : '') +
               '</span>' +
               cancelBtn +
-              '<span class="job-time">' + formatJobTime(job.finished || job.created) + '</span>';
+              '<span class="job-time">' + formatJobTime(job.finished || job.created) + durText + '</span>';
             block.appendChild(row);
             if (filesInfo) {
               const filesEl = document.createElement('div');
