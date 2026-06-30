@@ -534,27 +534,9 @@ def convert_cad_to_pdf(input_file: str) -> tuple[Path, dict[str, Any]]:
     size_mb = input_path.stat().st_size / (1024 * 1024) if input_path.exists() else 0
 
     if suffix == ".dwg":
-        try:
-            oda_pdf = convert_dwg_to_pdf_oda(str(input_path))
-            shutil.copy2(oda_pdf, pdf_path)
-            shutil.rmtree(oda_pdf.parent, ignore_errors=True)
-            meta["engine"] = "oda"
-            logger.info("DWG %s: ODA PDF OK", input_path.name)
-            return pdf_path, meta
-        except Exception as e:
-            logger.warning("DWG %s: ODA PDF failed (%s), fallback DXF+ezdxf", input_path.name, e)
-            meta["oda_error"] = str(e)[:200]
-            if not CAD_ALLOW_EZDXF_FALLBACK:
-                raise RuntimeError(
-                    f"ODA PDF не удался: {e}. Fallback отключён (CONVERT_CAD_ALLOW_EZDXF_FALLBACK=0)."
-                ) from e
-            if CAD_FALLBACK_MIN_MB and size_mb >= CAD_FALLBACK_MIN_MB:
-                raise RuntimeError(
-                    f"ODA PDF не удался для {input_path.name} ({size_mb:.1f} МБ). "
-                    "Повторите позже или увеличьте CONVERT_ODA_PDF_TIMEOUT_SEC."
-                ) from e
-            meta["fallback"] = True
-            meta["engine"] = "ezdxf"
+        # Bypassed direct ODA PDF conversion to strictly use the frame-detection engine on the _Штамп_рамка layer.
+        meta["fallback"] = True
+        meta["engine"] = "ezdxf"
 
     try:
         if suffix == ".dwg":
