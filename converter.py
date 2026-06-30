@@ -1305,6 +1305,23 @@ def convert_folder(
 
 def _convert_merge_part(idx: int, src: Path, tmp: Path) -> tuple[int, Path | None, dict]:
     part = tmp / f"{idx:04d}.pdf"
+
+    # 1. Проверяем, есть ли готовый PDF с таким же именем прямо рядом с исходным редактируемым файлом
+    if src.suffix.lower() != ".pdf":
+        sibling_pdf = src.with_suffix(".pdf")
+        if sibling_pdf.exists() and sibling_pdf.stat().st_mtime >= src.stat().st_mtime:
+            try:
+                shutil.copy2(sibling_pdf, part)
+                return idx, part, {
+                    "source": str(src),
+                    "pdf": str(part),
+                    "status": "ok",
+                    "message": "Включён в сборку (использован готовый PDF)",
+                    "hash": get_file_content_hash(sibling_pdf),
+                }
+            except Exception:
+                pass
+
     h = get_file_content_hash(src)
     cache_dir = get_local_cache_dir(src)
     cached_pdf = cache_dir / f"{h}.pdf"
@@ -1360,6 +1377,16 @@ def _convert_folder_merged(
 ) -> dict:
     if not inputs:
         raise ValueError("В папке нет поддерживаемых файлов для сборки")
+
+    # Исключаем дублирование: если для редактируемого чертежа/документа в списке уже есть готовый PDF,
+    # убираем исходный редактируемый файл из списка сборки, чтобы страницы не дублировались.
+    pdf_names = {str(p.with_suffix("")).lower() for p in inputs if p.suffix.lower() == ".pdf"}
+    filtered_inputs = []
+    for p in inputs:
+        if p.suffix.lower() != ".pdf" and str(p.with_suffix("")).lower() in pdf_names:
+            continue
+        filtered_inputs.append(p)
+    inputs = filtered_inputs
 
     safe_name = Path(output_name).name or "сборка.pdf"
     if not safe_name.lower().endswith(".pdf"):
