@@ -22,7 +22,7 @@ FRAME_LAYER_RE = re.compile(
 )
 # Явные слои контура чертежа (приоритет над viewport и прочими «рамками»).
 PRIORITY_FRAME_LAYER_RE = re.compile(
-    r"(_штамп_рамк|штамп_рамк|stamp.?frame|pdf_frame|frame_export|рамка_pdf|convert_frame)",
+    r"(_штамп_рамк|штамп_рамк|stamp.?frame|pdf_frame|frame_export|рамка_pdf|convert_frame|batchplot|export)",
     re.IGNORECASE,
 )
 FRAME_BLOCK_RE = re.compile(
