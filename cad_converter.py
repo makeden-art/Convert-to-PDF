@@ -208,13 +208,15 @@ class SafeFrontend:
     def draw_entity(self, entity, properties) -> None:
         try:
             self._orig_draw_entity(entity, properties)
-        except Exception:
+        except Exception as e:
+            logger.warning("Error rendering entity %s (%s): %s", entity.dxftype(), getattr(entity, 'handle', '?'), e)
             self._frontend.skip_entity(entity, "render error")
 
     def draw_composite_entity(self, entity, properties) -> None:
         try:
             self._orig_draw_composite_entity(entity, properties)
-        except Exception:
+        except Exception as e:
+            logger.warning("Error rendering composite entity %s (%s): %s", entity.dxftype(), getattr(entity, 'handle', '?'), e)
             self._frontend.skip_entity(entity, "composite render error")
 
 
@@ -308,6 +310,41 @@ def _save_figure(pdf, fig) -> None:
     pdf.savefig(fig, bbox_inches=None, pad_inches=0)
 
 
+def _make_dxf_document_monochrome(doc) -> None:
+    # 1. Force all layers to ACI color 7 (Black/White) and remove True Color overrides
+    for layer in doc.layers:
+        try:
+            layer.dxf.color = 7
+            if layer.dxf.hasattr("true_color"):
+                del layer.dxf.true_color
+        except Exception:
+            pass
+
+    # 2. Force all entities in paper/model layouts to ACI color 7 (renders black on white bg)
+    for layout in doc.layouts:
+        for entity in layout:
+            try:
+                if entity.dxf.hasattr("true_color"):
+                    del entity.dxf.true_color
+                if entity.dxf.hasattr("color_name"):
+                    del entity.dxf.color_name
+                entity.dxf.color = 7
+            except Exception:
+                pass
+
+    # 3. Force all entities in block definitions to ACI color 7
+    for block in doc.blocks:
+        for entity in block:
+            try:
+                if entity.dxf.hasattr("true_color"):
+                    del entity.dxf.true_color
+                if entity.dxf.hasattr("color_name"):
+                    del entity.dxf.color_name
+                entity.dxf.color = 7
+            except Exception:
+                pass
+
+
 def convert_dxf_to_pdf(
     dxf_path: Path,
     pdf_path: Path,
@@ -322,6 +359,7 @@ def convert_dxf_to_pdf(
     from matplotlib.backends.backend_pdf import PdfPages
 
     doc = _load_dxf_document(dxf_path)
+    _make_dxf_document_monochrome(doc)
     all_frames = detect_frames_in_doc(doc)
     render_frames = choose_render_frames(doc, all_frames) if CAD_RENDER_MODE != "layouts" else []
     use_frames = bool(render_frames) and CAD_RENDER_MODE in ("auto", "frames")
