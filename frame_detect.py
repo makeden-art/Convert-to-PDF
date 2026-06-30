@@ -462,7 +462,8 @@ def choose_render_frames(doc, frames: list[CadFrame]) -> list[CadFrame]:
         return []
 
 def sort_frames_reading_order(frames: list[CadFrame]) -> list[CadFrame]:
-    """Сортирует рамки по порядку чтения: сначала по листам, затем построчно сверху вниз, слева направо."""
+    """Сортирует рамки по порядку чтения: сначала по листам, затем по слоям (_рамка_2, _рамка_3) для очередности,
+    а при равенстве слоев — построчно сверху вниз, слева направо."""
     if not frames:
         return []
 
@@ -471,6 +472,15 @@ def sort_frames_reading_order(frames: list[CadFrame]) -> list[CadFrame]:
     for f in frames:
         by_layout.setdefault(f.layout, []).append(f)
 
+    # Вспомогательная функция для парсинга номера в конце имени слоя
+    def parse_layer_seq(layer_name: str) -> int:
+        if not layer_name:
+            return 1
+        m = re.search(r'[-_]?(\d+)$', layer_name)
+        if m:
+            return int(m.group(1))
+        return 1
+
     sorted_all: list[CadFrame] = []
     # Сортируем листы по алфавиту/натуральному порядку
     for layout_name in sorted(by_layout.keys()):
@@ -478,40 +488,50 @@ def sort_frames_reading_order(frames: list[CadFrame]) -> list[CadFrame]:
         if not layout_frames:
             continue
 
-        # Сортируем рамки в рамках одного листа сверху вниз по Y-центру
-        layout_frames.sort(key=lambda f: (f.ymin + f.ymax) / 2, reverse=True)
-
-        # Группируем в строки с допуском 50% от высоты рамки
-        rows: list[dict] = []
+        # Группируем рамки этого листа по номеру слоя
+        by_seq: dict[int, list[CadFrame]] = {}
         for f in layout_frames:
-            y_center = (f.ymin + f.ymax) / 2
-            h = abs(f.ymax - f.ymin)
+            seq = parse_layer_seq(f.layer)
+            by_seq.setdefault(seq, []).append(f)
 
-            placed = False
+        # Сортируем группы слоев по возрастанию номера (1, 2, 3...)
+        for seq_num in sorted(by_seq.keys()):
+            seq_frames = by_seq[seq_num]
+
+            # Для рамок на одном слое применяем пространственную сортировку сверху вниз, слева направо
+            # Сортируем рамки сверху вниз по Y-центру
+            seq_frames.sort(key=lambda f: (f.ymin + f.ymax) / 2, reverse=True)
+
+            # Группируем в строки с допуском 50% от высоты рамки
+            rows: list[dict] = []
+            for f in seq_frames:
+                y_center = (f.ymin + f.ymax) / 2
+                h = abs(f.ymax - f.ymin)
+
+                placed = False
+                for row in rows:
+                    row_y_center = row["y_center_sum"] / len(row["frames"])
+                    row_h = row["height_sum"] / len(row["frames"])
+                    if abs(y_center - row_y_center) < (row_h * 0.5):
+                        row["frames"].append(f)
+                        row["y_center_sum"] += y_center
+                        row["height_sum"] += h
+                        placed = True
+                        break
+                if not placed:
+                    rows.append({
+                        "frames": [f],
+                        "y_center_sum": y_center,
+                        "height_sum": h
+                    })
+
+            # Сортируем сами строки сверху вниз
+            rows.sort(key=lambda r: r["y_center_sum"] / len(r["frames"]), reverse=True)
+
+            # Внутри каждой строки сортируем слева направо по X-центру
             for row in rows:
-                row_y_center = row["y_center_sum"] / len(row["frames"])
-                row_h = row["height_sum"] / len(row["frames"])
-                # Если Y-центры близки, они в одной горизонтальной строке
-                if abs(y_center - row_y_center) < (row_h * 0.5):
-                    row["frames"].append(f)
-                    row["y_center_sum"] += y_center
-                    row["height_sum"] += h
-                    placed = True
-                    break
-            if not placed:
-                rows.append({
-                    "frames": [f],
-                    "y_center_sum": y_center,
-                    "height_sum": h
-                })
-
-        # Сортируем сами строки сверху вниз
-        rows.sort(key=lambda r: r["y_center_sum"] / len(r["frames"]), reverse=True)
-
-        # Внутри каждой строки сортируем слева направо по X-центру
-        for row in rows:
-            row["frames"].sort(key=lambda f: (f.xmin + f.xmax) / 2)
-            sorted_all.extend(row["frames"])
+                row["frames"].sort(key=lambda f: (f.xmin + f.xmax) / 2)
+                sorted_all.extend(row["frames"])
 
     return sorted_all
 
