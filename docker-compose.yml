@@ -11,7 +11,6 @@ services:
       - "8084:8000"
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
-      - "com.centurylinklabs.watchtower.scope=convert-to-pdf"
 
   watchtower:
     image: containrrr/watchtower:latest
