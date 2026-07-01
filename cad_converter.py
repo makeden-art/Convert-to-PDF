@@ -189,7 +189,7 @@ def _oda_convert(
             "ACAD2018",
             out_format,
             "0",
-            "1",
+            "0",
             glob_pattern,
         ]
         try:
