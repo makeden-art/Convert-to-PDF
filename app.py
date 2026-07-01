@@ -251,8 +251,14 @@ async def api_detect_frames(path: str):
         file_path = validate_file(path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    if file_path.suffix.lower() not in CAD_EXTENSIONS:
+    suffix = file_path.suffix.lower()
+    if suffix not in CAD_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Только DWG/DXF")
+    if suffix == ".dwg":
+        raise HTTPException(
+            status_code=400,
+            detail="Поиск рамок для DWG отключен во избежание фоновой нагрузки на процессор."
+        )
     try:
         from converter import _is_smb_path, _smb_local_file, _smb_mounted
 

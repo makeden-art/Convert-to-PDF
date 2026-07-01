@@ -1175,7 +1175,8 @@
       const cad = (files || []).filter(f => {
         const fmt = (f.format || '').toLowerCase();
         const name = (f.name || f.path || '').toLowerCase();
-        return fmt === 'dwg' || fmt === 'dxf' || name.endsWith('.dwg') || name.endsWith('.dxf');
+        // ONLY allow .dxf files for preview, completely skip .dwg to avoid heavy ODA background conversion load!
+        return fmt === 'dxf' || name.endsWith('.dxf');
       });
       if (cad.length !== 1) return;
       framesHintEl.style.display = 'block';
