@@ -419,6 +419,7 @@ def _render_modelspace(
     max_entities: int | None = None,
     crop_box: tuple[float, float, float, float] | None = None,
     bbox_cache: dict | None = None,
+    ctx: RenderContext | None = None,
 ) -> None:
     if max_entities is not None:
         count = _modelspace_entity_count(doc)
@@ -432,7 +433,8 @@ def _render_modelspace(
     from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
-    ctx = RenderContext(doc)
+    if ctx is None:
+        ctx = RenderContext(doc)
     out = MatplotlibBackend(ax, adjust_figure=False)
     config = Configuration(
         color_policy=ColorPolicy.MONOCHROME,
@@ -451,12 +453,13 @@ def _render_modelspace(
     frontend.draw_entities(entities)
 
 
-def _render_single_layout(doc, layout, ax) -> None:
+def _render_single_layout(doc, layout, ax, *, ctx: RenderContext | None = None) -> None:
     from ezdxf.addons.drawing import Frontend, RenderContext
     from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
-    ctx = RenderContext(doc)
+    if ctx is None:
+        ctx = RenderContext(doc)
     out = MatplotlibBackend(ax, adjust_figure=False)
     config = Configuration(
         color_policy=ColorPolicy.MONOCHROME,
@@ -476,23 +479,31 @@ def _apply_frame_crop(ax, frame: CadFrame) -> None:
     ax.margins(0)
 
 
-def _render_frame(doc, frame: CadFrame, ax, *, preview: bool = False, bbox_cache: dict | None = None) -> None:
+def _render_frame(
+    doc,
+    frame: CadFrame,
+    ax,
+    *,
+    preview: bool = False,
+    bbox_cache: dict | None = None,
+    ctx: RenderContext | None = None,
+) -> None:
     entity_limit = PREVIEW_MAX_ENTITIES if preview else None
     
     crop_box = (frame.xmin, frame.xmax, frame.ymin, frame.ymax)
 
     if frame.source == "viewport_model":
-        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache)
+        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache, ctx=ctx)
         _apply_frame_crop(ax, frame)
         return
 
     if frame.layout.upper() == "MODEL":
-        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache)
+        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache, ctx=ctx)
         _apply_frame_crop(ax, frame)
         return
 
     layout = doc.layouts.get(frame.layout)
-    _render_single_layout(doc, layout, ax)
+    _render_single_layout(doc, layout, ax, ctx=ctx)
     if frame.source in (
         "viewport",
         "polyline",
@@ -536,6 +547,9 @@ def convert_dxf_to_pdf(
         if all_frames:
             meta["frames"] = frames_summary(all_frames)
 
+    from ezdxf.addons.drawing import RenderContext
+    ctx = RenderContext(doc)
+
     bbox_cache = {}
     with PdfPages(str(pdf_path)) as pdf:
         if use_frames:
@@ -552,7 +566,7 @@ def convert_dxf_to_pdf(
                 ax = fig.add_axes([0, 0, 1, 1])
                 ax.axis("off")
                 try:
-                    _render_frame(doc, frame, ax, bbox_cache=bbox_cache)
+                    _render_frame(doc, frame, ax, bbox_cache=bbox_cache, ctx=ctx)
                     _save_figure(pdf, fig)
                 finally:
                     plt.close(fig)
@@ -574,9 +588,9 @@ def convert_dxf_to_pdf(
                 ax.axis("off")
                 try:
                     if hasattr(layout, "page_setup"):
-                        _render_single_layout(doc, layout, ax)
+                        _render_single_layout(doc, layout, ax, ctx=ctx)
                     else:
-                        _render_modelspace(doc, ax)
+                        _render_modelspace(doc, ax, ctx=ctx)
                     _save_figure(pdf, fig)
                 finally:
                     plt.close(fig)
