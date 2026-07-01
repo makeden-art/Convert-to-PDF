@@ -537,97 +537,104 @@ def sort_frames_reading_order(frames: list[CadFrame]) -> list[CadFrame]:
 
 
 def choose_render_frames(doc, frames: list[CadFrame]) -> list[CadFrame]:
-    """По одной рамке на каждый layout (лист)."""
+    """По одной рамке на каждый layout (лист) или все рамки из Model, если их несколько."""
     if not frames:
         return []
 
-    # Если есть рамки на приоритетном слое, возвращаем их все напрямую в правильном порядке
-    stamp_frames = [f for f in frames if f.source == "stamp_frame"]
-    if stamp_frames:
-        return sort_frames_reading_order(stamp_frames)
+    # 1. Отбираем рамки в Model
+    model_frames = [
+        f for f in frames
+        if f.layout.upper() == "MODEL"
+        and (f.source == "stamp_frame" or _is_drawing_frame_size(f.xmax - f.xmin, f.ymax - f.ymin))
+    ]
 
+    # 2. Списки layouts
     layout_names = [n for n in doc.layouts.names() if n.upper() != "MODEL"]
-    if not layout_names:
-        layout_names = ["Model"]
 
+    # Если в модели обнаружено более 1 рамки чертежа (мульти-листовой чертеж в пространстве модели),
+    # приоритет отдаем модели!
+    prefer_model = len(model_frames) > 1
+
+    if prefer_model:
+        model_stamps = [f for f in model_frames if f.source == "stamp_frame"]
+        if model_stamps:
+            return sort_frames_reading_order(model_stamps)
+        return sort_frames_reading_order(model_frames)
+
+    # 3. Иначе рендерим по layouts (по одной рамке на каждый layout)
     chosen: list[CadFrame] = []
-    for layout_name in layout_names:
-        local = [f for f in frames if f.layout == layout_name]
-        if not local:
-            continue
+    if layout_names:
+        for layout_name in layout_names:
+            local = [f for f in frames if f.layout == layout_name]
+            if not local:
+                continue
 
-        priority = [
-            f
-            for f in local
-            if _is_priority_frame_layer(f.layer)
-            and f.source in ("stamp_frame", "block", "polyline", "sheet_border")
-        ]
-        if priority:
-            best = max(priority, key=lambda f: f.area)
-            clipped = _clip_poly_frame(doc, best) if best.source != "stamp_frame" else None
-            chosen.append(clipped or best)
-            logger.info(
-                "Лист %s: рамка по слою %r → %s",
-                layout_name,
-                best.layer,
-                (clipped or best).label,
-            )
-            continue
+            priority = [
+                f
+                for f in local
+                if _is_priority_frame_layer(f.layer)
+                and f.source in ("stamp_frame", "block", "polyline", "sheet_border")
+            ]
+            if priority:
+                best = max(priority, key=lambda f: f.area)
+                clipped = _clip_poly_frame(doc, best) if best.source != "stamp_frame" else None
+                chosen.append(clipped or best)
+                continue
 
-        sheet = [f for f in local if f.source == "sheet_border"]
-        if sheet:
-            chosen.append(max(sheet, key=lambda f: f.area))
-            continue
+            sheet = [f for f in local if f.source == "sheet_border"]
+            if sheet:
+                chosen.append(max(sheet, key=lambda f: f.area))
+                continue
 
-        polys = [
-            f
-            for f in local
-            if f.source == "polyline"
-            and _is_drawing_frame_size(f.xmax - f.xmin, f.ymax - f.ymin)
-        ]
-        if polys:
-            best = max(polys, key=lambda f: f.area)
-            clipped = _clip_poly_frame(doc, best)
-            chosen.append(clipped or best)
-            continue
+            polys = [
+                f
+                for f in local
+                if f.source == "polyline"
+                and _is_drawing_frame_size(f.xmax - f.xmin, f.ymax - f.ymin)
+            ]
+            if polys:
+                best = max(polys, key=lambda f: f.area)
+                clipped = _clip_poly_frame(doc, best)
+                chosen.append(clipped or best)
+                continue
 
-        vps = [f for f in local if f.source == "viewport"]
-        if len(vps) == 1:
-            chosen.append(vps[0])
-            continue
-        if len(vps) > 1:
-            xmin = min(v.xmin for v in vps)
-            ymin = min(v.ymin for v in vps)
-            xmax = max(v.xmax for v in vps)
-            ymax = max(v.ymax for v in vps)
-            w = xmax - xmin
-            h = ymax - ymin
-            chosen.append(
-                CadFrame(
-                    source="viewport_union",
-                    layout=layout_name,
-                    label=f"Область viewport ({round(w)}×{round(h)} мм)",
-                    width_mm=round(max(w, h), 1),
-                    height_mm=round(min(w, h), 1),
-                    xmin=xmin,
-                    ymin=ymin,
-                    xmax=xmax,
-                    ymax=ymax,
-                    orientation=_orientation_label(w, h),
+            vps = [f for f in local if f.source == "viewport"]
+            if len(vps) == 1:
+                chosen.append(vps[0])
+                continue
+            if len(vps) > 1:
+                xmin = min(v.xmin for v in vps)
+                ymin = min(v.ymin for v in vps)
+                xmax = max(v.xmax for v in vps)
+                ymax = max(v.ymax for v in vps)
+                w = xmax - xmin
+                h = ymax - ymin
+                chosen.append(
+                    CadFrame(
+                        source="viewport_union",
+                        layout=layout_name,
+                        label=f"Область viewport ({round(w)}×{round(h)} мм)",
+                        width_mm=round(max(w, h), 1),
+                        height_mm=round(min(w, h), 1),
+                        xmin=xmin,
+                        ymin=ymin,
+                        xmax=xmax,
+                        ymax=ymax,
+                        orientation=_orientation_label(w, h),
+                    )
                 )
-            )
 
     if chosen:
         return _dedupe(chosen)
 
-    model_polys = [
-        f
-        for f in frames
-        if f.layout.upper() == "MODEL"
-        and f.source == "polyline"
-        and _is_drawing_frame_size(f.xmax - f.xmin, f.ymax - f.ymin)
-    ]
-    return _dedupe(model_polys)
+    # 4. Если в леяутах ничего не найдено, возвращаем рамки из модели (даже если она одна)
+    if model_frames:
+        model_stamps = [f for f in model_frames if f.source == "stamp_frame"]
+        if model_stamps:
+            return sort_frames_reading_order(model_stamps)
+        return sort_frames_reading_order(model_frames)
+
+    return []
 
 
 def frames_summary(frames: list[CadFrame]) -> dict[str, Any]:
