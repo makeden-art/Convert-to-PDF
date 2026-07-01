@@ -14,6 +14,7 @@ from frame_detect import CadFrame, choose_render_frames, detect_frames_in_doc, f
 from job_control import check_cancelled, run_monitored
 
 logger = logging.getLogger("convert.cad")
+logging.getLogger("ezdxf").setLevel(logging.ERROR)
 
 
 # Monkey patch ezdxf block reference explosion to catch transform/scaling exceptions gracefully.
@@ -419,7 +420,6 @@ def _render_modelspace(
     max_entities: int | None = None,
     crop_box: tuple[float, float, float, float] | None = None,
     bbox_cache: dict | None = None,
-    ctx: RenderContext | None = None,
 ) -> None:
     if max_entities is not None:
         count = _modelspace_entity_count(doc)
@@ -433,8 +433,7 @@ def _render_modelspace(
     from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
-    if ctx is None:
-        ctx = RenderContext(doc)
+    ctx = RenderContext(doc)
     out = MatplotlibBackend(ax, adjust_figure=False)
     config = Configuration(
         color_policy=ColorPolicy.MONOCHROME,
@@ -453,13 +452,12 @@ def _render_modelspace(
     frontend.draw_entities(entities)
 
 
-def _render_single_layout(doc, layout, ax, *, ctx: RenderContext | None = None) -> None:
+def _render_single_layout(doc, layout, ax) -> None:
     from ezdxf.addons.drawing import Frontend, RenderContext
     from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
-    if ctx is None:
-        ctx = RenderContext(doc)
+    ctx = RenderContext(doc)
     out = MatplotlibBackend(ax, adjust_figure=False)
     config = Configuration(
         color_policy=ColorPolicy.MONOCHROME,
@@ -486,24 +484,23 @@ def _render_frame(
     *,
     preview: bool = False,
     bbox_cache: dict | None = None,
-    ctx: RenderContext | None = None,
 ) -> None:
     entity_limit = PREVIEW_MAX_ENTITIES if preview else None
     
     crop_box = (frame.xmin, frame.xmax, frame.ymin, frame.ymax)
 
     if frame.source == "viewport_model":
-        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache, ctx=ctx)
+        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache)
         _apply_frame_crop(ax, frame)
         return
 
     if frame.layout.upper() == "MODEL":
-        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache, ctx=ctx)
+        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache)
         _apply_frame_crop(ax, frame)
         return
 
     layout = doc.layouts.get(frame.layout)
-    _render_single_layout(doc, layout, ax, ctx=ctx)
+    _render_single_layout(doc, layout, ax)
     if frame.source in (
         "viewport",
         "polyline",
@@ -547,9 +544,6 @@ def convert_dxf_to_pdf(
         if all_frames:
             meta["frames"] = frames_summary(all_frames)
 
-    from ezdxf.addons.drawing import RenderContext
-    ctx = RenderContext(doc)
-
     bbox_cache = {}
     with PdfPages(str(pdf_path)) as pdf:
         if use_frames:
@@ -566,7 +560,7 @@ def convert_dxf_to_pdf(
                 ax = fig.add_axes([0, 0, 1, 1])
                 ax.axis("off")
                 try:
-                    _render_frame(doc, frame, ax, bbox_cache=bbox_cache, ctx=ctx)
+                    _render_frame(doc, frame, ax, bbox_cache=bbox_cache)
                     _save_figure(pdf, fig)
                 finally:
                     plt.close(fig)
@@ -588,9 +582,9 @@ def convert_dxf_to_pdf(
                 ax.axis("off")
                 try:
                     if hasattr(layout, "page_setup"):
-                        _render_single_layout(doc, layout, ax, ctx=ctx)
+                        _render_single_layout(doc, layout, ax)
                     else:
-                        _render_modelspace(doc, ax, ctx=ctx)
+                        _render_modelspace(doc, ax)
                     _save_figure(pdf, fig)
                 finally:
                     plt.close(fig)
