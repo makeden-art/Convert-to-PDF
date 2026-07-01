@@ -363,6 +363,41 @@ def _patch_frontend(frontend) -> SafeFrontend:
     return safe
 
 
+def _is_entity_in_box(entity, xmin: float, xmax: float, ymin: float, ymax: float) -> bool:
+    try:
+        t = entity.dxftype()
+        if t == "LINE":
+            start = entity.dxf.start
+            end = entity.dxf.end
+            exmin = min(start.x, end.x)
+            exmax = max(start.x, end.x)
+            eymin = min(start.y, end.y)
+            eymax = max(start.y, end.y)
+            return not (exmax < xmin or exmin > xmax or eymax < ymin or eymin > ymax)
+            
+        if t in ("TEXT", "MTEXT"):
+            p = entity.dxf.insert
+            return xmin <= p.x <= xmax and ymin <= p.y <= ymax
+            
+        if t == "INSERT":
+            p = entity.dxf.insert
+            margin = 1500.0  # Safe boundary margin for block scaling
+            return (xmin - margin) <= p.x <= (xmax + margin) and (ymin - margin) <= p.y <= (ymax + margin)
+            
+        if t in ("LWPOLYLINE", "POLYLINE"):
+            pts = [v for v in entity.vertices] if t == "POLYLINE" else entity.get_points()
+            if not pts:
+                return True
+            xs = [p[0] for p in pts]
+            ys = [p[1] for p in pts]
+            exmin, exmax = min(xs), max(xs)
+            eymin, eymax = min(ys), max(ys)
+            return not (exmax < xmin or exmin > xmax or eymax < ymin or eymin > ymax)
+    except Exception:
+        pass
+    return True
+
+
 def _modelspace_entity_count(doc) -> int:
     try:
         return len(list(doc.modelspace()))
@@ -370,7 +405,7 @@ def _modelspace_entity_count(doc) -> int:
         return 0
 
 
-def _render_modelspace(doc, ax, *, max_entities: int | None = None) -> None:
+def _render_modelspace(doc, ax, *, max_entities: int | None = None, crop_box: tuple[float, float, float, float] | None = None) -> None:
     if max_entities is not None:
         count = _modelspace_entity_count(doc)
         if count > max_entities:
@@ -380,25 +415,41 @@ def _render_modelspace(doc, ax, *, max_entities: int | None = None) -> None:
             )
 
     from ezdxf.addons.drawing import Frontend, RenderContext
-    from ezdxf.addons.drawing.config import Configuration, ColorPolicy
+    from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
     ctx = RenderContext(doc)
     out = MatplotlibBackend(ax, adjust_figure=False)
-    config = Configuration(color_policy=ColorPolicy.MONOCHROME)
+    config = Configuration(
+        color_policy=ColorPolicy.MONOCHROME,
+        line_policy=LinePolicy.APPROXIMATE,
+        max_flattening_distance=0.15,
+        circle_approximation_count=32,
+    )
     frontend = Frontend(ctx, out, config=config)
     _patch_frontend(frontend)
-    frontend.draw_entities(doc.modelspace())
+
+    entities = doc.modelspace()
+    if crop_box is not None:
+        xmin, xmax, ymin, ymax = crop_box
+        entities = [e for e in entities if _is_entity_in_box(e, xmin, xmax, ymin, ymax)]
+
+    frontend.draw_entities(entities)
 
 
 def _render_single_layout(doc, layout, ax) -> None:
     from ezdxf.addons.drawing import Frontend, RenderContext
-    from ezdxf.addons.drawing.config import Configuration, ColorPolicy
+    from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
     ctx = RenderContext(doc)
     out = MatplotlibBackend(ax, adjust_figure=False)
-    config = Configuration(color_policy=ColorPolicy.MONOCHROME)
+    config = Configuration(
+        color_policy=ColorPolicy.MONOCHROME,
+        line_policy=LinePolicy.APPROXIMATE,
+        max_flattening_distance=0.15,
+        circle_approximation_count=32,
+    )
     frontend = Frontend(ctx, out, config=config)
     _patch_frontend(frontend)
     frontend.draw_layout(layout)
@@ -413,14 +464,16 @@ def _apply_frame_crop(ax, frame: CadFrame) -> None:
 
 def _render_frame(doc, frame: CadFrame, ax, *, preview: bool = False) -> None:
     entity_limit = PREVIEW_MAX_ENTITIES if preview else None
+    
+    crop_box = (frame.xmin, frame.xmax, frame.ymin, frame.ymax)
 
     if frame.source == "viewport_model":
-        _render_modelspace(doc, ax, max_entities=entity_limit)
+        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box)
         _apply_frame_crop(ax, frame)
         return
 
     if frame.layout.upper() == "MODEL":
-        _render_modelspace(doc, ax, max_entities=entity_limit)
+        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box)
         _apply_frame_crop(ax, frame)
         return
 
@@ -441,51 +494,7 @@ def _save_figure(pdf, fig) -> None:
     pdf.savefig(fig, bbox_inches=None, pad_inches=0)
 
 
-def _make_dxf_document_monochrome(doc) -> None:
-    # 1. Force all layers to ACI color 7 (Black/White) and remove True Color overrides
-    for layer in doc.layers:
-        try:
-            layer.dxf.color = 7
-            if layer.dxf.hasattr("true_color"):
-                del layer.dxf.true_color
-        except Exception:
-            pass
 
-    # 2. Force all entities in paper/model layouts to ACI color 7 (renders black on white bg)
-    for layout in doc.layouts:
-        for entity in layout:
-            try:
-                if entity.dxf.hasattr("true_color"):
-                    del entity.dxf.true_color
-                if entity.dxf.hasattr("color_name"):
-                    del entity.dxf.color_name
-                entity.dxf.color = 7
-                
-                # Also clean ATTRIB sub-entities on INSERT
-                if entity.dxftype() == "INSERT":
-                    for attrib in entity.attribs:
-                        try:
-                            if attrib.dxf.hasattr("true_color"):
-                                del attrib.dxf.true_color
-                            if attrib.dxf.hasattr("color_name"):
-                                del attrib.dxf.color_name
-                            attrib.dxf.color = 7
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-
-    # 3. Force all entities in block definitions to ACI color 7
-    for block in doc.blocks:
-        for entity in block:
-            try:
-                if entity.dxf.hasattr("true_color"):
-                    del entity.dxf.true_color
-                if entity.dxf.hasattr("color_name"):
-                    del entity.dxf.color_name
-                entity.dxf.color = 7
-            except Exception:
-                pass
 
 
 def convert_dxf_to_pdf(
@@ -502,7 +511,6 @@ def convert_dxf_to_pdf(
     from matplotlib.backends.backend_pdf import PdfPages
 
     doc = _load_dxf_document(dxf_path)
-    _make_dxf_document_monochrome(doc)
     all_frames = detect_frames_in_doc(doc)
     render_frames = choose_render_frames(doc, all_frames) if CAD_RENDER_MODE != "layouts" else []
     use_frames = bool(render_frames) and CAD_RENDER_MODE in ("auto", "frames")
