@@ -1657,17 +1657,23 @@
         const name = f.name || (f.path || '').split('/').pop() || f.path || '—';
         let meta = f.format || '';
         let cls = '';
+        let numberBtn = '';
         if (info.kind === 'result') {
           const st = (f.status || '').toLowerCase();
           meta = f.status || '';
           if (f.message) meta += (meta ? ': ' : '') + f.message;
-          if (st === 'ok' || st === 'done') cls = ' ok';
+          if (st === 'ok' || st === 'done') {
+            cls = ' ok';
+            if (f.pdf) {
+              numberBtn = ' <button type="button" class="btn-action-number" data-number-path="' + escapeHtml(f.pdf) + '" style="font-size:10px; padding:2px 6px; margin-left:8px; border-radius:4px; background:linear-gradient(135deg, #0284c7, #0369a1); border:1px solid rgba(255,255,255,0.1); color:white; cursor:pointer; font-weight:600;">Нумеровать</button>';
+            }
+          }
           else if (st === 'error' || st === 'fail') cls = ' error';
           else if (st === 'skip' || st === 'skipped') cls = ' skip';
         }
         return '<div class="job-file-row' + cls + '">' +
           '<span class="job-file-name" title="' + escapeHtml(f.path || name) + '">' + escapeHtml(name) + '</span>' +
-          '<span class="job-file-meta" title="' + escapeHtml(meta) + '">' + escapeHtml(meta) + '</span>' +
+          '<span class="job-file-meta" title="' + escapeHtml(meta) + '">' + escapeHtml(meta) + numberBtn + '</span>' +
           '</div>';
       }).join('');
       return '<div class="job-files-head">' + escapeHtml(head) + '</div>' + rows;
@@ -1711,7 +1717,9 @@
             const summary = job.result_summary || {};
             let extra = '';
             if (job.status === 'done' && summary.merged_pdf) {
-              extra = ' → ' + summary.merged_pdf.split('/').pop();
+              const filename = summary.merged_pdf.split('/').pop();
+              extra = ' → ' + escapeHtml(filename) +
+                ' <button type="button" class="btn-action-number" data-number-path="' + escapeHtml(summary.merged_pdf) + '" style="font-size:10px; padding:2px 6px; margin-left:8px; border-radius:4px; background:linear-gradient(135deg, #0284c7, #0369a1); border:1px solid rgba(255,255,255,0.1); color:white; cursor:pointer; font-weight:600;">Нумеровать</button>';
             } else if (job.status === 'done' && summary.stats) {
               extra = ' (' + (summary.stats.ok || 0) + ' OK)';
             } else if (job.status === 'error' || job.status === 'cancelled') {
@@ -2228,6 +2236,39 @@
     document.getElementById('btn-cancel-active').onclick = async () => {
       if (!activeJobId) return;
       await cancelJob(activeJobId, document.getElementById('btn-cancel-active'));
+    };
+
+    document.getElementById('jobs-list').onclick = (e) => {
+      const btn = e.target.closest('[data-number-path]');
+      if (btn) {
+        e.preventDefault();
+        e.stopPropagation();
+        const path = btn.dataset.numberPath;
+        const filename = path.split('/').pop() || 'result.pdf';
+        
+        // Select this file
+        orderedSelections = [{
+          type: 'file',
+          name: filename,
+          path: path
+        }];
+        
+        // Switch off merge mode to enable direct PDF numbering
+        document.getElementById('merge').checked = false;
+        refreshMergePanel();
+        
+        // Scroll smoothly to numbering panel and highlight it
+        const numRow = document.getElementById('num-row');
+        if (numRow) {
+          numRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          numRow.style.boxShadow = '0 0 15px rgba(2, 132, 199, 0.8)';
+          numRow.style.borderColor = '#0284c7';
+          setTimeout(() => {
+            numRow.style.boxShadow = '';
+            numRow.style.borderColor = '';
+          }, 2000);
+        }
+      }
     };
 
     loadTree('');
