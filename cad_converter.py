@@ -363,35 +363,42 @@ def _patch_frontend(frontend) -> SafeFrontend:
     return safe
 
 
-def _is_entity_in_box(entity, xmin: float, xmax: float, ymin: float, ymax: float) -> bool:
+def _is_entity_in_box(
+    entity,
+    xmin: float,
+    xmax: float,
+    ymin: float,
+    ymax: float,
+    cache: dict | None = None,
+) -> bool:
+    if cache is not None:
+        try:
+            h = entity.dxf.handle
+        except Exception:
+            h = id(entity)
+        if h in cache:
+            coords = cache[h]
+        else:
+            coords = None
+            try:
+                from ezdxf import bbox
+                box = bbox.extents([entity])
+                if box:
+                    coords = (box.extmin.x, box.extmax.x, box.extmin.y, box.extmax.y)
+            except Exception:
+                pass
+            cache[h] = coords
+            
+        if coords is None:
+            return True
+        exmin, exmax, eymin, eymax = coords
+        return not (exmax < xmin or exmin > xmax or eymax < ymin or eymin > ymax)
+        
     try:
-        t = entity.dxftype()
-        if t == "LINE":
-            start = entity.dxf.start
-            end = entity.dxf.end
-            exmin = min(start.x, end.x)
-            exmax = max(start.x, end.x)
-            eymin = min(start.y, end.y)
-            eymax = max(start.y, end.y)
-            return not (exmax < xmin or exmin > xmax or eymax < ymin or eymin > ymax)
-            
-        if t in ("TEXT", "MTEXT"):
-            p = entity.dxf.insert
-            return xmin <= p.x <= xmax and ymin <= p.y <= ymax
-            
-        if t == "INSERT":
-            p = entity.dxf.insert
-            margin = 1500.0  # Safe boundary margin for block scaling
-            return (xmin - margin) <= p.x <= (xmax + margin) and (ymin - margin) <= p.y <= (ymax + margin)
-            
-        if t in ("LWPOLYLINE", "POLYLINE"):
-            pts = [v for v in entity.vertices] if t == "POLYLINE" else entity.get_points()
-            if not pts:
-                return True
-            xs = [p[0] for p in pts]
-            ys = [p[1] for p in pts]
-            exmin, exmax = min(xs), max(xs)
-            eymin, eymax = min(ys), max(ys)
+        from ezdxf import bbox
+        box = bbox.extents([entity])
+        if box:
+            exmin, exmax, eymin, eymax = box.extmin.x, box.extmax.x, box.extmin.y, box.extmax.y
             return not (exmax < xmin or exmin > xmax or eymax < ymin or eymin > ymax)
     except Exception:
         pass
@@ -405,7 +412,14 @@ def _modelspace_entity_count(doc) -> int:
         return 0
 
 
-def _render_modelspace(doc, ax, *, max_entities: int | None = None, crop_box: tuple[float, float, float, float] | None = None) -> None:
+def _render_modelspace(
+    doc,
+    ax,
+    *,
+    max_entities: int | None = None,
+    crop_box: tuple[float, float, float, float] | None = None,
+    bbox_cache: dict | None = None,
+) -> None:
     if max_entities is not None:
         count = _modelspace_entity_count(doc)
         if count > max_entities:
@@ -432,7 +446,7 @@ def _render_modelspace(doc, ax, *, max_entities: int | None = None, crop_box: tu
     entities = doc.modelspace()
     if crop_box is not None:
         xmin, xmax, ymin, ymax = crop_box
-        entities = [e for e in entities if _is_entity_in_box(e, xmin, xmax, ymin, ymax)]
+        entities = [e for e in entities if _is_entity_in_box(e, xmin, xmax, ymin, ymax, bbox_cache)]
 
     frontend.draw_entities(entities)
 
@@ -462,18 +476,18 @@ def _apply_frame_crop(ax, frame: CadFrame) -> None:
     ax.margins(0)
 
 
-def _render_frame(doc, frame: CadFrame, ax, *, preview: bool = False) -> None:
+def _render_frame(doc, frame: CadFrame, ax, *, preview: bool = False, bbox_cache: dict | None = None) -> None:
     entity_limit = PREVIEW_MAX_ENTITIES if preview else None
     
     crop_box = (frame.xmin, frame.xmax, frame.ymin, frame.ymax)
 
     if frame.source == "viewport_model":
-        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box)
+        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache)
         _apply_frame_crop(ax, frame)
         return
 
     if frame.layout.upper() == "MODEL":
-        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box)
+        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache)
         _apply_frame_crop(ax, frame)
         return
 
@@ -522,6 +536,7 @@ def convert_dxf_to_pdf(
         if all_frames:
             meta["frames"] = frames_summary(all_frames)
 
+    bbox_cache = {}
     with PdfPages(str(pdf_path)) as pdf:
         if use_frames:
             logger.info(
@@ -537,7 +552,7 @@ def convert_dxf_to_pdf(
                 ax = fig.add_axes([0, 0, 1, 1])
                 ax.axis("off")
                 try:
-                    _render_frame(doc, frame, ax)
+                    _render_frame(doc, frame, ax, bbox_cache=bbox_cache)
                     _save_figure(pdf, fig)
                 finally:
                     plt.close(fig)
