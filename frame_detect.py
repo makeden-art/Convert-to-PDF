@@ -552,15 +552,8 @@ def choose_render_frames(doc, frames: list[CadFrame]) -> list[CadFrame]:
     layout_names = [n for n in doc.layouts.names() if n.upper() != "MODEL"]
 
     # Если в модели обнаружено более 1 рамки чертежа (мульти-листовой чертеж в пространстве модели),
-    # приоритет отдаем модели, но ТОЛЬКО если эти рамки лежат на слоях рамок или содержат штампы!
-    # Иначе это могут быть детали конструкции (например, бетонные блоки, балки), ошибочно принятые за листы.
-    model_has_legit_frames = any(
-        f.source == "stamp_frame"
-        or _is_priority_frame_layer(f.layer)
-        or (f.layer and FRAME_LAYER_RE.search(f.layer))
-        for f in model_frames
-    )
-    prefer_model = len(model_frames) > 1 and (model_has_legit_frames or not layout_names)
+    # приоритет отдаем модели!
+    prefer_model = len(model_frames) > 1
 
     if prefer_model:
         model_stamps = [f for f in model_frames if f.source == "stamp_frame"]
