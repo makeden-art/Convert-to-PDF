@@ -507,6 +507,38 @@ def _layout_viewport_model_extents(
         max(v["model_ymax"] for v in vps),
     )
 
+def _patch_filter_vp_entities():
+    try:
+        import ezdxf.addons.drawing.pipeline as pipeline
+        if hasattr(pipeline, '_orig_filter_vp_entities'):
+            return
+        pipeline._orig_filter_vp_entities = pipeline.filter_vp_entities
+        
+        def _fast_filter_vp_entities(msp, limits, bbox_cache=None):
+            min_x, min_y, max_x, max_y = limits
+            for e in msp:
+                dxftype = e.dxftype()
+                try:
+                    if dxftype == "LINE":
+                        s, en = e.dxf.start, e.dxf.end
+                        exmax = s.x if s.x > en.x else en.x
+                        exmin = s.x if s.x < en.x else en.x
+                        eymax = s.y if s.y > en.y else en.y
+                        eymin = s.y if s.y < en.y else en.y
+                        if exmax < min_x or exmin > max_x or eymax < min_y or eymin > max_y:
+                            continue
+                    elif dxftype == "CIRCLE":
+                        c, r = e.dxf.center, e.dxf.radius
+                        if (c.x + r) < min_x or (c.x - r) > max_x or (c.y + r) < min_y or (c.y - r) > max_y:
+                            continue
+                except Exception:
+                    pass
+                yield e
+
+        pipeline.filter_vp_entities = _fast_filter_vp_entities
+    except Exception:
+        pass
+
 def _patch_mleader_zerodiv() -> None:
     """Monkey-patch ezdxf LeaderData.transform to survive zero-length dogleg vectors.
 
