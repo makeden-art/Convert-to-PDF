@@ -536,6 +536,23 @@ def sort_frames_reading_order(frames: list[CadFrame]) -> list[CadFrame]:
     return sorted_all
 
 
+def _has_substantial_layouts(doc, layout_names: list[str], min_entities: int = 10) -> bool:
+    """Возвращает True если хотя бы один бумажный лист содержит достаточно объектов.
+
+    Используется чтобы отличить «настоящий» бумажный лист (со штампом и видовыми экранами)
+    от пустого-заглушки. Порог ``min_entities`` можно подобрать под проект — по умолчанию 10.
+    """
+    for name in layout_names:
+        try:
+            layout = doc.layouts.get(name)
+            count = sum(1 for _ in layout)
+            if count >= min_entities:
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def choose_render_frames(doc, frames: list[CadFrame]) -> list[CadFrame]:
     """По одной рамке на каждый layout (лист) или все рамки из Model, если их несколько."""
     if not frames:
@@ -551,9 +568,33 @@ def choose_render_frames(doc, frames: list[CadFrame]) -> list[CadFrame]:
     # 2. Списки layouts
     layout_names = [n for n in doc.layouts.names() if n.upper() != "MODEL"]
 
-    # Если в модели обнаружено более 1 рамки чертежа (мульти-листовой чертеж в пространстве модели),
-    # приоритет отдаем модели!
-    prefer_model = len(model_frames) > 1
+    # 3. Есть ли в модели явные рамки-штампы (на слоях типа _Штамп_рамка*)?
+    model_has_stamp_layers = any(
+        f.source == "stamp_frame" or _is_priority_frame_layer(f.layer)
+        for f in model_frames
+    )
+
+    # 4. Есть ли содержательные бумажные листы (с объектами > порога)?
+    has_substantial_layouts = bool(layout_names) and _has_substantial_layouts(doc, layout_names)
+
+    # Модель получает приоритет если:
+    #   - рамки лежат на явном слое-штампе (_Штамп_рамка, pdf_frame и т.п.), ИЛИ
+    #   - в бумажном пространстве нет содержательных листов (чертёж полностью в модели).
+    # Если рамки обнаружены на произвольных слоях (1-Бетон, S-OPOR ...) И при этом
+    # существуют заполненные листы — выбираем листы, а не структурные элементы модели.
+    prefer_model = len(model_frames) > 1 and (
+        model_has_stamp_layers or not has_substantial_layouts
+    )
+
+    logger.debug(
+        "choose_render_frames: model=%d, layouts=%s, stamp_layers=%s, substantial_layouts=%s "
+        "→ prefer_model=%s",
+        len(model_frames),
+        layout_names,
+        model_has_stamp_layers,
+        has_substantial_layouts,
+        prefer_model,
+    )
 
     if prefer_model:
         model_stamps = [f for f in model_frames if f.source == "stamp_frame"]
@@ -565,6 +606,20 @@ def choose_render_frames(doc, frames: list[CadFrame]) -> list[CadFrame]:
     chosen: list[CadFrame] = []
     if layout_names:
         for layout_name in layout_names:
+            # Пропускаем листы-заглушки с минимальным количеством объектов
+            try:
+                _layout_obj = doc.layouts.get(layout_name)
+                _layout_entity_count = sum(1 for _ in _layout_obj)
+                if _layout_entity_count < 5:
+                    logger.debug(
+                        "Skipping layout %r: only %d entities (empty placeholder)",
+                        layout_name,
+                        _layout_entity_count,
+                    )
+                    continue
+            except Exception:
+                pass
+
             local = [f for f in frames if f.layout == layout_name]
             if not local:
                 continue
