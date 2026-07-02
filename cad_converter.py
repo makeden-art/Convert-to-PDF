@@ -538,7 +538,6 @@ def _render_single_layout(doc, layout, ax) -> None:
     from ezdxf.addons.drawing import Frontend, RenderContext
     from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
-    import ezdxf.bbox
 
     _patch_mleader_zerodiv()
     ctx = RenderContext(doc)
@@ -549,14 +548,7 @@ def _render_single_layout(doc, layout, ax) -> None:
         max_flattening_distance=0.15,
         circle_approximation_count=32,
     )
-    
-    # Create a spatial cache for this layout rendering.
-    # When layout has multiple viewports (like OK6), ezdxf will cache modelspace
-    # entity bounding boxes during the first viewport, dramatically speeding up
-    # rendering of the remaining viewports.
-    ez_cache = ezdxf.bbox.Cache()
-    
-    frontend = Frontend(ctx, out, config=config, bbox_cache=ez_cache)
+    frontend = Frontend(ctx, out, config=config)
     _patch_frontend(frontend)
     frontend.draw_layout(layout)
 
