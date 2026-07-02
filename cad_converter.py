@@ -452,6 +452,52 @@ def _render_modelspace(
     frontend.draw_entities(entities)
 
 
+def _layout_viewport_model_extents(
+    layout,
+) -> tuple[float, float, float, float] | None:
+    """Return the union of model-space extents of all VIEWPORT entities in *layout*.
+
+    ezdxf's ``draw_layout`` expands every viewport by rendering model-space content
+    through it, which is extremely slow for complex drawings (can take 10+ minutes).
+    Instead we compute the model-space window each viewport looks at and union them
+    all so that we can render model space directly with a crop box.
+
+    Returns ``(xmin, xmax, ymin, ymax)`` in model coordinates, or ``None`` if the
+    layout has no VIEWPORT entities (or their extents can't be determined).
+    """
+    viewports = [e for e in layout if e.dxftype() == "VIEWPORT"]
+    if not viewports:
+        return None
+
+    extents: list[tuple[float, float, float, float]] = []
+    for vp in viewports:
+        try:
+            vc = vp.dxf.view_center_point  # center in model space
+            vh = float(vp.dxf.view_height)  # height in model space
+            # Derive model-space width from paper-space aspect ratio
+            pw = float(getattr(vp.dxf, "width", 0) or 0)
+            ph = float(getattr(vp.dxf, "height", 0) or 0)
+            vw = vh * (pw / ph) if ph > 0 else vh
+            if vw <= 0 or vh <= 0:
+                continue
+            extents.append((
+                vc.x - vw / 2, vc.x + vw / 2,
+                vc.y - vh / 2, vc.y + vh / 2,
+            ))
+        except Exception:
+            continue
+
+    if not extents:
+        return None
+
+    return (
+        min(e[0] for e in extents),
+        max(e[1] for e in extents),
+        min(e[2] for e in extents),
+        max(e[3] for e in extents),
+    )
+
+
 def _render_single_layout(doc, layout, ax) -> None:
     from ezdxf.addons.drawing import Frontend, RenderContext
     from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
@@ -486,7 +532,7 @@ def _render_frame(
     bbox_cache: dict | None = None,
 ) -> None:
     entity_limit = PREVIEW_MAX_ENTITIES if preview else None
-    
+
     crop_box = (frame.xmin, frame.xmax, frame.ymin, frame.ymax)
 
     if frame.source == "viewport_model":
@@ -500,6 +546,34 @@ def _render_frame(
         return
 
     layout = doc.layouts.get(frame.layout)
+
+    # Rendering paper-space layouts via draw_layout() expands every VIEWPORT by
+    # re-rendering its model content — for complex drawings this takes 10+ minutes.
+    # Fast path: compute the union of viewport model extents and render model space
+    # directly.  Fall back to draw_layout only when no viewport extents are found
+    # (e.g. layouts with only decorative paper-space entities).
+    vp_model_box = _layout_viewport_model_extents(layout)
+    if vp_model_box is not None:
+        vp_xmin, vp_xmax, vp_ymin, vp_ymax = vp_model_box
+        logger.info(
+            "Layout %r: rendering model space via viewport extents "
+            "(%.0f×%.0f model units) instead of draw_layout",
+            frame.layout,
+            vp_xmax - vp_xmin,
+            vp_ymax - vp_ymin,
+        )
+        _render_modelspace(
+            doc, ax,
+            max_entities=entity_limit,
+            crop_box=(vp_xmin, vp_xmax, vp_ymin, vp_ymax),
+            bbox_cache=bbox_cache,
+        )
+        ax.set_xlim(vp_xmin, vp_xmax)
+        ax.set_ylim(vp_ymin, vp_ymax)
+        ax.set_aspect("auto")
+        ax.margins(0)
+        return
+
     _render_single_layout(doc, layout, ax)
     if frame.source in (
         "viewport",
@@ -510,6 +584,8 @@ def _render_frame(
         "stamp_frame",
     ):
         _apply_frame_crop(ax, frame)
+
+
 
 
 def _save_figure(pdf, fig) -> None:
