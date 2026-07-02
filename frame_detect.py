@@ -575,22 +575,30 @@ def choose_render_frames(doc, frames: list[CadFrame]) -> list[CadFrame]:
     )
 
     # 4. Есть ли содержательные бумажные листы (с объектами > порога)?
-    has_substantial_layouts = bool(layout_names) and _has_substantial_layouts(doc, layout_names)
+    # Логируем каждый лист для диагностики
+    _layout_entity_counts: dict[str, int] = {}
+    for _ln in layout_names:
+        try:
+            _lo = doc.layouts.get(_ln)
+            _layout_entity_counts[_ln] = sum(1 for _ in _lo)
+        except Exception as _e:
+            logger.warning("_has_substantial_layouts: cannot count layout %r: %s", _ln, _e)
+            _layout_entity_counts[_ln] = -1
+    has_substantial_layouts = any(n >= 10 for n in _layout_entity_counts.values())
 
     # Модель получает приоритет если:
     #   - рамки лежат на явном слое-штампе (_Штамп_рамка, pdf_frame и т.п.), ИЛИ
     #   - в бумажном пространстве нет содержательных листов (чертёж полностью в модели).
-    # Если рамки обнаружены на произвольных слоях (1-Бетон, S-OPOR ...) И при этом
-    # существуют заполненные листы — выбираем листы, а не структурные элементы модели.
     prefer_model = len(model_frames) > 1 and (
         model_has_stamp_layers or not has_substantial_layouts
     )
 
-    logger.debug(
-        "choose_render_frames: model=%d, layouts=%s, stamp_layers=%s, substantial_layouts=%s "
-        "→ prefer_model=%s",
+    logger.warning(
+        "choose_render_frames: model_frames=%d, layouts=%s, layout_counts=%s, "
+        "stamp_layers=%s, substantial=%s → prefer_model=%s",
         len(model_frames),
         layout_names,
+        _layout_entity_counts,
         model_has_stamp_layers,
         has_substantial_layouts,
         prefer_model,

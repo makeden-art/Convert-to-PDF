@@ -23,5 +23,7 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
+        import traceback
+        print(traceback.format_exc(), file=sys.stderr)
         print(str(e), file=sys.stderr)
         sys.exit(1)

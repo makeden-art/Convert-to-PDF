@@ -1,4 +1,4 @@
-"""Конвертация DWG/DXF в PDF: ODA, затем рендер по рамкам или layout."""
+"""Р С™Р С•Р Р…Р Р†Р ВµРЎР‚РЎвЂљР В°РЎвЂ Р С‘РЎРЏ DWG/DXF Р Р† PDF: ODA, Р В·Р В°РЎвЂљР ВµР С РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚ Р С—Р С• РЎР‚Р В°Р СР С”Р В°Р С Р С‘Р В»Р С‘ layout."""
 from __future__ import annotations
 
 import gc
@@ -175,7 +175,7 @@ def _oda_convert(
     glob_pattern: str,
 ) -> Path:
     if not oda_available():
-        raise RuntimeError("ODAFileConverter не установлен в контейнере.")
+        raise RuntimeError("ODAFileConverter Р Р…Р Вµ РЎС“РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р В»Р ВµР Р… Р Р† Р С”Р С•Р Р…РЎвЂљР ВµР в„–Р Р…Р ВµРЎР‚Р Вµ.")
 
     with tempfile.TemporaryDirectory(prefix="oda_in_") as in_dir, tempfile.TemporaryDirectory(
         prefix="oda_out_"
@@ -197,7 +197,7 @@ def _oda_convert(
             result = run_monitored(cmd, timeout=timeout)
         except subprocess.TimeoutExpired as e:
             raise RuntimeError(
-                f"Превышено время ожидания ODA ({out_format}, {timeout} сек)."
+                f"Р СџРЎР‚Р ВµР Р†РЎвЂ№РЎв‚¬Р ВµР Р…Р С• Р Р†РЎР‚Р ВµР СРЎРЏ Р С•Р В¶Р С‘Р Т‘Р В°Р Р…Р С‘РЎРЏ ODA ({out_format}, {timeout} РЎРѓР ВµР С”)."
             ) from e
 
         if result.returncode != 0:
@@ -214,7 +214,7 @@ def _oda_convert(
             out_files = list(Path(out_dir).glob(f"*.{ext}"))
 
         if not out_files:
-            raise RuntimeError(f"ODA не создал {out_format} для {input_path.name}.")
+            raise RuntimeError(f"ODA Р Р…Р Вµ РЎРѓР С•Р В·Р Т‘Р В°Р В» {out_format} Р Т‘Р В»РЎРЏ {input_path.name}.")
 
         dest_dir = Path(tempfile.mkdtemp(prefix=f"oda_{ext}_"))
         dest = dest_dir / out_files[0].name
@@ -223,10 +223,10 @@ def _oda_convert(
 
 
 def convert_dwg_to_pdf_oda(input_file: str) -> Path:
-    """DWG → PDF напрямую через ODA (лучшее качество для чертежей с листами)."""
+    """DWG РІвЂ вЂ™ PDF Р Р…Р В°Р С—РЎР‚РЎРЏР СРЎС“РЎР‹ РЎвЂЎР ВµРЎР‚Р ВµР В· ODA (Р В»РЎС“РЎвЂЎРЎв‚¬Р ВµР Вµ Р С”Р В°РЎвЂЎР ВµРЎРѓРЎвЂљР Р†Р С• Р Т‘Р В»РЎРЏ РЎвЂЎР ВµРЎР‚РЎвЂљР ВµР В¶Р ВµР в„– РЎРѓ Р В»Р С‘РЎРѓРЎвЂљР В°Р СР С‘)."""
     input_path = Path(input_file)
     if input_path.suffix.lower() != ".dwg":
-        raise ValueError("convert_dwg_to_pdf_oda ожидает .dwg")
+        raise ValueError("convert_dwg_to_pdf_oda Р С•Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљ .dwg")
     return _oda_convert(
         input_path,
         "PDF",
@@ -236,10 +236,10 @@ def convert_dwg_to_pdf_oda(input_file: str) -> Path:
 
 
 def convert_dwg_to_dxf(input_file: str) -> Path:
-    """DWG → DXF через ODAFileConverter."""
+    """DWG РІвЂ вЂ™ DXF РЎвЂЎР ВµРЎР‚Р ВµР В· ODAFileConverter."""
     input_path = Path(input_file)
     if input_path.suffix.lower() != ".dwg":
-        raise ValueError("convert_dwg_to_dxf ожидает .dwg")
+        raise ValueError("convert_dwg_to_dxf Р С•Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљ .dwg")
     return _oda_convert(
         input_path,
         "DXF",
@@ -288,7 +288,7 @@ def _paper_layouts(doc) -> list:
 
 
 def _layout_figsize(layout) -> tuple[float, float]:
-    """Размер страницы из настроек листа или A3 альбом по умолчанию."""
+    """Р В Р В°Р В·Р СР ВµРЎР‚ РЎРѓРЎвЂљРЎР‚Р В°Р Р…Р С‘РЎвЂ РЎвЂ№ Р С‘Р В· Р Р…Р В°РЎРѓРЎвЂљРЎР‚Р С•Р ВµР С” Р В»Р С‘РЎРѓРЎвЂљР В° Р С‘Р В»Р С‘ A3 Р В°Р В»РЎРЉР В±Р С•Р С Р С—Р С• РЎС“Р СР С•Р В»РЎвЂЎР В°Р Р…Р С‘РЎР‹."""
     try:
         page = layout.page_setup
         width = float(getattr(page, "paper_width", 0) or 0)
@@ -314,7 +314,7 @@ def _frame_figsize(frame: CadFrame) -> tuple[float, float]:
 
 
 class SafeFrontend:
-    """Обёртка над ezdxf Frontend: пропускает битые сущности в блоках."""
+    """Р С›Р В±РЎвЂРЎР‚РЎвЂљР С”Р В° Р Р…Р В°Р Т‘ ezdxf Frontend: Р С—РЎР‚Р С•Р С—РЎС“РЎРѓР С”Р В°Р ВµРЎвЂљ Р В±Р С‘РЎвЂљРЎвЂ№Р Вµ РЎРѓРЎС“РЎвЂ°Р Р…Р С•РЎРѓРЎвЂљР С‘ Р Р† Р В±Р В»Р С•Р С”Р В°РЎвЂ¦."""
 
     def __init__(self, frontend) -> None:
         self._frontend = frontend
@@ -425,8 +425,8 @@ def _render_modelspace(
         count = _modelspace_entity_count(doc)
         if count > max_entities:
             raise RuntimeError(
-                f"Слишком много объектов в модели ({count} > {max_entities}) для предпросмотра. "
-                "Выполните конвертацию в PDF и откройте «PDF рядом»."
+                f"Р РЋР В»Р С‘РЎв‚¬Р С”Р С•Р С Р СР Р…Р С•Р С–Р С• Р С•Р В±РЎР‰Р ВµР С”РЎвЂљР С•Р Р† Р Р† Р СР С•Р Т‘Р ВµР В»Р С‘ ({count} > {max_entities}) Р Т‘Р В»РЎРЏ Р С—РЎР‚Р ВµР Т‘Р С—РЎР‚Р С•РЎРѓР СР С•РЎвЂљРЎР‚Р В°. "
+                "Р вЂ™РЎвЂ№Р С—Р С•Р В»Р Р…Р С‘РЎвЂљР Вµ Р С”Р С•Р Р…Р Р†Р ВµРЎР‚РЎвЂљР В°РЎвЂ Р С‘РЎР‹ Р Р† PDF Р С‘ Р С•РЎвЂљР С”РЎР‚Р С•Р в„–РЎвЂљР Вµ Р’В«PDF РЎР‚РЎРЏР Т‘Р С•Р СР’В»."
             )
 
     from ezdxf.addons.drawing import Frontend, RenderContext
@@ -452,50 +452,86 @@ def _render_modelspace(
     frontend.draw_entities(entities)
 
 
+def _layout_individual_viewport_extents(layout) -> list[dict]:
+    """Return per-viewport model+paper extents for each real VIEWPORT in *layout*.
+
+    Skips viewport id==1 (paper-space clipping viewport) and any with
+    model extents > 1 000 000 units (sanity filter).
+
+    Each entry has keys:
+        model_xmin, model_xmax, model_ymin, model_ymax
+        paper_w_mm, paper_h_mm
+    """
+    result: list[dict] = []
+    for vp in layout:
+        if vp.dxftype() != "VIEWPORT":
+            continue
+        try:
+            vp_id = vp.dxf.get("id", None)
+            if vp_id == 1:
+                continue
+            vc = vp.dxf.view_center_point
+            vh = float(vp.dxf.view_height)
+            pw = float(getattr(vp.dxf, "width", 0) or 0)
+            ph = float(getattr(vp.dxf, "height", 0) or 0)
+            if pw <= 0 or ph <= 0 or vh <= 0:
+                continue
+            vw = vh * (pw / ph)
+            if vw > 1_000_000 or vh > 1_000_000:
+                continue
+            result.append({
+                "model_xmin": vc.x - vw / 2,
+                "model_xmax": vc.x + vw / 2,
+                "model_ymin": vc.y - vh / 2,
+                "model_ymax": vc.y + vh / 2,
+                "paper_w_mm": pw,
+                "paper_h_mm": ph,
+            })
+        except Exception:
+            continue
+    logger.info("_layout_individual_viewport_extents: %d viewports", len(result))
+    return result
+
+
 def _layout_viewport_model_extents(
     layout,
 ) -> tuple[float, float, float, float] | None:
-    """Return the union of model-space extents of all VIEWPORT entities in *layout*.
-
-    ezdxf's ``draw_layout`` expands every viewport by rendering model-space content
-    through it, which is extremely slow for complex drawings (can take 10+ minutes).
-    Instead we compute the model-space window each viewport looks at and union them
-    all so that we can render model space directly with a crop box.
-
-    Returns ``(xmin, xmax, ymin, ymax)`` in model coordinates, or ``None`` if the
-    layout has no VIEWPORT entities (or their extents can't be determined).
-    """
-    viewports = [e for e in layout if e.dxftype() == "VIEWPORT"]
-    if not viewports:
+    """Return the UNION of model-space extents of all real VIEWPORTs (preview use)."""
+    vps = _layout_individual_viewport_extents(layout)
+    if not vps:
         return None
-
-    extents: list[tuple[float, float, float, float]] = []
-    for vp in viewports:
-        try:
-            vc = vp.dxf.view_center_point  # center in model space
-            vh = float(vp.dxf.view_height)  # height in model space
-            # Derive model-space width from paper-space aspect ratio
-            pw = float(getattr(vp.dxf, "width", 0) or 0)
-            ph = float(getattr(vp.dxf, "height", 0) or 0)
-            vw = vh * (pw / ph) if ph > 0 else vh
-            if vw <= 0 or vh <= 0:
-                continue
-            extents.append((
-                vc.x - vw / 2, vc.x + vw / 2,
-                vc.y - vh / 2, vc.y + vh / 2,
-            ))
-        except Exception:
-            continue
-
-    if not extents:
-        return None
-
     return (
-        min(e[0] for e in extents),
-        max(e[1] for e in extents),
-        min(e[2] for e in extents),
-        max(e[3] for e in extents),
+        min(v["model_xmin"] for v in vps),
+        max(v["model_xmax"] for v in vps),
+        min(v["model_ymin"] for v in vps),
+        max(v["model_ymax"] for v in vps),
     )
+
+def _patch_mleader_zerodiv() -> None:
+    """Monkey-patch ezdxf LeaderData.transform to survive zero-length dogleg vectors.
+
+    Some DWG files contain MLEADER entities with a zero-length dogleg vector.  When
+    ezdxf's draw_layout processes such an entity it calls Vec3.normalize() on a zero
+    vector, raising ZeroDivisionError and aborting the whole render.  We intercept
+    the transform method and silently skip the bad leaders.
+    """
+    try:
+        from ezdxf.entities import mleader as _ml
+        if getattr(_ml.LeaderData, "_patched_zerodiv", False):
+            return
+        _orig = _ml.LeaderData.transform
+
+        def _safe(self, wcs):  # noqa: ANN001
+            try:
+                return _orig(self, wcs)
+            except ZeroDivisionError:
+                pass  # zero-length dogleg – skip silently
+
+        _ml.LeaderData.transform = _safe
+        _ml.LeaderData._patched_zerodiv = True
+        logger.debug("_patch_mleader_zerodiv applied")
+    except Exception as exc:
+        logger.warning("_patch_mleader_zerodiv failed: %s", exc)
 
 
 def _render_single_layout(doc, layout, ax) -> None:
@@ -503,6 +539,7 @@ def _render_single_layout(doc, layout, ax) -> None:
     from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
+    _patch_mleader_zerodiv()
     ctx = RenderContext(doc)
     out = MatplotlibBackend(ax, adjust_figure=False)
     config = Configuration(
@@ -514,6 +551,7 @@ def _render_single_layout(doc, layout, ax) -> None:
     frontend = Frontend(ctx, out, config=config)
     _patch_frontend(frontend)
     frontend.draw_layout(layout)
+
 
 
 def _apply_frame_crop(ax, frame: CadFrame) -> None:
@@ -531,8 +569,13 @@ def _render_frame(
     preview: bool = False,
     bbox_cache: dict | None = None,
 ) -> None:
-    entity_limit = PREVIEW_MAX_ENTITIES if preview else None
+    """Render *frame* onto *ax* (model-space frames only).
 
+    Paper-space frames with viewports are handled upstream by
+    _render_paper_layout_viewport_pages; this path is used as a fallback
+    (preview or no viewports found).
+    """
+    entity_limit = PREVIEW_MAX_ENTITIES if preview else None
     crop_box = (frame.xmin, frame.xmax, frame.ymin, frame.ymax)
 
     if frame.source == "viewport_model":
@@ -545,35 +588,9 @@ def _render_frame(
         _apply_frame_crop(ax, frame)
         return
 
+
+    # Paper-space layout fallback (no viewports or preview mode)
     layout = doc.layouts.get(frame.layout)
-
-    # Rendering paper-space layouts via draw_layout() expands every VIEWPORT by
-    # re-rendering its model content — for complex drawings this takes 10+ minutes.
-    # Fast path: compute the union of viewport model extents and render model space
-    # directly.  Fall back to draw_layout only when no viewport extents are found
-    # (e.g. layouts with only decorative paper-space entities).
-    vp_model_box = _layout_viewport_model_extents(layout)
-    if vp_model_box is not None:
-        vp_xmin, vp_xmax, vp_ymin, vp_ymax = vp_model_box
-        logger.info(
-            "Layout %r: rendering model space via viewport extents "
-            "(%.0f×%.0f model units) instead of draw_layout",
-            frame.layout,
-            vp_xmax - vp_xmin,
-            vp_ymax - vp_ymin,
-        )
-        _render_modelspace(
-            doc, ax,
-            max_entities=entity_limit,
-            crop_box=(vp_xmin, vp_xmax, vp_ymin, vp_ymax),
-            bbox_cache=bbox_cache,
-        )
-        ax.set_xlim(vp_xmin, vp_xmax)
-        ax.set_ylim(vp_ymin, vp_ymax)
-        ax.set_aspect("auto")
-        ax.margins(0)
-        return
-
     _render_single_layout(doc, layout, ax)
     if frame.source in (
         "viewport",
@@ -584,6 +601,47 @@ def _render_frame(
         "stamp_frame",
     ):
         _apply_frame_crop(ax, frame)
+
+
+def _render_paper_layout_viewport_pages(
+    doc,
+    frame: CadFrame,
+    pdf_pages,
+    *,
+    bbox_cache: dict | None = None,
+) -> bool:
+    """Render each viewport in a paper-space layout as a separate PDF page.
+
+    Returns True when at least one page was written, False if no usable viewports
+    were found (caller should fall back to the normal _render_frame path).
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    layout = doc.layouts.get(frame.layout)
+    vp_list = _layout_individual_viewport_extents(layout)
+    if not vp_list:
+        return False
+
+    logger.info("Paper layout %r: rendering %d viewports as separate pages", frame.layout, len(vp_list))
+    for i, vp in enumerate(vp_list):
+        check_cancelled()
+        figsize = (vp["paper_w_mm"] / 25.4, vp["paper_h_mm"] / 25.4)
+        fig = plt.figure(figsize=figsize, dpi=CAD_RENDER_DPI)
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.axis("off")
+        crop = (vp["model_xmin"], vp["model_xmax"], vp["model_ymin"], vp["model_ymax"])
+        _render_modelspace(doc, ax, crop_box=crop, bbox_cache=bbox_cache)
+        ax.set_xlim(vp["model_xmin"], vp["model_xmax"])
+        ax.set_ylim(vp["model_ymin"], vp["model_ymax"])
+        ax.set_aspect("auto")
+        ax.margins(0)
+        _save_figure(pdf_pages, fig)
+        plt.close(fig)
+        logger.info("  Viewport %d/%d done", i + 1, len(vp_list))
+
+    return True
 
 
 
@@ -601,7 +659,7 @@ def convert_dxf_to_pdf(
     *,
     meta: dict[str, Any] | None = None,
 ) -> Path:
-    """Рендер DXF в PDF: по рамкам (приоритет) или по layout."""
+    """Р В Р ВµР Р…Р Т‘Р ВµРЎР‚ DXF Р Р† PDF: Р С—Р С• РЎР‚Р В°Р СР С”Р В°Р С (Р С—РЎР‚Р С‘Р С•РЎР‚Р С‘РЎвЂљР ВµРЎвЂљ) Р С‘Р В»Р С‘ Р С—Р С• layout."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -624,13 +682,50 @@ def convert_dxf_to_pdf(
     with PdfPages(str(pdf_path)) as pdf:
         if use_frames:
             logger.info(
-                "DXF %s: рендер %d рамок, dpi=%s",
+                "DXF %s: РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚ %d РЎР‚Р В°Р СР С•Р С”, dpi=%s",
                 dxf_path.name,
                 len(render_frames),
                 CAD_RENDER_DPI,
             )
             for frame in render_frames:
                 check_cancelled()
+                is_paper_frame = (
+                    frame.layout.upper() != "MODEL"
+                    and frame.source in (
+                        "stamp_frame", "viewport", "viewport_union", "sheet_border",
+                    )
+                )
+                if is_paper_frame:
+                    # PRIMARY: draw_layout renders the full paper-space sheet
+                    # (title block, borders, notes + all viewport model content).
+                    figsize = _frame_figsize(frame)
+                    fig = plt.figure(figsize=figsize, dpi=CAD_RENDER_DPI)
+                    ax = fig.add_axes([0, 0, 1, 1])
+                    ax.axis("off")
+                    try:
+                        _render_frame(doc, frame, ax, bbox_cache=bbox_cache)
+                        _save_figure(pdf, fig)
+                        plt.close(fig)
+                        continue
+                    except Exception:
+                        logger.warning(
+                            "draw_layout failed for %r, falling back to per-viewport",
+                            frame.layout, exc_info=True,
+                        )
+                        plt.close(fig)
+                    # FALLBACK: per-viewport pages (no title block but shows content)
+                    try:
+                        done = _render_paper_layout_viewport_pages(
+                            doc, frame, pdf, bbox_cache=bbox_cache,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Per-viewport fallback also failed (layout=%r)", frame.layout
+                        )
+                        done = False
+                    if done:
+                        continue
+
                 figsize = _frame_figsize(frame)
                 fig = plt.figure(figsize=figsize, dpi=CAD_RENDER_DPI)
                 ax = fig.add_axes([0, 0, 1, 1])
@@ -638,13 +733,19 @@ def convert_dxf_to_pdf(
                 try:
                     _render_frame(doc, frame, ax, bbox_cache=bbox_cache)
                     _save_figure(pdf, fig)
+                except Exception:
+                    logger.exception(
+                        "Error rendering frame %s (layout=%r source=%r)",
+                        frame, frame.layout, frame.source,
+                    )
+                    raise
                 finally:
                     plt.close(fig)
         else:
             paper = _paper_layouts(doc)
             render_targets = paper if paper else [doc.modelspace()]
             logger.info(
-                "DXF %s: рендер %d layout(s), dpi=%s",
+                "DXF %s: РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚ %d layout(s), dpi=%s",
                 dxf_path.name,
                 len(render_targets),
                 CAD_RENDER_DPI,
@@ -670,12 +771,12 @@ def convert_dxf_to_pdf(
     gc.collect()
 
     if not pdf_path.exists() or pdf_path.stat().st_size == 0:
-        raise RuntimeError("PDF не создан после рендера DXF.")
+        raise RuntimeError("PDF Р Р…Р Вµ РЎРѓР С•Р В·Р Т‘Р В°Р Р… Р С—Р С•РЎРѓР В»Р Вµ РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚Р В° DXF.")
     return pdf_path
 
 
 def _cad_render_targets(doc) -> tuple[list[Any], str, list[CadFrame]]:
-    """Цели рендера: рамки или layout'ы."""
+    """Р В¦Р ВµР В»Р С‘ РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚Р В°: РЎР‚Р В°Р СР С”Р С‘ Р С‘Р В»Р С‘ layout'РЎвЂ№."""
     all_frames = detect_frames_in_doc(doc)
     render_frames = choose_render_frames(doc, all_frames) if CAD_RENDER_MODE != "layouts" else []
     use_frames = bool(render_frames) and CAD_RENDER_MODE in ("auto", "frames")
@@ -692,7 +793,7 @@ def render_cad_preview_png(
     page: int = 1,
     dpi: int | None = None,
 ) -> tuple[bytes, int, dict[str, Any]]:
-    """Один кадр CAD (DWG/DXF) в PNG для предпросмотра. Возвращает (png, pages, meta)."""
+    """Р С›Р Т‘Р С‘Р Р… Р С”Р В°Р Т‘РЎР‚ CAD (DWG/DXF) Р Р† PNG Р Т‘Р В»РЎРЏ Р С—РЎР‚Р ВµР Т‘Р С—РЎР‚Р С•РЎРѓР СР С•РЎвЂљРЎР‚Р В°. Р вЂ™Р С•Р В·Р Р†РЎР‚Р В°РЎвЂ°Р В°Р ВµРЎвЂљ (png, pages, meta)."""
     import io
 
     import matplotlib
@@ -704,21 +805,21 @@ def render_cad_preview_png(
     input_path = Path(input_file)
     suffix = input_path.suffix.lower()
     if suffix not in CAD_EXTENSIONS:
-        raise ValueError(f"Ожидается DWG или DXF, получено: {suffix}")
+        raise ValueError(f"Р С›Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљРЎРѓРЎРЏ DWG Р С‘Р В»Р С‘ DXF, Р С—Р С•Р В»РЎС“РЎвЂЎР ВµР Р…Р С•: {suffix}")
 
     size_mb = input_path.stat().st_size / (1024 * 1024) if input_path.exists() else 0
     if size_mb > PREVIEW_CAD_MAX_MB:
         raise RuntimeError(
-            f"Файл слишком большой ({size_mb:.0f} МБ) для предпросмотра исходника. "
-            f"Сначала выполните конвертацию в PDF на странице «Конвертация» "
-            f"(лимит предпросмотра — {PREVIEW_CAD_MAX_MB:.0f} МБ)."
+            f"Р В¤Р В°Р в„–Р В» РЎРѓР В»Р С‘РЎв‚¬Р С”Р С•Р С Р В±Р С•Р В»РЎРЉРЎв‚¬Р С•Р в„– ({size_mb:.0f} Р СљР вЂ) Р Т‘Р В»РЎРЏ Р С—РЎР‚Р ВµР Т‘Р С—РЎР‚Р С•РЎРѓР СР С•РЎвЂљРЎР‚Р В° Р С‘РЎРѓРЎвЂ¦Р С•Р Т‘Р Р…Р С‘Р С”Р В°. "
+            f"Р РЋР Р…Р В°РЎвЂЎР В°Р В»Р В° Р Р†РЎвЂ№Р С—Р С•Р В»Р Р…Р С‘РЎвЂљР Вµ Р С”Р С•Р Р…Р Р†Р ВµРЎР‚РЎвЂљР В°РЎвЂ Р С‘РЎР‹ Р Р† PDF Р Р…Р В° РЎРѓРЎвЂљРЎР‚Р В°Р Р…Р С‘РЎвЂ Р Вµ Р’В«Р С™Р С•Р Р…Р Р†Р ВµРЎР‚РЎвЂљР В°РЎвЂ Р С‘РЎРЏР’В» "
+            f"(Р В»Р С‘Р СР С‘РЎвЂљ Р С—РЎР‚Р ВµР Т‘Р С—РЎР‚Р С•РЎРѓР СР С•РЎвЂљРЎР‚Р В° РІР‚вЂќ {PREVIEW_CAD_MAX_MB:.0f} Р СљР вЂ)."
         )
 
     tmp = Path(tempfile.mkdtemp(prefix="cad_preview_"))
     try:
         if suffix == ".dwg":
             if not oda_available():
-                raise RuntimeError("ODAFileConverter не установлен")
+                raise RuntimeError("ODAFileConverter Р Р…Р Вµ РЎС“РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р В»Р ВµР Р…")
             cached_dxf = _dwg_to_dxf_for_preview(input_path)
             work_dxf = tmp / cached_dxf.name
             shutil.copy2(cached_dxf, work_dxf)
@@ -779,17 +880,17 @@ def render_cad_preview_png(
 
 
 def inspect_cad_frames(input_file: str) -> dict[str, Any]:
-    """Список рамок для DWG/DXF (для UI/API)."""
+    """Р РЋР С—Р С‘РЎРѓР С•Р С” РЎР‚Р В°Р СР С•Р С” Р Т‘Р В»РЎРЏ DWG/DXF (Р Т‘Р В»РЎРЏ UI/API)."""
     input_path = Path(input_file)
     suffix = input_path.suffix.lower()
     if suffix not in CAD_EXTENSIONS:
-        raise ValueError(f"Ожидается DWG или DXF, получено: {suffix}")
+        raise ValueError(f"Р С›Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљРЎРѓРЎРЏ DWG Р С‘Р В»Р С‘ DXF, Р С—Р С•Р В»РЎС“РЎвЂЎР ВµР Р…Р С•: {suffix}")
 
     tmp = Path(tempfile.mkdtemp(prefix="cad_frames_"))
     try:
         if suffix == ".dwg":
             if not oda_available():
-                raise RuntimeError("ODAFileConverter не установлен")
+                raise RuntimeError("ODAFileConverter Р Р…Р Вµ РЎС“РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р В»Р ВµР Р…")
             dxf_path = convert_dwg_to_dxf(str(input_path))
             work_dxf = tmp / dxf_path.name
             shutil.copy2(dxf_path, work_dxf)
@@ -812,13 +913,13 @@ def inspect_cad_frames(input_file: str) -> dict[str, Any]:
 
 def convert_cad_to_pdf(input_file: str) -> tuple[Path, dict[str, Any]]:
     """
-    DWG/DXF → PDF.
-    DWG: ODA → PDF; при ошибке — DWG → DXF → рендер по рамкам/layout (ezdxf).
+    DWG/DXF РІвЂ вЂ™ PDF.
+    DWG: ODA РІвЂ вЂ™ PDF; Р С—РЎР‚Р С‘ Р С•РЎв‚¬Р С‘Р В±Р С”Р Вµ РІР‚вЂќ DWG РІвЂ вЂ™ DXF РІвЂ вЂ™ РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚ Р С—Р С• РЎР‚Р В°Р СР С”Р В°Р С/layout (ezdxf).
     """
     input_path = Path(input_file)
     suffix = input_path.suffix.lower()
     if suffix not in CAD_EXTENSIONS:
-        raise ValueError(f"Ожидается DWG или DXF, получено: {suffix}")
+        raise ValueError(f"Р С›Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљРЎРѓРЎРЏ DWG Р С‘Р В»Р С‘ DXF, Р С—Р С•Р В»РЎС“РЎвЂЎР ВµР Р…Р С•: {suffix}")
 
     meta: dict[str, Any] = {"engine": None, "fallback": False}
     tmp = Path(tempfile.mkdtemp(prefix="cad_pdf_"))
@@ -826,7 +927,7 @@ def convert_cad_to_pdf(input_file: str) -> tuple[Path, dict[str, Any]]:
     size_mb = input_path.stat().st_size / (1024 * 1024) if input_path.exists() else 0
 
     if suffix == ".dwg":
-        # Bypassed direct ODA PDF conversion to strictly use the frame-detection engine on the _Штамп_рамка layer.
+        # Bypassed direct ODA PDF conversion to strictly use the frame-detection engine on the _Р РЃРЎвЂљР В°Р СР С—_РЎР‚Р В°Р СР С”Р В° layer.
         meta["fallback"] = True
         meta["engine"] = "ezdxf"
 
