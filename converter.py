@@ -11,7 +11,6 @@ import threading
 import time
 import uuid
 import gc
-import hashlib
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from contextlib import contextmanager
 from pathlib import Path
@@ -53,54 +52,6 @@ def allowed_roots() -> list[Path]:
         "/data,/workspace,/opt/road-pdf-platform",
     )
     return [Path(p.strip()).resolve() for p in raw.split(",") if p.strip()]
-
-
-def get_file_content_hash(path: Path) -> str:
-    """Быстрый хэш файла на основе размера, mtime и структуры байт."""
-    try:
-        stat = path.stat()
-        h = hashlib.md5()
-        # Добавляем имя, размер и время изменения
-        h.update(f"{path.name}_{stat.st_size}_{stat.st_mtime}".encode())
-        # Если файл не пустой, берем крайние байты для страховки от коллизий при подмене
-        if stat.st_size > 0:
-            with open(path, "rb") as f:
-                h.update(f.read(8192))
-                if stat.st_size > 8192:
-                    f.seek(-8192, 2)
-                    h.update(f.read(8192))
-        return h.hexdigest()
-    except Exception:
-        return hashlib.md5(f"{path}_{time.time()}".encode()).hexdigest()
-
-
-def get_global_cache_dir() -> Path:
-    """Глобальная папка кэша (резервная)."""
-    d = Path(os.getenv("CONVERT_CACHE_DIR", "/data/cache/convert"))
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-        test_file = d / f".test_write_{uuid.uuid4().hex}"
-        test_file.touch()
-        test_file.unlink()
-        return d
-    except Exception:
-        fallback = Path(tempfile.gettempdir()) / "convert_cache"
-        fallback.mkdir(parents=True, exist_ok=True)
-        return fallback
-
-
-def get_local_cache_dir(src_file: Path) -> Path:
-    """Локальная папка проекта `.convert_cache`. Если папка read-only, отдает глобальную."""
-    parent = src_file.parent
-    cache_dir = parent / ".convert_cache"
-    try:
-        cache_dir.mkdir(exist_ok=True)
-        test_file = cache_dir / f".test_write_{uuid.uuid4().hex}"
-        test_file.touch()
-        test_file.unlink()
-        return cache_dir
-    except Exception:
-        return get_global_cache_dir()
 
 
 def server_path_exists(path: Path) -> bool:
@@ -1003,11 +954,19 @@ def _convert_timeout_for(src: Path) -> int:
     return FILE_CONVERT_TIMEOUT_SEC
 
 
-def convert_file_to_pdf_isolated(src: Path, dest: Path) -> None:
+def convert_file_to_pdf_isolated(src: Path, dest: Path) -> dict | None:
     """Конвертация в отдельном процессе — OOM дочернего не роняет uvicorn."""
     import sys
+    import json
 
     timeout_sec = _convert_timeout_for(src)
+    meta_file = dest.with_suffix(".meta.json")
+    if meta_file.exists():
+        try:
+            meta_file.unlink()
+        except Exception:
+            pass
+
     try:
         proc = run_monitored(
             [sys.executable, str(_WORKER_SCRIPT), str(src), str(dest)],
@@ -1028,12 +987,21 @@ def convert_file_to_pdf_isolated(src: Path, dest: Path) -> None:
     if not dest.is_file():
         raise RuntimeError(f"PDF не создан: {src.name}")
 
+    meta = None
+    if meta_file.exists():
+        try:
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+            meta_file.unlink()
+        except Exception:
+            pass
+    return meta
 
-def _convert_local_file_to_pdf(src: Path, dest: Path) -> None:
+
+def _convert_local_file_to_pdf(src: Path, dest: Path) -> dict | None:
     if CONVERT_ISOLATE:
-        convert_file_to_pdf_isolated(src, dest)
+        return convert_file_to_pdf_isolated(src, dest)
     else:
-        convert_file_to_pdf(src, dest)
+        return convert_file_to_pdf(src, dest)
 
 
 def convert_file_to_pdf(src: Path, dest: Path) -> dict | None:
@@ -1059,7 +1027,10 @@ def convert_file_to_pdf(src: Path, dest: Path) -> dict | None:
                 raise RuntimeError("ODAFileConverter не установлен (DWG/DXF недоступны)")
             with _cad_sem:
                 pdf_tmp, cad_meta = convert_cad_to_pdf(str(src))
-            shutil.move(str(pdf_tmp), str(dest))
+            try:
+                shutil.move(str(pdf_tmp), str(dest))
+            finally:
+                shutil.rmtree(pdf_tmp.parent, ignore_errors=True)
             return cad_meta
         pdf_tmp = _convert_with_libreoffice(src, tmp)
         shutil.move(str(pdf_tmp), str(dest))
@@ -1068,13 +1039,12 @@ def convert_file_to_pdf(src: Path, dest: Path) -> dict | None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _convert_source_to_temp_pdf(src: Path, dest: Path) -> None:
+def _convert_source_to_temp_pdf(src: Path, dest: Path) -> dict | None:
     """Конвертировать файл с сервера (локальный или SMB) во временный PDF."""
     if _is_smb_path(src) and _smb_mounted():
         with _smb_local_file(src) as local_src:
-            _convert_local_file_to_pdf(local_src, dest)
-        return
-    _convert_local_file_to_pdf(src, dest)
+            return _convert_local_file_to_pdf(local_src, dest)
+    return _convert_local_file_to_pdf(src, dest)
 
 
 def _save_merged_pdf(local_pdf: Path, dest: Path) -> Path:
@@ -1113,10 +1083,10 @@ def convert_file_in_place(src: Path) -> dict:
         if _is_smb_path(src) and _smb_mounted():
             with _smb_local_file(src) as local_src:
                 tmp_pdf = local_src.with_suffix(".pdf")
-                cad_meta = convert_file_to_pdf(local_src, tmp_pdf)
+                cad_meta = _convert_local_file_to_pdf(local_src, tmp_pdf)
                 saved = _smb_put_file(tmp_pdf, dest)
         else:
-            cad_meta = convert_file_to_pdf(src, dest)
+            cad_meta = _convert_local_file_to_pdf(src, dest)
             saved = dest
         msg = "Сконвертировано"
         if cad_meta and cad_meta.get("engine") == "ezdxf" and cad_meta.get("fallback"):
@@ -1305,55 +1275,13 @@ def convert_folder(
 
 def _convert_merge_part(idx: int, src: Path, tmp: Path) -> tuple[int, Path | None, dict]:
     part = tmp / f"{idx:04d}.pdf"
-
-    # 1. Проверяем, есть ли готовый PDF с таким же именем прямо рядом с исходным редактируемым файлом
-    if src.suffix.lower() != ".pdf":
-        sibling_pdf = src.with_suffix(".pdf")
-        if sibling_pdf.exists() and sibling_pdf.stat().st_mtime >= src.stat().st_mtime:
-            try:
-                shutil.copy2(sibling_pdf, part)
-                return idx, part, {
-                    "source": str(src),
-                    "pdf": str(part),
-                    "status": "ok",
-                    "message": "Включён в сборку (использован готовый PDF)",
-                    "hash": get_file_content_hash(sibling_pdf),
-                }
-            except Exception:
-                pass
-
-    h = get_file_content_hash(src)
-    cache_dir = get_local_cache_dir(src)
-    cached_pdf = cache_dir / f"{h}.pdf"
-
-    # Пытаемся взять готовый PDF из локального кэша
-    if cached_pdf.exists():
-        try:
-            shutil.copy2(cached_pdf, part)
-            return idx, part, {
-                "source": str(src),
-                "pdf": str(part),
-                "status": "ok",
-                "message": "Включён в сборку (из кэша)",
-                "hash": h,
-            }
-        except Exception:
-            pass
-
-    # Стандартная конвертация
     try:
         _convert_source_to_temp_pdf(src, part)
-        # Сохраняем результат в кэш для последующих сборок
-        try:
-            shutil.copy2(part, cached_pdf)
-        except Exception:
-            pass
         return idx, part, {
             "source": str(src),
             "pdf": str(part),
             "status": "ok",
             "message": "Включён в сборку",
-            "hash": h,
         }
     except Exception as e:
         return idx, None, {
@@ -1361,7 +1289,6 @@ def _convert_merge_part(idx: int, src: Path, tmp: Path) -> tuple[int, Path | Non
             "pdf": None,
             "status": "error",
             "message": str(e),
-            "hash": h,
         }
 
 
@@ -1377,16 +1304,6 @@ def _convert_folder_merged(
 ) -> dict:
     if not inputs:
         raise ValueError("В папке нет поддерживаемых файлов для сборки")
-
-    # Исключаем дублирование: если для редактируемого чертежа/документа в списке уже есть готовый PDF,
-    # убираем исходный редактируемый файл из списка сборки, чтобы страницы не дублировались.
-    pdf_names = {str(p.with_suffix("")).lower() for p in inputs if p.suffix.lower() == ".pdf"}
-    filtered_inputs = []
-    for p in inputs:
-        if p.suffix.lower() != ".pdf" and str(p.with_suffix("")).lower() in pdf_names:
-            continue
-        filtered_inputs.append(p)
-    inputs = filtered_inputs
 
     safe_name = Path(output_name).name or "сборка.pdf"
     if not safe_name.lower().endswith(".pdf"):
@@ -1433,24 +1350,6 @@ def _convert_folder_merged(
             saved_path = download_to
         else:
             saved_path = _save_merged_pdf(local_merged, merged_path)
-            # Сохраняем манифест сборки (.cache.json) рядом с итоговым PDF
-            try:
-                manifest_path = saved_path.with_suffix(".pdf.cache.json")
-                manifest_sources = {}
-                for r in results:
-                    if r.get("status") == "ok" and "hash" in r:
-                        src_p = Path(r["source"])
-                        manifest_sources[str(src_p)] = {
-                            "hash": r["hash"],
-                            "mtime": src_p.stat().st_mtime if src_p.exists() else 0.0
-                        }
-                with open(manifest_path, "w", encoding="utf-8") as mf:
-                    json.dump({
-                        "output_file": saved_path.name,
-                        "sources": manifest_sources
-                    }, mf, ensure_ascii=False, indent=2)
-            except Exception:
-                pass
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
         pdf_parts.clear()
@@ -1548,26 +1447,6 @@ def convert_uploads_to_merged_pdf(
         "pages_from": len(pdf_parts),
         "stats": stats,
         "files": results,
-        "numbering_from_page": numbering_from_page,
-        "numbering_start": numbering_start,
-    }
-
-
-def number_pdf_file(
-    file_path: str,
-    numbering_from_page: int = 1,
-    numbering_start: int = 1,
-) -> dict:
-    """Пронумеровать существующий PDF файл на сервере."""
-    fp = validate_file(file_path)
-    if fp.suffix.lower() != ".pdf":
-        raise ValueError("Файл не является PDF")
-
-    _apply_pdf_numbering(fp, from_page=numbering_from_page, start=numbering_start)
-
-    return {
-        "status": "ok",
-        "file_path": str(fp),
         "numbering_from_page": numbering_from_page,
         "numbering_start": numbering_start,
     }

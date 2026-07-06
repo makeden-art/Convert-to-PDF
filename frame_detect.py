@@ -372,39 +372,7 @@ def _detect_block_frames(layout, layout_name: str, doc) -> list[CadFrame]:
 def detect_frames_in_doc(doc) -> list[CadFrame]:
     frames: list[CadFrame] = []
 
-    # 1. Поиск замкнутых прямоугольников на целевом слое _Штамп_рамка
-    target_layers = {"_штамп_рамка", "штамп_рамка", "_штамп_рамк", "штамп_рамк"}
-    for layout_name in doc.layouts.names():
-        layout = doc.layouts.get(layout_name)
-        for xmin, ymin, xmax, ymax, layer, handle in _collect_closed_rects(layout):
-            if layer and layer.strip().lower() in target_layers:
-                w = xmax - xmin
-                h = ymax - ymin
-                if w < 30 or h < 30:
-                    continue
-                label = f"{round(w)}×{round(h)} мм"
-                frames.append(CadFrame(
-                    source="stamp_frame",
-                    layout=layout_name,
-                    label=label,
-                    width_mm=round(max(w, h), 1),
-                    height_mm=round(min(w, h), 1),
-                    xmin=xmin,
-                    ymin=ymin,
-                    xmax=xmax,
-                    ymax=ymax,
-                    layer=layer,
-                    handle=handle,
-                    orientation=_orientation_label(w, h),
-                ))
-
-    # Если рамки на слое _Штамп_рамка найдены, возвращаем только их
-    if frames:
-        deduped = _dedupe(frames)
-        logger.info("Найдено приоритетных рамок на слое _Штамп_рамка: %d", len(deduped))
-        return deduped
-
-    # Иначе выполняем стандартный поиск рамок
+    # Собираем все рамки стандартными методами
     for layout_name in doc.layouts.names():
         layout = doc.layouts.get(layout_name)
         frames.extend(_detect_sheet_border_frames(layout, layout_name))
@@ -412,8 +380,15 @@ def detect_frames_in_doc(doc) -> list[CadFrame]:
         frames.extend(_detect_polyline_frames(layout, layout_name))
         frames.extend(_detect_block_frames(layout, layout_name, doc))
 
-    deduped = _dedupe(frames)
-    logger.info("Найдено рамок: %d", len(deduped))
+    # СТРОГИЙ РЕЖИМ: Оставляем только те рамки, которые лежат на слоях _штамп_рамка и т.д.
+    strict_frames = [f for f in frames if _is_priority_frame_layer(f.layer)]
+
+    if not strict_frames:
+        logger.warning("В чертеже не найдено ни одной рамки на слое _штамп_рамка. Пропускаем файл.")
+        return []
+
+    deduped = _dedupe(strict_frames)
+    logger.info("Найдено строгих рамок на целевом слое: %d", len(deduped))
     return deduped
 
 
@@ -587,22 +562,14 @@ def choose_render_frames(doc, frames: list[CadFrame]) -> list[CadFrame]:
     has_substantial_layouts = any(n >= 10 for n in _layout_entity_counts.values())
 
     # Модель получает приоритет если:
+    #   - найдено много (больше 5) рамок в модели, ИЛИ
     #   - рамки лежат на явном слое-штампе (_Штамп_рамка, pdf_frame и т.п.), ИЛИ
     #   - в бумажном пространстве нет содержательных листов (чертёж полностью в модели).
     prefer_model = len(model_frames) > 1 and (
-        model_has_stamp_layers or not has_substantial_layouts
+        len(model_frames) > 5 or model_has_stamp_layers or not has_substantial_layouts
     )
 
-    logger.warning(
-        "choose_render_frames: model_frames=%d, layouts=%s, layout_counts=%s, "
-        "stamp_layers=%s, substantial=%s → prefer_model=%s",
-        len(model_frames),
-        layout_names,
-        _layout_entity_counts,
-        model_has_stamp_layers,
-        has_substantial_layouts,
-        prefer_model,
-    )
+
 
     if prefer_model:
         model_stamps = [f for f in model_frames if f.source == "stamp_frame"]
@@ -614,11 +581,17 @@ def choose_render_frames(doc, frames: list[CadFrame]) -> list[CadFrame]:
     chosen: list[CadFrame] = []
     if layout_names:
         for layout_name in layout_names:
+            local = [f for f in frames if f.layout == layout_name]
+            if not local:
+                continue
+
             # Пропускаем листы-заглушки с минимальным количеством объектов
+            # НО не пропускаем, если на листе найдена приоритетная рамка
             try:
                 _layout_obj = doc.layouts.get(layout_name)
                 _layout_entity_count = sum(1 for _ in _layout_obj)
-                if _layout_entity_count < 5:
+                has_priority = any(_is_priority_frame_layer(f.layer) for f in local)
+                if _layout_entity_count < 5 and not has_priority:
                     logger.debug(
                         "Skipping layout %r: only %d entities (empty placeholder)",
                         layout_name,
@@ -627,10 +600,6 @@ def choose_render_frames(doc, frames: list[CadFrame]) -> list[CadFrame]:
                     continue
             except Exception:
                 pass
-
-            local = [f for f in frames if f.layout == layout_name]
-            if not local:
-                continue
 
             priority = [
                 f

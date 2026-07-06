@@ -572,6 +572,16 @@ def _render_single_layout(doc, layout, ax) -> None:
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
     _patch_mleader_zerodiv()
+
+    # Загружаем ГОСТ-шрифты в Matplotlib напрямую (в обход fontconfig, чтобы не крашить ODA)
+    import matplotlib.font_manager as fm
+    import glob
+    for font_path in glob.glob("/app/fonts/*.ttf"):
+        try:
+            fm.fontManager.addfont(font_path)
+        except Exception:
+            pass
+
     ctx = RenderContext(doc)
     out = MatplotlibBackend(ax, adjust_figure=False)
     config = Configuration(
