@@ -438,9 +438,13 @@ def _render_modelspace(
     config = Configuration(
         color_policy=ColorPolicy.MONOCHROME,
         line_policy=LinePolicy.APPROXIMATE,
-        max_flattening_distance=0.15,
-        circle_approximation_count=32,
+        max_flattening_distance=2.0,
+        circle_approximation_count=16,
+        hatch_policy=Configuration().hatch_policy,
     )
+    
+    _patch_filter_vp_entities()
+    
     frontend = Frontend(ctx, out, config=config)
     _patch_frontend(frontend)
 
@@ -571,6 +575,7 @@ def _render_single_layout(doc, layout, ax) -> None:
     from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
+    _patch_filter_vp_entities()
     _patch_mleader_zerodiv()
 
     # Загружаем ГОСТ-шрифты в Matplotlib напрямую (в обход fontconfig, чтобы не крашить ODA)
@@ -587,8 +592,8 @@ def _render_single_layout(doc, layout, ax) -> None:
     config = Configuration(
         color_policy=ColorPolicy.MONOCHROME,
         line_policy=LinePolicy.APPROXIMATE,
-        max_flattening_distance=0.15,
-        circle_approximation_count=32,
+        max_flattening_distance=2.0,
+        circle_approximation_count=16,
     )
     frontend = Frontend(ctx, out, config=config)
     _patch_frontend(frontend)
@@ -631,9 +636,90 @@ def _render_frame(
         return
 
 
-    # Paper-space layout fallback (no viewports or preview mode)
+    # Paper-space layout fallback (fast multi-axes rendering)
     layout = doc.layouts.get(frame.layout)
-    _render_single_layout(doc, layout, ax)
+    viewports = [e for e in layout if e.dxftype() == "VIEWPORT" and e.dxf.status > 0]
+    
+    if not viewports:
+        _render_single_layout(doc, layout, ax)
+    else:
+        fig = ax.figure
+        # 1. Hide the original ax so it doesn't block
+        ax.set_visible(False)
+        
+        # Paper boundaries
+        pw = frame.xmax - frame.xmin
+        ph = frame.ymax - frame.ymin
+        
+        for vp in viewports:
+            try:
+                vc = vp.dxf.view_center_point
+                vh = float(vp.dxf.view_height)
+                vp_w = float(getattr(vp.dxf, "width", 0) or 0)
+                vp_h = float(getattr(vp.dxf, "height", 0) or 0)
+                if vp_h <= 0: continue
+                vw = vh * (vp_w / vp_h)
+                if vw <= 0 or vh <= 0: continue
+                
+                # Model boundaries
+                mod_xmin = vc.x - vw / 2
+                mod_xmax = vc.x + vw / 2
+                mod_ymin = vc.y - vh / 2
+                mod_ymax = vc.y + vh / 2
+                
+                # Relative figure coordinates
+                ax_left = (vp.dxf.center.x - vp_w / 2 - frame.xmin) / pw if pw > 0 else 0
+                ax_bottom = (vp.dxf.center.y - vp_h / 2 - frame.ymin) / ph if ph > 0 else 0
+                ax_width = vp_w / pw if pw > 0 else 1
+                ax_height = vp_h / ph if ph > 0 else 1
+                
+                # Clamp to 0-1 just in case
+                ax_left = max(0.0, min(1.0, ax_left))
+                ax_bottom = max(0.0, min(1.0, ax_bottom))
+                ax_width = max(0.0, min(1.0 - ax_left, ax_width))
+                ax_height = max(0.0, min(1.0 - ax_bottom, ax_height))
+                
+                if ax_width <= 0.01 or ax_height <= 0.01: continue
+                
+                ax_vp = fig.add_axes([ax_left, ax_bottom, ax_width, ax_height])
+                ax_vp.axis("off")
+                _render_modelspace(
+                    doc, ax_vp, max_entities=entity_limit, 
+                    crop_box=(mod_xmin, mod_xmax, mod_ymin, mod_ymax), 
+                    bbox_cache=bbox_cache
+                )
+                ax_vp.set_xlim(mod_xmin, mod_xmax)
+                ax_vp.set_ylim(mod_ymin, mod_ymax)
+                ax_vp.set_aspect("auto")
+                ax_vp.margins(0)
+            except Exception as e:
+                logger.warning("Fast VP render error: %s", e)
+
+        # 2. Render paper space entities on a transparent top layer
+        ax_paper = fig.add_axes([0, 0, 1, 1])
+        ax_paper.axis("off")
+        ax_paper.patch.set_alpha(0)
+        
+        from ezdxf.addons.drawing import Frontend, RenderContext
+        from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
+        from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
+        ctx = RenderContext(doc)
+        out = MatplotlibBackend(ax_paper, adjust_figure=False)
+        config = Configuration(
+            color_policy=ColorPolicy.MONOCHROME,
+            line_policy=LinePolicy.APPROXIMATE,
+            max_flattening_distance=2.0,
+            circle_approximation_count=16,
+        )
+        frontend = Frontend(ctx, out, config=config)
+        _patch_frontend(frontend)
+        layout_entities = [e for e in layout if e.dxftype() != "VIEWPORT"]
+        frontend.draw_entities(layout_entities)
+        
+        ax_paper.set_xlim(frame.xmin, frame.xmax)
+        ax_paper.set_ylim(frame.ymin, frame.ymax)
+        ax_paper.set_aspect("auto")
+        ax_paper.margins(0)
     if frame.source in (
         "viewport",
         "polyline",

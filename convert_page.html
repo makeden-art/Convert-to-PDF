@@ -1003,8 +1003,8 @@
 
     function progressMessage(merge, fileCount) {
       if (merge && fileCount > 1) {
-        const estMin = Math.max(1, Math.round(fileCount * 0.4));
-        const estMax = Math.max(estMin + 1, Math.round(fileCount * 0.9));
+        const estMin = Math.max(1, Math.round(fileCount * 1.5));
+        const estMax = Math.max(estMin + 1, Math.round(fileCount * 1.75));
         return 'Сборка ' + fileCount + ' ' + plural(fileCount, 'файла', 'файлов', 'файлов') +
           ' в один PDF…\nОценка: ' + estMin + '–' + estMax + ' мин.\n' +
           'Word/Excel конвертируются по одному — не закрывайте страницу.';

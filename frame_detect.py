@@ -565,8 +565,8 @@ def choose_render_frames(doc, frames: list[CadFrame]) -> list[CadFrame]:
     #   - найдено много (больше 5) рамок в модели, ИЛИ
     #   - рамки лежат на явном слое-штампе (_Штамп_рамка, pdf_frame и т.п.), ИЛИ
     #   - в бумажном пространстве нет содержательных листов (чертёж полностью в модели).
-    prefer_model = len(model_frames) > 1 and (
-        len(model_frames) > 5 or model_has_stamp_layers or not has_substantial_layouts
+    prefer_model = model_has_stamp_layers or (
+        len(model_frames) > 1 and (len(model_frames) > 5 or not has_substantial_layouts)
     )
 
 
