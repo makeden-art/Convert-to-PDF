@@ -639,15 +639,17 @@ async def api_convert(
 
 @app.get("/api/cad-server-ping")
 async def ping_cad_server(ip: str):
-    import httpx
+    import urllib.request
     if not ip:
         raise HTTPException(status_code=400, detail="No IP")
     if not ip.startswith("http"):
         ip = "http://" + ip
     try:
-        async with httpx.AsyncClient(timeout=3) as client:
-            resp = await client.get(ip)
-            return {"status": "ok", "code": resp.status_code}
+        req = urllib.request.Request(ip, method="GET")
+        with urllib.request.urlopen(req, timeout=3) as response:
+            return {"status": "ok", "code": response.status}
+    except urllib.error.HTTPError as e:
+        return {"status": "ok", "code": e.code}
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 
