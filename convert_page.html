@@ -29,7 +29,7 @@
     .tree-panel { border: 1px solid rgba(148,163,184,.25); border-radius: 12px; background: #0f172a; min-height: 320px; display: flex; flex-direction: column; }
     .tree-toolbar { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid rgba(148,163,184,.2); flex-wrap: wrap; }
     .tree-path { font-size: 12px; color: #64748b; word-break: break-all; flex: 1; }
-    .tree-list { overflow: auto; flex: 1; padding: 8px 0; max-height: 360px; }
+    .tree-list { overflow: auto; flex: 1; padding: 8px 0; min-height: 400px; max-height: 65vh; }
     .tree-item { display: flex; align-items: center; gap: 8px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
     .tree-item:hover { background: rgba(56,189,248,.08); }
     .tree-item.dir { font-weight: 500; color: #7dd3fc; }
@@ -108,7 +108,7 @@
     .merge-item.drag-over { background: rgba(56,189,248,.15); border-top: 2px solid #38bdf8; }
     .merge-item.dragging { opacity: .45; }
     .merge-item .drag-handle { color: #64748b; font-size: 14px; flex-shrink: 0; user-select: none; padding: 0 2px; }
-    .merge-item .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .merge-item .fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .merge-item button { padding: 2px 8px; font-size: 11px; }
     .merge-item button.btn-remove { padding: 2px 6px; color: #f87171; border-color: rgba(248,113,113,.35); }
     .num-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
@@ -1045,7 +1045,13 @@
 
       try {
         let checkPayload = null;
-        if (merge && mergeOrder.length > 0) {
+        if (merge) {
+          if (!mergeOrder.length) {
+            alert('Список для сборки ещё загружается или пуст. Пожалуйста, подождите секунду и попробуйте снова.');
+            btn.disabled = false;
+            btn.textContent = 'Конвертировать на сервере';
+            return;
+          }
           checkPayload = {
             paths: mergeOrder.map(f => f.path),
             merge: true,
@@ -1079,7 +1085,7 @@
 
         startProgress(progressMessage(merge, fileCount || orderedSelections.length || 1));
 
-        if (merge && mergeOrder.length > 0) {
+        if (merge) {
           const j = await apiPost('/api/convert-paths', {
             paths: mergeOrder.map(f => f.path),
             merge: true,
