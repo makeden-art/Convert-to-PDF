@@ -1,30 +1,1286 @@
-"""Р С™Р С•Р Р…Р Р†Р ВµРЎР‚РЎвЂљР В°РЎвЂ Р С‘РЎРЏ DWG/DXF Р Р† PDF: ODA, Р В·Р В°РЎвЂљР ВµР С РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚ Р С—Р С• РЎР‚Р В°Р СР С”Р В°Р С Р С‘Р В»Р С‘ layout."""\nfrom __future__ import annotations\n\nimport gc\nimport logging\nimport os\nimport shutil\nimport subprocess\nimport tempfile\nfrom pathlib import Path\nfrom typing import Any, Iterable\n\nfrom frame_detect import CadFrame, choose_render_frames, detect_frames_in_doc, frames_summary\nfrom job_control import check_cancelled, run_monitored\n\nlogger = logging.getLogger("convert.cad")\nlogging.getLogger("ezdxf").setLevel(logging.ERROR)\n\n\n# Monkey patch ezdxf block reference explosion to catch transform/scaling exceptions gracefully.\n# This prevents a single buggy entity (like a ZeroDivisionError in a MLEADER) from breaking \n# rendering for the entire block (such as an entire table or title stamp).\ndef _safe_virtual_block_reference_entities(\n    block_ref,\n    *,\n    skipped_entity_callback=None,\n    redraw_order=False,\n    copy_strategy=None,\n) -> Iterable:\n    import sys\n    import ezdxf.explode\n    from ezdxf.explode import default_copy, default_logging_callback\n    from ezdxf.entities import Ellipse\n    from ezdxf.math import NonUniformScalingError, InsertTransformationError\n\n    if copy_strategy is None:\n        copy_strategy = default_copy\n\n    assert block_ref.dxftype() == "INSERT"\n    skipped_entity_callback = skipped_entity_callback or default_logging_callback\n\n    def disassemble(layout) -> Iterable:\n        for entity in layout.entities_in_redraw_order() if redraw_order else layout:\n            if entity.dxftype() == "ATTDEF":\n                continue\n            try:\n                copy = entity.copy(copy_strategy=copy_strategy)\n            except Exception as e:\n                skipped_entity_callback(entity, f"non copyable: {e}")\n                if hasattr(entity, "virtual_entities"):\n                    try:\n                        yield from entity.virtual_entities()\n                    except Exception:\n                        pass\n            else:\n                if hasattr(copy, "remove_association"):\n                    copy.remove_association()\n                yield copy\n\n    def transform(entities):\n        for entity in entities:\n            try:\n                entity.transform(m)\n            except NotImplementedError:\n                skipped_entity_callback(entity, "non transformable")\n            except NonUniformScalingError:\n                dxftype = entity.dxftype()\n                if dxftype in {"ARC", "CIRCLE"}:\n                    try:\n                        if abs(entity.dxf.radius) > 1e-12:\n                            yield Ellipse.from_arc(entity).transform(m)\n                        else:\n                            skipped_entity_callback(entity, "Invalid radius")\n                    except Exception as e:\n                        skipped_entity_callback(entity, f"arc transform error: {e}")\n                elif dxftype in {"LWPOLYLINE", "POLYLINE"}:\n                    try:\n                        yield from transform(entity.virtual_entities())\n                    except Exception as e:\n                        skipped_entity_callback(entity, f"polyline virtual_entities error: {e}")\n                else:\n                    skipped_entity_callback(entity, "unsupported non-uniform scaling")\n            except InsertTransformationError:\n                try:\n                    yield from transform(\n                        _safe_virtual_block_reference_entities(\n                            entity, skipped_entity_callback=skipped_entity_callback, copy_strategy=copy_strategy\n                        )\n                    )\n                except Exception as e:\n                    skipped_entity_callback(entity, f"insert transform error: {e}")\n            except Exception as e:\n                # Bypasses ZeroDivisionError and other math/structure exceptions inside specific entities\n                skipped_entity_callback(entity, f"transform error: {e}")\n            else:\n                yield entity\n\n    m = block_ref.matrix44()\n    block_layout = block_ref.block()\n    if block_layout is None:\n        return\n\n    yield from transform(disassemble(block_layout))\n\n\ndef _safe_draw_viewports(frontend, viewports) -> None:\n    # Sort viewports by status\n    viewports.sort(key=lambda e: e.dxf.status)\n    # Remove all invisible viewports:\n    viewports = [vp for vp in viewports if vp.dxf.status > 0]\n    if not viewports:\n        return\n\n    # Find the paper space viewport (ID == 1)\n    ps_vp_idx = None\n    for idx, vp in enumerate(viewports):\n        if vp.dxf.get("id") == 1:\n            ps_vp_idx = idx\n            break\n\n    if ps_vp_idx is not None:\n        viewports.pop(ps_vp_idx)\n    else:\n        # Fallback to ezdxf's original behavior if ID 1 is not found\n        if viewports[0].dxf.get("status", 1) == 1:\n            viewports.pop(0)\n\n    # Draw all remaining viewports\n    for viewport in viewports:\n        try:\n            frontend.draw_viewport(viewport)\n        except Exception as e:\n            logger.warning("Error rendering viewport %s: %s", viewport.dxf.handle, e)\n\n\n# Apply the monkey patch dynamically to all imported ezdxf modules containing it\ntry:\n    import sys\n    import ezdxf.explode\n    import ezdxf.entities.insert\n    import ezdxf.addons.drawing.frontend\n    for name, module in list(sys.modules.items()):\n        if name.startswith("ezdxf") and hasattr(module, "virtual_block_reference_entities"):\n            setattr(module, "virtual_block_reference_entities", _safe_virtual_block_reference_entities)\n    ezdxf.addons.drawing.frontend._draw_viewports = _safe_draw_viewports\n    logger.info("Successfully applied safe ezdxf block reference and viewport monkey-patches.")\nexcept Exception as e:\n    logger.error("Failed to apply ezdxf monkey-patch: %s", e)\n\ntry:\n    import ezdxf.addons.drawing.pipeline as _pipeline\n    from ezdxf.addons.drawing.config import ColorPolicy\n    _orig_apply_color_policy = _pipeline.apply_color_policy\n\n    def patched_apply_color_policy(color: str, policy, custom_color: str) -> str:\n        if policy == ColorPolicy.MONOCHROME:\n            try:\n                r = int(color[1:3], 16)\n                g = int(color[3:5], 16)\n                b = int(color[5:7], 16)\n                is_blue = (r < 100 and g < 150 and b > 150)\n                if is_blue:\n                    return color\n            except Exception:\n                pass\n            return "#000000" + color[7:]\n        return _orig_apply_color_policy(color, policy, custom_color)\n\n    _pipeline.apply_color_policy = patched_apply_color_policy\n    logger.info("Successfully applied ezdxf apply_color_policy monkey-patch.")\nexcept Exception as e:\n    logger.error("Failed to apply ezdxf apply_color_policy monkey-patch: %s", e)\n\nCAD_EXTENSIONS = {".dwg", ".dxf"}\nCAD_RENDER_DPI = max(72, int(os.getenv("CONVERT_CAD_DPI", "150")))\nCAD_RENDER_MODE = os.getenv("CONVERT_CAD_RENDER_MODE", "auto").strip().lower()\nODA_DXF_TIMEOUT_SEC = int(os.getenv("CONVERT_ODA_DXF_TIMEOUT_SEC", "180"))\nODA_PDF_TIMEOUT_SEC = int(os.getenv("CONVERT_ODA_PDF_TIMEOUT_SEC", "1800"))\nCAD_FALLBACK_MIN_MB = float(os.getenv("CONVERT_CAD_FALLBACK_MIN_MB", "0"))\nCAD_ALLOW_EZDXF_FALLBACK = os.getenv("CONVERT_CAD_ALLOW_EZDXF_FALLBACK", "1").strip().lower() not in (\n    "0",\n    "false",\n    "no",\n)\nPREVIEW_MAX_ENTITIES = max(1000, int(os.getenv("CONVERT_PREVIEW_MAX_ENTITIES", "25000")))\nPREVIEW_CAD_MAX_MB = float(os.getenv("CONVERT_PREVIEW_CAD_MAX_MB", "20"))\nPREVIEW_DXF_CACHE_DIR = Path(os.getenv("CONVERT_PREVIEW_DXF_CACHE", "/tmp/cad_preview_dxf_cache"))\n\n\ndef oda_available() -> bool:\n    return shutil.which("ODAFileConverter") is not None\n\n\ndef _oda_convert(\n    input_path: Path,\n    out_format: str,\n    *,\n    timeout: int,\n    glob_pattern: str,\n) -> Path:\n    if not oda_available():\n        raise RuntimeError("ODAFileConverter Р Р…Р Вµ РЎС“РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р В»Р ВµР Р… Р Р† Р С”Р С•Р Р…РЎвЂљР ВµР в„–Р Р…Р ВµРЎР‚Р Вµ.")\n\n    with tempfile.TemporaryDirectory(prefix="oda_in_") as in_dir, tempfile.TemporaryDirectory(\n        prefix="oda_out_"\n    ) as out_dir:\n        shutil.copy2(input_path, Path(in_dir) / input_path.name)\n        cmd = [\n            "xvfb-run",\n            "-a",\n            "ODAFileConverter",\n            in_dir,\n            out_dir,\n            "ACAD2018",\n            out_format,\n            "0",\n            "0",\n            glob_pattern,\n        ]\n        try:\n            result = run_monitored(cmd, timeout=timeout)\n        except subprocess.TimeoutExpired as e:\n            raise RuntimeError(\n                f"Р СџРЎР‚Р ВµР Р†РЎвЂ№РЎв‚¬Р ВµР Р…Р С• Р Р†РЎР‚Р ВµР СРЎРЏ Р С•Р В¶Р С‘Р Т‘Р В°Р Р…Р С‘РЎРЏ ODA ({out_format}, {timeout} РЎРѓР ВµР С”)."\n            ) from e\n\n        if result.returncode != 0:\n            raise RuntimeError(\n                f"ODAFileConverter ({out_format}): {(result.stderr or result.stdout or '').strip()}"\n            )\n\n        ext = out_format.lower()\n        if ext == "dxf":\n            out_files = list(Path(out_dir).glob("*.dxf"))\n        elif ext == "pdf":\n            out_files = list(Path(out_dir).glob("*.pdf"))\n        else:\n            out_files = list(Path(out_dir).glob(f"*.{ext}"))\n\n        if not out_files:\n            raise RuntimeError(f"ODA Р Р…Р Вµ РЎРѓР С•Р В·Р Т‘Р В°Р В» {out_format} Р Т‘Р В»РЎРЏ {input_path.name}.")\n\n        dest_dir = Path(tempfile.mkdtemp(prefix=f"oda_{ext}_"))\n        dest = dest_dir / out_files[0].name\n        shutil.copy2(out_files[0], dest)\n        return dest\n\n\ndef convert_dwg_to_pdf_oda(input_file: str) -> Path:\n    """DWG РІвЂ вЂ™ PDF Р Р…Р В°Р С—РЎР‚РЎРЏР СРЎС“РЎР‹ РЎвЂЎР ВµРЎР‚Р ВµР В· ODA (Р В»РЎС“РЎвЂЎРЎв‚¬Р ВµР Вµ Р С”Р В°РЎвЂЎР ВµРЎРѓРЎвЂљР Р†Р С• Р Т‘Р В»РЎРЏ РЎвЂЎР ВµРЎР‚РЎвЂљР ВµР В¶Р ВµР в„– РЎРѓ Р В»Р С‘РЎРѓРЎвЂљР В°Р СР С‘)."""\n    input_path = Path(input_file)\n    if input_path.suffix.lower() != ".dwg":\n        raise ValueError("convert_dwg_to_pdf_oda Р С•Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљ .dwg")\n    return _oda_convert(\n        input_path,\n        "PDF",\n        timeout=ODA_PDF_TIMEOUT_SEC,\n        glob_pattern="*.dwg",\n    )\n\n\ndef convert_dwg_to_dxf(input_file: str) -> Path:\n    """DWG РІвЂ вЂ™ DXF РЎвЂЎР ВµРЎР‚Р ВµР В· ODAFileConverter."""\n    input_path = Path(input_file)\n    if input_path.suffix.lower() != ".dwg":\n        raise ValueError("convert_dwg_to_dxf Р С•Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљ .dwg")\n    return _oda_convert(\n        input_path,\n        "DXF",\n        timeout=ODA_DXF_TIMEOUT_SEC,\n        glob_pattern="*.dwg",\n    )\n\n\ndef _load_dxf_document(dxf_path: Path):\n    import ezdxf\n    from ezdxf import recover\n\n    try:\n        doc = ezdxf.readfile(str(dxf_path))\n    except ezdxf.DXFError:\n        doc, _ = recover.readfile(str(dxf_path))\n        \n    for layout in doc.layouts:\n        try:\n            for vp in layout.query("VIEWPORT"):\n                if vp.dxf.view_direction_vector.z != 1.0:\n                    vp.dxf.view_direction_vector = (0, 0, 1)\n                    vp.dxf.view_target_point = (0, 0, 0)\n        except Exception:\n            pass\n            \n    return doc\n\n\ndef _preview_dxf_cache_path(input_path: Path) -> Path:\n    PREVIEW_DXF_CACHE_DIR.mkdir(parents=True, exist_ok=True)\n    st = input_path.stat()\n    safe_name = input_path.stem.replace("/", "_")[:80]\n    return PREVIEW_DXF_CACHE_DIR / f"{st.st_mtime_ns}_{st.st_size}_{safe_name}.dxf"\n\n\ndef _dwg_to_dxf_for_preview(input_path: Path) -> Path:\n    cached = _preview_dxf_cache_path(input_path)\n    if cached.exists() and cached.stat().st_size > 0:\n        logger.info("Preview DXF cache hit: %s", input_path.name)\n        return cached\n    dxf_path = convert_dwg_to_dxf(str(input_path))\n    try:\n        shutil.copy2(dxf_path, cached)\n    finally:\n        shutil.rmtree(dxf_path.parent, ignore_errors=True)\n    return cached\n\n\ndef _paper_layouts(doc) -> list:\n    layouts = []\n    for name in doc.layouts.names():\n        if name.upper() != "MODEL":\n            layouts.append(doc.layouts.get(name))\n    return layouts\n\n\ndef _layout_figsize(layout) -> tuple[float, float]:\n    """Р В Р В°Р В·Р СР ВµРЎР‚ РЎРѓРЎвЂљРЎР‚Р В°Р Р…Р С‘РЎвЂ РЎвЂ№ Р С‘Р В· Р Р…Р В°РЎРѓРЎвЂљРЎР‚Р С•Р ВµР С” Р В»Р С‘РЎРѓРЎвЂљР В° Р С‘Р В»Р С‘ A3 Р В°Р В»РЎРЉР В±Р С•Р С Р С—Р С• РЎС“Р СР С•Р В»РЎвЂЎР В°Р Р…Р С‘РЎР‹."""\n    try:\n        page = layout.page_setup\n        width = float(getattr(page, "paper_width", 0) or 0)\n        height = float(getattr(page, "paper_height", 0) or 0)\n        if width > 1 and height > 1:\n            w_in = width / 25.4\n            h_in = height / 25.4\n            if w_in > 0.5 and h_in > 0.5:\n                return (w_in, h_in)\n    except Exception:\n        pass\n    return (16.54, 11.69)\n\n\ndef _frame_figsize(frame: CadFrame) -> tuple[float, float]:\n    w_mm = abs(frame.xmax - frame.xmin)\n    h_mm = abs(frame.ymax - frame.ymin)\n    if frame.orientation == "landscape" and w_mm < h_mm:\n        w_mm, h_mm = h_mm, w_mm\n    elif frame.orientation == "portrait" and w_mm > h_mm:\n        w_mm, h_mm = h_mm, w_mm\n    return (max(w_mm, 50) / 25.4, max(h_mm, 50) / 25.4)\n\n\nclass SafeFrontend:\n    """Р С›Р В±РЎвЂРЎР‚РЎвЂљР С”Р В° Р Р…Р В°Р Т‘ ezdxf Frontend: Р С—РЎР‚Р С•Р С—РЎС“РЎРѓР С”Р В°Р ВµРЎвЂљ Р В±Р С‘РЎвЂљРЎвЂ№Р Вµ РЎРѓРЎС“РЎвЂ°Р Р…Р С•РЎРѓРЎвЂљР С‘ Р Р† Р В±Р В»Р С•Р С”Р В°РЎвЂ¦."""\n\n    def __init__(self, frontend, is_monochrome: bool = False) -> None:\n        self._frontend = frontend\n        self._is_monochrome = is_monochrome\n        self._orig_draw_entity = frontend.draw_entity\n        self._orig_draw_composite_entity = frontend.draw_composite_entity\n        self._orig_draw_entities = frontend.draw_entities\n\n    def draw_layout(self, layout, finalize: bool = True) -> None:\n        self._frontend.draw_layout(layout, finalize=finalize)\n\n    def draw_entities(self, entities: Iterable, filter_func=None) -> None:\n        from ezdxf.addons.drawing.frontend import _draw_entities\n\n        safe = []\n        for entity in entities:\n            try:\n                safe.append(entity)\n            except Exception:\n                continue\n        if safe:\n            _draw_entities(self._frontend, self._frontend.ctx, safe, filter_func=filter_func)\n\n    def draw_entity(self, entity, properties=None) -> None:\n        try:\n            if self._is_monochrome:\n                if properties is None:\n                    properties = self._frontend.ctx.resolve_all(entity)\n                \n                preserve_color = False\n                try:\n                    c = entity.dxf.color\n                    \n                    tc_val = None\n                    if entity.dxf.hasattr('true_color'):\n                        tc_val = entity.dxf.true_color\n                    elif c == 256 and entity.doc:\n                        layer = entity.doc.layers.get(entity.dxf.layer)\n                        if layer and layer.dxf.hasattr('true_color'):\n                            tc_val = layer.dxf.true_color\n                            \n                    if tc_val is not None:\n                        if tc_val != 0x0 and tc_val != 0xFFFFFF:\n                            layer_name = str(entity.dxf.layer).lower()\n                            r = (tc_val >> 16) & 0xFF\n                            g = (tc_val >> 8) & 0xFF\n                            b = tc_val & 0xFF\n                            is_blue = (r < 100 and g < 150 and b > 150)\n                            if "подпис" in layer_name or "цвет" in layer_name or is_blue:\n                                preserve_color = True\n                except Exception:\n                    pass\n                \n                if not preserve_color:\n                    properties.color = "#FF0000"\n            self._orig_draw_entity(entity, properties)\n        except Exception as e:\n            logger.warning("Error rendering entity %s (%s): %s", entity.dxftype(), getattr(entity, 'handle', '?'), e)\n            self._frontend.skip_entity(entity, "render error")\n\n    def draw_composite_entity(self, entity, properties) -> None:\n        try:\n            if self._is_monochrome:\n                if properties is None:\n                    properties = self._frontend.ctx.resolve_all(entity)\n                \n                preserve_color = False\n                try:\n                    c = entity.dxf.color\n                    \n                    tc_val = None\n                    if entity.dxf.hasattr('true_color'):\n                        tc_val = entity.dxf.true_color\n                    elif c == 256 and entity.doc:\n                        layer = entity.doc.layers.get(entity.dxf.layer)\n                        if layer and layer.dxf.hasattr('true_color'):\n                            tc_val = layer.dxf.true_color\n                            \n                    if tc_val is not None:\n                        if tc_val != 0x0 and tc_val != 0xFFFFFF:\n                            layer_name = str(entity.dxf.layer).lower()\n                            r = (tc_val >> 16) & 0xFF\n                            g = (tc_val >> 8) & 0xFF\n                            b = tc_val & 0xFF\n                            is_blue = (r < 100 and g < 150 and b > 150)\n                            if "подпис" in layer_name or "цвет" in layer_name or is_blue:\n                                preserve_color = True\n                except Exception:\n                    pass\n                \n                if not preserve_color:\n                    properties.color = "#FF0000"\n            self._orig_draw_composite_entity(entity, properties)\n        except Exception as e:\n            logger.warning("Error rendering composite entity %s (%s): %s", entity.dxftype(), getattr(entity, 'handle', '?'), e)\n            self._frontend.skip_entity(entity, "composite render error")\n\n\ndef _patch_frontend(frontend, is_monochrome: bool = False) -> SafeFrontend:\n    safe = SafeFrontend(frontend, is_monochrome=is_monochrome)\n    import types\n\n    frontend.draw_entities = types.MethodType(SafeFrontend.draw_entities, safe)  # type: ignore[method-assign]\n    frontend.draw_entity = types.MethodType(SafeFrontend.draw_entity, safe)  # type: ignore[method-assign]\n    frontend.draw_composite_entity = types.MethodType(  # type: ignore[method-assign]\n        SafeFrontend.draw_composite_entity, safe\n    )\n    return safe\n\n\ndef _is_entity_in_box(\n    entity,\n    xmin: float,\n    xmax: float,\n    ymin: float,\n    ymax: float,\n    cache: dict | None = None,\n) -> bool:\n    if cache is not None:\n        try:\n            h = entity.dxf.handle\n        except Exception:\n            h = id(entity)\n        if h in cache:\n            coords = cache[h]\n        else:\n            coords = None\n            try:\n                from ezdxf import bbox\n                box = bbox.extents([entity])\n                if box:\n                    coords = (box.extmin.x, box.extmax.x, box.extmin.y, box.extmax.y)\n            except Exception:\n                pass\n            cache[h] = coords\n            \n        if coords is None:\n            return True\n        exmin, exmax, eymin, eymax = coords\n        return not (exmax < xmin or exmin > xmax or eymax < ymin or eymin > ymax)\n        \n    try:\n        from ezdxf import bbox\n        box = bbox.extents([entity])\n        if box:\n            exmin, exmax, eymin, eymax = box.extmin.x, box.extmax.x, box.extmin.y, box.extmax.y\n            return not (exmax < xmin or exmin > xmax or eymax < ymin or eymin > ymax)\n    except Exception:\n        pass\n    return True\n\n\ndef _modelspace_entity_count(doc) -> int:\n    try:\n        return len(list(doc.modelspace()))\n    except Exception:\n        return 0\n\n\ndef resolve_color_policy(layout, color_mode: str):\n    from ezdxf.addons.drawing.config import ColorPolicy\n    if color_mode == "monochrome":\n        return ColorPolicy.MONOCHROME\n    elif color_mode == "color":\n        return ColorPolicy.COLOR_SWAP_BW\n    \n    style_sheet = ""\n    try:\n        if layout:\n            if hasattr(layout, "dxf") and hasattr(layout.dxf, "current_style_sheet"):\n                style_sheet = str(layout.dxf.current_style_sheet).lower()\n            elif hasattr(layout, "get_plot_style_filename"):\n                style_sheet = str(layout.get_plot_style_filename()).lower()\n    except Exception:\n        pass\n        \n    doc = layout.doc if layout and hasattr(layout, 'doc') else None\n    if not style_sheet and doc:\n        try:\n            for l in doc.layouts:\n                s = ""\n                if hasattr(l, "dxf") and hasattr(l.dxf, "current_style_sheet"):\n                    s = str(l.dxf.current_style_sheet).lower()\n                elif hasattr(l, "get_plot_style_filename"):\n                    s = str(l.get_plot_style_filename()).lower()\n                if "monochrome" in s:\n                    style_sheet = s\n                    break\n        except Exception:\n            pass\n    \n    if "monochrome" in style_sheet:\n        return ColorPolicy.MONOCHROME\n    return ColorPolicy.COLOR_SWAP_BW\n\n\ndef _render_modelspace(\n    doc,\n    ax,\n    *,\n    color_mode: str = "auto",\n    max_entities: int | None = None,\n    crop_box: tuple[float, float, float, float] | None = None,\n    bbox_cache: dict | None = None,\n    layout_for_style=None,\n) -> None:\n    if max_entities is not None:\n        count = _modelspace_entity_count(doc)\n        if count > max_entities:\n            raise RuntimeError(\n                f"Р РЋР В»Р С‘РЎв‚¬Р С”Р С•Р С Р СР Р…Р С•Р С–Р С• Р С•Р В±РЎР‰Р ВµР С”РЎвЂљР С•Р Р† Р Р† Р СР С•Р Т‘Р ВµР В»Р С‘ ({count} > {max_entities}) Р Т‘Р В»РЎРЏ Р С—РЎР‚Р ВµР Т‘Р С—РЎР‚Р С•РЎРѓР СР С•РЎвЂљРЎР‚Р В°. "\n                "Р вЂ™РЎвЂ№Р С—Р С•Р В»Р Р…Р С‘РЎвЂљР Вµ Р С”Р С•Р Р…Р Р†Р ВµРЎР‚РЎвЂљР В°РЎвЂ Р С‘РЎР‹ Р Р† PDF Р С‘ Р С•РЎвЂљР С”РЎР‚Р С•Р в„–РЎвЂљР Вµ Р’В«PDF РЎР‚РЎРЏР Т‘Р С•Р СР’В»."\n            )\n\n    from ezdxf.addons.drawing import Frontend, RenderContext\n    from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy\n    from ezdxf.addons.drawing.matplotlib import MatplotlibBackend\n\n    style_layout = layout_for_style if layout_for_style is not None else doc.modelspace()\n    color_policy = resolve_color_policy(style_layout, color_mode)\n    is_mono = (color_policy == ColorPolicy.MONOCHROME)\n    actual_policy = color_policy\n\n    ctx = RenderContext(doc)\n    out = MatplotlibBackend(ax, adjust_figure=False)\n    config = Configuration(\n        color_policy=actual_policy,\n        line_policy=LinePolicy.APPROXIMATE,\n        lineweight_scaling=2.0,\n        max_flattening_distance=2.0,\n        circle_approximation_count=16,\n        hatch_policy=Configuration().hatch_policy,\n    )\n    \n    _patch_color_policy_for_signatures()\n    _patch_filter_vp_entities()\n    \n    frontend = Frontend(ctx, out, config=config)\n    \n\n    entities = doc.modelspace()\n    if crop_box is not None:\n        xmin, xmax, ymin, ymax = crop_box\n        entities = [e for e in entities if _is_entity_in_box(e, xmin, xmax, ymin, ymax, bbox_cache)]\n\n    frontend.draw_entities(entities)\n\n\ndef _layout_individual_viewport_extents(layout) -> list[dict]:\n    """Return per-viewport model+paper extents for each real VIEWPORT in *layout*.\n\n    Skips viewport id==1 (paper-space clipping viewport) and any with\n    model extents > 1 000 000 units (sanity filter).\n\n    Each entry has keys:\n        model_xmin, model_xmax, model_ymin, model_ymax\n        paper_w_mm, paper_h_mm\n    """\n    result: list[dict] = []\n    for vp in layout:\n        if vp.dxftype() != "VIEWPORT":\n            continue\n        try:\n            vp_id = vp.dxf.get("id", None)\n            if vp_id == 1:\n                continue\n            vc = vp.dxf.view_center_point\n            vh = float(vp.dxf.view_height)\n            pw = float(getattr(vp.dxf, "width", 0) or 0)\n            ph = float(getattr(vp.dxf, "height", 0) or 0)\n            if pw <= 0 or ph <= 0 or vh <= 0:\n                continue\n            vw = vh * (pw / ph)\n            if vw > 1_000_000 or vh > 1_000_000:\n                continue\n            result.append({\n                "model_xmin": vc.x - vw / 2,\n                "model_xmax": vc.x + vw / 2,\n                "model_ymin": vc.y - vh / 2,\n                "model_ymax": vc.y + vh / 2,\n                "paper_w_mm": pw,\n                "paper_h_mm": ph,\n            })\n        except Exception:\n            continue\n    logger.info("_layout_individual_viewport_extents: %d viewports", len(result))\n    return result\n\n\ndef _layout_viewport_model_extents(\n    layout,\n) -> tuple[float, float, float, float] | None:\n    """Return the UNION of model-space extents of all real VIEWPORTs (preview use)."""\n    vps = _layout_individual_viewport_extents(layout)\n    if not vps:\n        return None\n    return (\n        min(v["model_xmin"] for v in vps),\n        max(v["model_xmax"] for v in vps),\n        min(v["model_ymin"] for v in vps),\n        max(v["model_ymax"] for v in vps),\n    )\n\ndef _patch_color_policy_for_signatures():\n    import ezdxf.addons.drawing.pipeline as pipeline\n    import ezdxf.addons.drawing.properties as properties\n    \n    if hasattr(pipeline, '_orig_apply_color_policy'):\n        return\n        \n    pipeline._orig_apply_color_policy = pipeline.apply_color_policy\n    def new_apply_color_policy(color, color_policy, custom_color="#000000"):\n        if custom_color is None:\n            custom_color = "#000000"\n        if color and color.endswith("_KEEP"):\n            return color[:-5]\n        return pipeline._orig_apply_color_policy(color, color_policy, custom_color)\n    pipeline.apply_color_policy = new_apply_color_policy\n\n    properties._orig_resolve_all = properties.RenderContext.resolve_all\n    def new_resolve_all(self, entity):\n        p = properties._orig_resolve_all(self, entity)\n        \n        # ACI based color preservation\n        keep_color = False\n        c = entity.dxf.color\n        if entity.dxf.hasattr("true_color"):\n            tc = entity.dxf.true_color\n            r, g, b = (tc >> 16) & 0xFF, (tc >> 8) & 0xFF, tc & 0xFF\n            if r < 100 and g < 150 and b > 150:\n                keep_color = True\n        elif c not in (0, 256) and c in {5}:\n            keep_color = True\n        elif c == 256 and entity.doc:\n            layer = entity.doc.layers.get(entity.dxf.layer)\n            if layer:\n                if layer.dxf.hasattr("true_color"):\n                    tc = layer.dxf.true_color\n                    r, g, b = (tc >> 16) & 0xFF, (tc >> 8) & 0xFF, tc & 0xFF\n                    if r < 100 and g < 150 and b > 150:\n                        keep_color = True\n                elif layer.color in {5}:\n                    keep_color = True\n                    \n        if keep_color and p.color:\n            p.color = p.color + "_KEEP"\n            \n        return p\n    properties.RenderContext.resolve_all = new_resolve_all\n\n\ndef _patch_filter_vp_entities():\n    try:\n        import ezdxf.addons.drawing.pipeline as pipeline\n        if hasattr(pipeline, '_orig_filter_vp_entities'):\n            return\n        pipeline._orig_filter_vp_entities = pipeline.filter_vp_entities\n        \n        def _fast_filter_vp_entities(msp, limits, bbox_cache=None):\n            min_x, min_y, max_x, max_y = limits\n            for e in msp:\n                dxftype = e.dxftype()\n                try:\n                    if dxftype == "LINE":\n                        s, en = e.dxf.start, e.dxf.end\n                        exmax = s.x if s.x > en.x else en.x\n                        exmin = s.x if s.x < en.x else en.x\n                        eymax = s.y if s.y > en.y else en.y\n                        eymin = s.y if s.y < en.y else en.y\n                        if exmax < min_x or exmin > max_x or eymax < min_y or eymin > max_y:\n                            continue\n                    elif dxftype == "CIRCLE":\n                        c, r = e.dxf.center, e.dxf.radius\n                        if (c.x + r) < min_x or (c.x - r) > max_x or (c.y + r) < min_y or (c.y - r) > max_y:\n                            continue\n                except Exception:\n                    pass\n                yield e\n\n        # pipeline.filter_vp_entities = _fast_filter_vp_entities\n    except Exception:\n        pass\n\ndef _patch_mleader_zerodiv() -> None:\n    """Monkey-patch ezdxf LeaderData.transform to survive zero-length dogleg vectors.\n\n    Some DWG files contain MLEADER entities with a zero-length dogleg vector.  When\n    ezdxf's draw_layout processes such an entity it calls Vec3.normalize() on a zero\n    vector, raising ZeroDivisionError and aborting the whole render.  We intercept\n    the transform method and silently skip the bad leaders.\n    """\n    try:\n        from ezdxf.entities import mleader as _ml\n        if getattr(_ml.LeaderData, "_patched_zerodiv", False):\n            return\n        _orig = _ml.LeaderData.transform\n\n        def _safe(self, wcs):  # noqa: ANN001\n            try:\n                return _orig(self, wcs)\n            except ZeroDivisionError:\n                pass  # zero-length dogleg – skip silently\n\n        _ml.LeaderData.transform = _safe\n        _ml.LeaderData._patched_zerodiv = True\n        logger.debug("_patch_mleader_zerodiv applied")\n    except Exception as exc:\n        logger.warning("_patch_mleader_zerodiv failed: %s", exc)\n\n\ndef _render_single_layout(doc, layout, ax, color_mode: str = "auto") -> None:\n    from ezdxf.addons.drawing import Frontend, RenderContext\n    from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy\n    from ezdxf.addons.drawing.matplotlib import MatplotlibBackend\n    import ezdxf.fonts.fonts as ezdxf_fonts\n    from pathlib import Path\n    import matplotlib.font_manager as fm\n    import glob\n\n    _patch_color_policy_for_signatures()\n    _patch_filter_vp_entities()\n    _patch_mleader_zerodiv()\n\n    for font_path in glob.glob("/app/fonts/*.ttf"):\n        try:\n            fm.fontManager.addfont(font_path)\n        except Exception:\n            pass\n    try:\n        ezdxf_fonts.font_manager.scan_folder(Path("/app/fonts"))\n    except Exception as e:\n        logger.warning(f"Error loading fonts into ezdxf: {e}")\n\n    color_policy = resolve_color_policy(layout, color_mode)\n    is_mono = (color_policy == ColorPolicy.MONOCHROME)\n    actual_policy = color_policy\n\n    ctx = RenderContext(doc)\n    out = MatplotlibBackend(ax, adjust_figure=False)\n    config = Configuration(\n        background_policy=ezdxf.addons.drawing.config.BackgroundPolicy.CUSTOM,\n        custom_bg_color="#FFFFFF",\n        color_policy=actual_policy,\n        line_policy=LinePolicy.SOLID,\n        lineweight_scaling=2.0,\n        max_flattening_distance=2.0,\n        circle_approximation_count=16,\n    )\n    frontend = Frontend(ctx, out, config=config)\n    \n    frontend.draw_layout(layout)\n\n\n\ndef _apply_frame_crop(ax, frame: CadFrame) -> None:\n    ax.set_xlim(frame.xmin, frame.xmax)\n    ax.set_ylim(frame.ymin, frame.ymax)\n    ax.set_aspect("auto")\n    ax.margins(0)\n\n\ndef _render_frame(\n    doc,\n    frame: CadFrame,\n    ax,\n    color_mode: str = "auto",\n    preview: bool = False,\n    bbox_cache: dict | None = None,\n) -> None:\n    """Render *frame* onto *ax* (model-space frames only).\n\n    Paper-space frames with viewports are handled upstream by\n    _render_paper_layout_viewport_pages; this path is used as a fallback\n    (preview or no viewports found).\n    """\n    entity_limit = PREVIEW_MAX_ENTITIES if preview else None\n    crop_box = (frame.xmin, frame.xmax, frame.ymin, frame.ymax)\n\n    if frame.source == "viewport_model":\n        layout = doc.layouts.get(frame.layout)\n        _render_modelspace(doc, ax, color_mode=color_mode, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache, layout_for_style=layout)\n        _apply_frame_crop(ax, frame)\n        return\n\n    if frame.layout.upper() == "MODEL":\n        _render_modelspace(doc, ax, color_mode=color_mode, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache)\n        _apply_frame_crop(ax, frame)\n        return\n\n\n    # Paper-space layout fallback (fast multi-axes rendering)\n    layout = doc.layouts.get(frame.layout)\n    viewports = [e for e in layout if e.dxftype() == "VIEWPORT" and e.dxf.status > 0]\n    \n    if not viewports:\n        _render_single_layout(doc, layout, ax, color_mode=color_mode)\n    else:\n        fig = ax.figure\n        # 1. Hide the original ax so it doesn't block\n        ax.set_visible(False)\n        \n        # Paper boundaries\n        pw = frame.xmax - frame.xmin\n        ph = frame.ymax - frame.ymin\n        \n        for vp in viewports:\n            try:\n                vc = vp.dxf.view_center_point\n                vh = float(vp.dxf.view_height)\n                vp_w = float(getattr(vp.dxf, "width", 0) or 0)\n                vp_h = float(getattr(vp.dxf, "height", 0) or 0)\n                if vp_h <= 0: continue\n                vw = vh * (vp_w / vp_h)\n                if vw <= 0 or vh <= 0: continue\n                \n                # Model boundaries\n                mod_xmin = vc.x - vw / 2\n                mod_xmax = vc.x + vw / 2\n                mod_ymin = vc.y - vh / 2\n                mod_ymax = vc.y + vh / 2\n                \n                # Relative figure coordinates\n                ax_left = (vp.dxf.center.x - vp_w / 2 - frame.xmin) / pw if pw > 0 else 0\n                ax_bottom = (vp.dxf.center.y - vp_h / 2 - frame.ymin) / ph if ph > 0 else 0\n                ax_width = vp_w / pw if pw > 0 else 1\n                ax_height = vp_h / ph if ph > 0 else 1\n                \n                # Clamp to 0-1 just in case\n                ax_left = max(0.0, min(1.0, ax_left))\n                ax_bottom = max(0.0, min(1.0, ax_bottom))\n                ax_width = max(0.0, min(1.0 - ax_left, ax_width))\n                ax_height = max(0.0, min(1.0 - ax_bottom, ax_height))\n                \n                if ax_width <= 0.01 or ax_height <= 0.01: continue\n                \n                ax_vp = fig.add_axes([ax_left, ax_bottom, ax_width, ax_height])\n                ax_vp.axis("off")\n                _render_modelspace(\n                    doc, ax_vp, color_mode=color_mode, max_entities=entity_limit, \n                    crop_box=(mod_xmin, mod_xmax, mod_ymin, mod_ymax), \n                    bbox_cache=bbox_cache,\n                    layout_for_style=layout\n                )\n                ax_vp.set_xlim(mod_xmin, mod_xmax)\n                ax_vp.set_ylim(mod_ymin, mod_ymax)\n                ax_vp.set_aspect("auto")\n                ax_vp.margins(0)\n            except Exception as e:\n                logger.warning("Fast VP render error: %s", e)\n\n        # 2. Render paper space entities on a transparent top layer\n        ax_paper = fig.add_axes([0, 0, 1, 1])\n        ax_paper.axis("off")\n        ax_paper.patch.set_alpha(0)\n        \n        from ezdxf.addons.drawing import Frontend, RenderContext\n        from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy\n        from ezdxf.addons.drawing.matplotlib import MatplotlibBackend\n        import ezdxf.addons.drawing.config\n        \n        color_policy = resolve_color_policy(layout, color_mode)\n        is_mono = (color_policy == ColorPolicy.MONOCHROME)\n        actual_policy = color_policy\n\n        ctx = RenderContext(doc)\n        out = MatplotlibBackend(ax_paper, adjust_figure=False)\n        config = Configuration(\n            background_policy=ezdxf.addons.drawing.config.BackgroundPolicy.CUSTOM,\n            custom_bg_color="#FFFFFF",\n            color_policy=actual_policy,\n            line_policy=LinePolicy.SOLID,\n        lineweight_scaling=2.0,\n            max_flattening_distance=2.0,\n            circle_approximation_count=16,\n        )\n        frontend = Frontend(ctx, out, config=config)\n        \n        layout_entities = [e for e in layout if e.dxftype() != "VIEWPORT"]\n        frontend.draw_entities(layout_entities)\n        \n        ax_paper.set_xlim(frame.xmin, frame.xmax)\n        ax_paper.set_ylim(frame.ymin, frame.ymax)\n        ax_paper.set_aspect("auto")\n        ax_paper.margins(0)\n    if frame.source in (\n        "viewport",\n        "polyline",\n        "block",\n        "sheet_border",\n        "viewport_union",\n        "stamp_frame",\n    ):\n        _apply_frame_crop(ax, frame)\n\n\ndef _render_paper_layout_viewport_pages(\n    doc,\n    frame: CadFrame,\n    pdf_pages,\n    color_mode: str = "auto",\n    bbox_cache: dict | None = None,\n) -> bool:\n    """Render each viewport in a paper-space layout as a separate PDF page.\n\n    Returns True when at least one page was written, False if no usable viewports\n    were found (caller should fall back to the normal _render_frame path).\n    """\n    import matplotlib\n    matplotlib.use("Agg")\n    import matplotlib.pyplot as plt\n\n    layout = doc.layouts.get(frame.layout)\n    vp_list = _layout_individual_viewport_extents(layout)\n    if not vp_list:\n        return False\n\n    logger.info("Paper layout %r: rendering %d viewports as separate pages", frame.layout, len(vp_list))\n    for i, vp in enumerate(vp_list):\n        check_cancelled()\n        figsize = (vp["paper_w_mm"] / 25.4, vp["paper_h_mm"] / 25.4)\n        fig = plt.figure(figsize=figsize, dpi=CAD_RENDER_DPI)\n        ax = fig.add_axes([0, 0, 1, 1])\n        ax.axis("off")\n        crop = (vp["model_xmin"], vp["model_xmax"], vp["model_ymin"], vp["model_ymax"])\n        _render_modelspace(doc, ax, color_mode=color_mode, crop_box=crop, bbox_cache=bbox_cache, layout_for_style=layout)\n        ax.set_xlim(vp["model_xmin"], vp["model_xmax"])\n        ax.set_ylim(vp["model_ymin"], vp["model_ymax"])\n        ax.set_aspect("auto")\n        ax.margins(0)\n        _save_figure(pdf_pages, fig)\n        plt.close(fig)\n        logger.info("  Viewport %d/%d done", i + 1, len(vp_list))\n\n    return True\n\n\n\n\ndef _save_figure(pdf, fig) -> None:\n    pdf.savefig(fig, bbox_inches=None, pad_inches=0)\n\n\n\n\n\ndef convert_dxf_to_pdf(\n    dxf_path: Path,\n    pdf_path: Path,\n    *,\n    meta: dict[str, Any] | None = None,\n) -> Path:\n    """Р В Р ВµР Р…Р Т‘Р ВµРЎР‚ DXF Р Р† PDF: Р С—Р С• РЎР‚Р В°Р С˜Р С”Р В°Р С˜ (Р С—РЎР‚Р С‘Р С•РЎР‚Р С‘РЎвЂљР ВµРЎвЂљ) Р С‘Р В»Р С‘ Р С—Р С• layout."""\n    import matplotlib\n\n    matplotlib.use("Agg")\n    import matplotlib.pyplot as plt\n    from matplotlib.backends.backend_pdf import PdfPages\n\n    color_mode = (meta or {}).get("color_mode", "auto")\n    doc = _load_dxf_document(dxf_path)\n    all_frames = detect_frames_in_doc(doc)\n    render_frames = choose_render_frames(doc, all_frames) if CAD_RENDER_MODE != "layouts" else []\n    use_frames = bool(render_frames) and CAD_RENDER_MODE in ("auto", "frames")\n\n    if meta is not None:\n        meta["frames_detected"] = len(all_frames)\n        meta["frames_rendered"] = len(render_frames) if use_frames else 0\n        meta["render_mode"] = "frames" if use_frames else "layouts"\n        if all_frames:\n            meta["frames"] = frames_summary(all_frames)\n\n    bbox_cache = {}\n    with PdfPages(str(pdf_path)) as pdf:\n        if use_frames:\n            logger.info(\n                "DXF %s: РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚ %d РЎР‚Р В°Р С˜Р С•Р С”, dpi=%s",\n                dxf_path.name,\n                len(render_frames),\n                CAD_RENDER_DPI,\n            )\n            for frame in render_frames:\n                check_cancelled()\n                is_paper_frame = (\n                    frame.layout.upper() != "MODEL"\n                    and frame.source in (\n                        "stamp_frame", "viewport", "viewport_union", "sheet_border",\n                    )\n                )\n                if is_paper_frame:\n                    # PRIMARY: draw_layout renders the full paper-space sheet\n                    # (title block, borders, notes + all viewport model content).\n                    figsize = _frame_figsize(frame)\n                    fig = plt.figure(figsize=figsize, dpi=CAD_RENDER_DPI)\n                    ax = fig.add_axes([0, 0, 1, 1])\n                    ax.axis("off")\n                    try:\n                        _render_frame(doc, frame, ax, color_mode=color_mode, bbox_cache=bbox_cache)\n                        _save_figure(pdf, fig)\n                        plt.close(fig)\n                        continue\n                    except Exception:\n                        logger.warning(\n                            "draw_layout failed for %r, falling back to per-viewport",\n                            frame.layout, exc_info=True,\n                        )\n                        plt.close(fig)\n                    # FALLBACK: per-viewport pages (no title block but shows content)\n                    try:\n                        done = _render_paper_layout_viewport_pages(\n                            doc, frame, pdf, color_mode=color_mode, bbox_cache=bbox_cache,\n                        )\n                    except Exception:\n                        logger.exception(\n                            "Per-viewport fallback also failed (layout=%r)", frame.layout\n                        )\n                        done = False\n                    if done:\n                        continue\n\n                figsize = _frame_figsize(frame)\n                fig = plt.figure(figsize=figsize, dpi=CAD_RENDER_DPI)\n                ax = fig.add_axes([0, 0, 1, 1])\n                ax.axis("off")\n                try:\n                    _render_frame(doc, frame, ax, color_mode=color_mode, bbox_cache=bbox_cache)\n                    _save_figure(pdf, fig)\n                except Exception:\n                    logger.exception(\n                        "Error rendering frame %s (layout=%r source=%r)",\n                        frame, frame.layout, frame.source,\n                    )\n                    raise\n                finally:\n                    plt.close(fig)\n        else:\n            paper = _paper_layouts(doc)\n            render_targets = paper if paper else [doc.modelspace()]\n            logger.info(\n                "DXF %s: РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚ %d layout(s), dpi=%s",\n                dxf_path.name,\n                len(render_targets),\n                CAD_RENDER_DPI,\n            )\n            for layout in render_targets:\n                check_cancelled()\n                figsize = _layout_figsize(layout) if hasattr(layout, "page_setup") else (16.54, 11.69)\n                fig = plt.figure(figsize=figsize, dpi=CAD_RENDER_DPI)\n                ax = fig.add_axes([0, 0, 1, 1])\n                ax.set_aspect("equal")\n                ax.axis("off")\n                try:\n                    if hasattr(layout, "page_setup"):\n                        _render_single_layout(doc, layout, ax, color_mode=color_mode)\n                    else:\n                        _render_modelspace(doc, ax, color_mode=color_mode)\n                    _save_figure(pdf, fig)\n                finally:\n                    plt.close(fig)\n\n    plt.close("all")\n    del doc\n    gc.collect()\n\n    if not pdf_path.exists() or pdf_path.stat().st_size == 0:\n        raise RuntimeError("PDF Р Р…Р Вµ РЎРѓР С•Р В·Р Т‘Р В°Р Р… Р С—Р С•РЎРѓР В»Р Вµ РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚Р В° DXF.")\n    return pdf_path\n\n\ndef _cad_render_targets(doc) -> tuple[list[Any], str, list[CadFrame]]:\n    """Р В¦Р ВµР В»Р С‘ РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚Р В°: РЎР‚Р В°Р СР С”Р С‘ Р С‘Р В»Р С‘ layout'РЎвЂ№."""\n    all_frames = detect_frames_in_doc(doc)\n    render_frames = choose_render_frames(doc, all_frames) if CAD_RENDER_MODE != "layouts" else []\n    use_frames = bool(render_frames) and CAD_RENDER_MODE in ("auto", "frames")\n    if use_frames:\n        return render_frames, "frames", all_frames\n    paper = _paper_layouts(doc)\n    targets: list[Any] = paper if paper else [doc.modelspace()]\n    return targets, "layouts", all_frames\n\n\ndef render_cad_preview_png(\n    input_file: str,\n    *,\n    page: int = 1,\n    dpi: int | None = None,\n) -> tuple[bytes, int, dict[str, Any]]:\n    """Р С›Р Т‘Р С‘Р Р… Р С”Р В°Р Т‘РЎР‚ CAD (DWG/DXF) Р Р† PNG Р Т‘Р В»РЎРЏ Р С—РЎР‚Р ВµР Т‘Р С—РЎР‚Р С•РЎРѓР С˜Р С•РЎвЂљРЎР‚Р В°. Р вЂ™Р С•Р В·Р Р†РЎР‚Р В°РЎвЂ°Р В°Р ВµРЎвЂљ (png, pages, meta).    """\n    import io\n\n    color_mode = "auto"\n    import matplotlib\n\n    matplotlib.use("Agg")\n    import matplotlib.pyplot as plt\n\n    preview_dpi = max(48, min(120, dpi or int(os.getenv("CONVERT_PREVIEW_DPI", "96"))))\n    input_path = Path(input_file)\n    suffix = input_path.suffix.lower()\n    if suffix not in CAD_EXTENSIONS:\n        raise ValueError(f"Р С›Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљРЎРѓРЎРЏ DWG Р С‘Р В»Р С‘ DXF, Р С—Р С•Р В»РЎС“РЎвЂЎР ВµР Р…Р С•: {suffix}")\n\n    size_mb = input_path.stat().st_size / (1024 * 1024) if input_path.exists() else 0\n    if size_mb > PREVIEW_CAD_MAX_MB:\n        raise RuntimeError(\n            f"Р В¤Р В°Р в„–Р В» РЎРѓР В»Р С‘РЎв‚¬Р С”Р С•Р С Р В±Р С•Р В»РЎРЉРЎв‚¬Р С•Р в„– ({size_mb:.0f} Р СљР вЂ) Р Т‘Р В»РЎРЏ Р С—РЎР‚Р ВµР Т‘Р С—РЎР‚Р С•РЎРѓР СР С•РЎвЂљРЎР‚Р В° Р С‘РЎРѓРЎвЂ¦Р С•Р Т‘Р Р…Р С‘Р С”Р В°. "\n            f"Р РЋР Р…Р В°РЎвЂЎР В°Р В»Р В° Р Р†РЎвЂ№Р С—Р С•Р В»Р Р…Р С‘РЎвЂљР Вµ Р С”Р С•Р Р…Р Р†Р ВµРЎР‚РЎвЂљР В°РЎвЂ Р С‘РЎР‹ Р Р† PDF Р Р…Р В° РЎРѓРЎвЂљРЎР‚Р В°Р Р…Р С‘РЎвЂ Р Вµ Р’В«Р С™Р С•Р Р…Р Р†Р ВµРЎР‚РЎвЂљР В°РЎвЂ Р С‘РЎРЏР’В» "\n            f"(Р В»Р С‘Р СР С‘РЎвЂљ Р С—РЎР‚Р ВµР Т‘Р С—РЎР‚Р С•РЎРѓР СР С•РЎвЂљРЎР‚Р В° РІР‚вЂќ {PREVIEW_CAD_MAX_MB:.0f} Р СљР вЂ)."\n        )\n\n    tmp = Path(tempfile.mkdtemp(prefix="cad_preview_"))\n    try:\n        if suffix == ".dwg":\n            if not oda_available():\n                raise RuntimeError("ODAFileConverter Р Р…Р Вµ РЎС“РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р В»Р ВµР Р…")\n            cached_dxf = _dwg_to_dxf_for_preview(input_path)\n            work_dxf = tmp / cached_dxf.name\n            shutil.copy2(cached_dxf, work_dxf)\n        else:\n            work_dxf = tmp / input_path.name\n            shutil.copy2(input_path, work_dxf)\n\n        doc = _load_dxf_document(work_dxf)\n        targets, mode, all_frames = _cad_render_targets(doc)\n        total = max(1, len(targets))\n        page_idx = max(1, min(page, total)) - 1\n        target = targets[page_idx]\n\n        if mode == "frames":\n            frame = target\n            figsize = _frame_figsize(frame)\n            fig = plt.figure(figsize=figsize, dpi=preview_dpi)\n            ax = fig.add_axes([0, 0, 1, 1])\n            ax.axis("off")\n            try:\n                _render_frame(doc, frame, ax, color_mode=color_mode, preview=True)\n            finally:\n                buf = io.BytesIO()\n                fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.05, facecolor="white")\n                plt.close(fig)\n            caption = frame.label or frame.layout\n            if frame.layer:\n                caption = f"{caption} ({frame.layer})"\n        else:\n            figsize = _layout_figsize(target) if hasattr(target, "page_setup") else (16.54, 11.69)\n            fig = plt.figure(figsize=figsize, dpi=preview_dpi)\n            ax = fig.add_axes([0, 0, 1, 1])\n            ax.set_aspect("equal")\n            ax.axis("off")\n            try:\n                if hasattr(target, "page_setup"):\n                    _render_single_layout(doc, target, ax, color_mode=color_mode)\n                else:\n                    _render_modelspace(doc, ax, color_mode=color_mode)\n            finally:\n                buf = io.BytesIO()\n                fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.05, facecolor="white")\n                plt.close(fig)\n            caption = getattr(target, "name", None) or "Model"\n\n        plt.close("all")\n        meta = {\n            "render_mode": mode,\n            "page": page_idx + 1,\n            "pages": total,\n            "caption": caption,\n            "frames_detected": len(all_frames),\n        }\n        return buf.getvalue(), total, meta\n    finally:\n        plt.close("all")\n        shutil.rmtree(tmp, ignore_errors=True)\n\n\ndef inspect_cad_frames(input_file: str) -> dict[str, Any]:\n    """Р РЋР С—Р С‘РЎРѓР С•Р С” РЎР‚Р В°Р СР С•Р С” Р Т‘Р В»РЎРЏ DWG/DXF (Р Т‘Р В»РЎРЏ UI/API)."""\n    input_path = Path(input_file)\n    suffix = input_path.suffix.lower()\n    if suffix not in CAD_EXTENSIONS:\n        raise ValueError(f"Р С›Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљРЎРѓРЎРЏ DWG Р С‘Р В»Р С‘ DXF, Р С—Р С•Р В»РЎС“РЎвЂЎР ВµР Р…Р С•: {suffix}")\n\n    tmp = Path(tempfile.mkdtemp(prefix="cad_frames_"))\n    try:\n        if suffix == ".dwg":\n            if not oda_available():\n                raise RuntimeError("ODAFileConverter Р Р…Р Вµ РЎС“РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р В»Р ВµР Р…")\n            dxf_path = convert_dwg_to_dxf(str(input_path))\n            work_dxf = tmp / dxf_path.name\n            shutil.copy2(dxf_path, work_dxf)\n            shutil.rmtree(dxf_path.parent, ignore_errors=True)\n        else:\n            work_dxf = tmp / input_path.name\n            shutil.copy2(input_path, work_dxf)\n\n        doc = _load_dxf_document(work_dxf)\n        frames = detect_frames_in_doc(doc)\n        chosen = choose_render_frames(doc, frames)\n        return {\n            "path": str(input_path),\n            "detected": frames_summary(frames),\n            "will_render": frames_summary(chosen),\n        }\n    finally:\n        shutil.rmtree(tmp, ignore_errors=True)\n\n\ndef convert_cad_to_pdf(
+"""Р С™Р С•Р Р…Р Р†Р ВµРЎР‚РЎвЂљР В°РЎвЂ Р С‘РЎРЏ DWG/DXF Р Р† PDF: ODA, Р В·Р В°РЎвЂљР ВµР С РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚ Р С—Р С• РЎР‚Р В°Р СР С”Р В°Р С Р С‘Р В»Р С‘ layout."""
+from __future__ import annotations
+
+import gc
+import logging
+import os
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Any, Iterable
+
+from frame_detect import CadFrame, choose_render_frames, detect_frames_in_doc, frames_summary
+from job_control import check_cancelled, run_monitored
+
+logger = logging.getLogger("convert.cad")
+logging.getLogger("ezdxf").setLevel(logging.ERROR)
+
+
+# Monkey patch ezdxf block reference explosion to catch transform/scaling exceptions gracefully.
+# This prevents a single buggy entity (like a ZeroDivisionError in a MLEADER) from breaking 
+# rendering for the entire block (such as an entire table or title stamp).
+def _safe_virtual_block_reference_entities(
+    block_ref,
+    *,
+    skipped_entity_callback=None,
+    redraw_order=False,
+    copy_strategy=None,
+) -> Iterable:
+    import sys
+    import ezdxf.explode
+    from ezdxf.explode import default_copy, default_logging_callback
+    from ezdxf.entities import Ellipse
+    from ezdxf.math import NonUniformScalingError, InsertTransformationError
+
+    if copy_strategy is None:
+        copy_strategy = default_copy
+
+    assert block_ref.dxftype() == "INSERT"
+    skipped_entity_callback = skipped_entity_callback or default_logging_callback
+
+    def disassemble(layout) -> Iterable:
+        for entity in layout.entities_in_redraw_order() if redraw_order else layout:
+            if entity.dxftype() == "ATTDEF":
+                continue
+            try:
+                copy = entity.copy(copy_strategy=copy_strategy)
+            except Exception as e:
+                skipped_entity_callback(entity, f"non copyable: {e}")
+                if hasattr(entity, "virtual_entities"):
+                    try:
+                        yield from entity.virtual_entities()
+                    except Exception:
+                        pass
+            else:
+                if hasattr(copy, "remove_association"):
+                    copy.remove_association()
+                yield copy
+
+    def transform(entities):
+        for entity in entities:
+            try:
+                entity.transform(m)
+            except NotImplementedError:
+                skipped_entity_callback(entity, "non transformable")
+            except NonUniformScalingError:
+                dxftype = entity.dxftype()
+                if dxftype in {"ARC", "CIRCLE"}:
+                    try:
+                        if abs(entity.dxf.radius) > 1e-12:
+                            yield Ellipse.from_arc(entity).transform(m)
+                        else:
+                            skipped_entity_callback(entity, "Invalid radius")
+                    except Exception as e:
+                        skipped_entity_callback(entity, f"arc transform error: {e}")
+                elif dxftype in {"LWPOLYLINE", "POLYLINE"}:
+                    try:
+                        yield from transform(entity.virtual_entities())
+                    except Exception as e:
+                        skipped_entity_callback(entity, f"polyline virtual_entities error: {e}")
+                else:
+                    skipped_entity_callback(entity, "unsupported non-uniform scaling")
+            except InsertTransformationError:
+                try:
+                    yield from transform(
+                        _safe_virtual_block_reference_entities(
+                            entity, skipped_entity_callback=skipped_entity_callback, copy_strategy=copy_strategy
+                        )
+                    )
+                except Exception as e:
+                    skipped_entity_callback(entity, f"insert transform error: {e}")
+            except Exception as e:
+                # Bypasses ZeroDivisionError and other math/structure exceptions inside specific entities
+                skipped_entity_callback(entity, f"transform error: {e}")
+            else:
+                yield entity
+
+    m = block_ref.matrix44()
+    block_layout = block_ref.block()
+    if block_layout is None:
+        return
+
+    yield from transform(disassemble(block_layout))
+
+
+def _safe_draw_viewports(frontend, viewports) -> None:
+    # Sort viewports by status
+    viewports.sort(key=lambda e: e.dxf.status)
+    # Remove all invisible viewports:
+    viewports = [vp for vp in viewports if vp.dxf.status > 0]
+    if not viewports:
+        return
+
+    # Find the paper space viewport (ID == 1)
+    ps_vp_idx = None
+    for idx, vp in enumerate(viewports):
+        if vp.dxf.get("id") == 1:
+            ps_vp_idx = idx
+            break
+
+    if ps_vp_idx is not None:
+        viewports.pop(ps_vp_idx)
+    else:
+        # Fallback to ezdxf's original behavior if ID 1 is not found
+        if viewports[0].dxf.get("status", 1) == 1:
+            viewports.pop(0)
+
+    # Draw all remaining viewports
+    for viewport in viewports:
+        try:
+            frontend.draw_viewport(viewport)
+        except Exception as e:
+            logger.warning("Error rendering viewport %s: %s", viewport.dxf.handle, e)
+
+
+# Apply the monkey patch dynamically to all imported ezdxf modules containing it
+try:
+    import sys
+    import ezdxf.explode
+    import ezdxf.entities.insert
+    import ezdxf.addons.drawing.frontend
+    for name, module in list(sys.modules.items()):
+        if name.startswith("ezdxf") and hasattr(module, "virtual_block_reference_entities"):
+            setattr(module, "virtual_block_reference_entities", _safe_virtual_block_reference_entities)
+    ezdxf.addons.drawing.frontend._draw_viewports = _safe_draw_viewports
+    logger.info("Successfully applied safe ezdxf block reference and viewport monkey-patches.")
+except Exception as e:
+    logger.error("Failed to apply ezdxf monkey-patch: %s", e)
+
+try:
+    import ezdxf.addons.drawing.pipeline as _pipeline
+    from ezdxf.addons.drawing.config import ColorPolicy
+    _orig_apply_color_policy = _pipeline.apply_color_policy
+
+    def patched_apply_color_policy(color: str, policy, custom_color: str) -> str:
+        if policy == ColorPolicy.MONOCHROME:
+            try:
+                r = int(color[1:3], 16)
+                g = int(color[3:5], 16)
+                b = int(color[5:7], 16)
+                is_blue = (r < 100 and g < 150 and b > 150)
+                if is_blue:
+                    return color
+            except Exception:
+                pass
+            return "#000000" + color[7:]
+        return _orig_apply_color_policy(color, policy, custom_color)
+
+    _pipeline.apply_color_policy = patched_apply_color_policy
+    logger.info("Successfully applied ezdxf apply_color_policy monkey-patch.")
+except Exception as e:
+    logger.error("Failed to apply ezdxf apply_color_policy monkey-patch: %s", e)
+
+CAD_EXTENSIONS = {".dwg", ".dxf"}
+CAD_RENDER_DPI = max(72, int(os.getenv("CONVERT_CAD_DPI", "150")))
+CAD_RENDER_MODE = os.getenv("CONVERT_CAD_RENDER_MODE", "auto").strip().lower()
+ODA_DXF_TIMEOUT_SEC = int(os.getenv("CONVERT_ODA_DXF_TIMEOUT_SEC", "180"))
+ODA_PDF_TIMEOUT_SEC = int(os.getenv("CONVERT_ODA_PDF_TIMEOUT_SEC", "1800"))
+CAD_FALLBACK_MIN_MB = float(os.getenv("CONVERT_CAD_FALLBACK_MIN_MB", "0"))
+CAD_ALLOW_EZDXF_FALLBACK = os.getenv("CONVERT_CAD_ALLOW_EZDXF_FALLBACK", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+)
+PREVIEW_MAX_ENTITIES = max(1000, int(os.getenv("CONVERT_PREVIEW_MAX_ENTITIES", "25000")))
+PREVIEW_CAD_MAX_MB = float(os.getenv("CONVERT_PREVIEW_CAD_MAX_MB", "20"))
+PREVIEW_DXF_CACHE_DIR = Path(os.getenv("CONVERT_PREVIEW_DXF_CACHE", "/tmp/cad_preview_dxf_cache"))
+
+
+def oda_available() -> bool:
+    return shutil.which("ODAFileConverter") is not None
+
+
+def _oda_convert(
+    input_path: Path,
+    out_format: str,
+    *,
+    timeout: int,
+    glob_pattern: str,
+) -> Path:
+    if not oda_available():
+        raise RuntimeError("ODAFileConverter Р Р…Р Вµ РЎС“РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р В»Р ВµР Р… Р Р† Р С”Р С•Р Р…РЎвЂљР ВµР в„–Р Р…Р ВµРЎР‚Р Вµ.")
+
+    with tempfile.TemporaryDirectory(prefix="oda_in_") as in_dir, tempfile.TemporaryDirectory(
+        prefix="oda_out_"
+    ) as out_dir:
+        shutil.copy2(input_path, Path(in_dir) / input_path.name)
+        cmd = [
+            "xvfb-run",
+            "-a",
+            "ODAFileConverter",
+            in_dir,
+            out_dir,
+            "ACAD2018",
+            out_format,
+            "0",
+            "0",
+            glob_pattern,
+        ]
+        try:
+            result = run_monitored(cmd, timeout=timeout)
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(
+                f"Р СџРЎР‚Р ВµР Р†РЎвЂ№РЎв‚¬Р ВµР Р…Р С• Р Р†РЎР‚Р ВµР СРЎРЏ Р С•Р В¶Р С‘Р Т‘Р В°Р Р…Р С‘РЎРЏ ODA ({out_format}, {timeout} РЎРѓР ВµР С”)."
+            ) from e
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"ODAFileConverter ({out_format}): {(result.stderr or result.stdout or '').strip()}"
+            )
+
+        ext = out_format.lower()
+        if ext == "dxf":
+            out_files = list(Path(out_dir).glob("*.dxf"))
+        elif ext == "pdf":
+            out_files = list(Path(out_dir).glob("*.pdf"))
+        else:
+            out_files = list(Path(out_dir).glob(f"*.{ext}"))
+
+        if not out_files:
+            raise RuntimeError(f"ODA Р Р…Р Вµ РЎРѓР С•Р В·Р Т‘Р В°Р В» {out_format} Р Т‘Р В»РЎРЏ {input_path.name}.")
+
+        dest_dir = Path(tempfile.mkdtemp(prefix=f"oda_{ext}_"))
+        dest = dest_dir / out_files[0].name
+        shutil.copy2(out_files[0], dest)
+        return dest
+
+
+def convert_dwg_to_pdf_oda(input_file: str) -> Path:
+    """DWG РІвЂ вЂ™ PDF Р Р…Р В°Р С—РЎР‚РЎРЏР СРЎС“РЎР‹ РЎвЂЎР ВµРЎР‚Р ВµР В· ODA (Р В»РЎС“РЎвЂЎРЎв‚¬Р ВµР Вµ Р С”Р В°РЎвЂЎР ВµРЎРѓРЎвЂљР Р†Р С• Р Т‘Р В»РЎРЏ РЎвЂЎР ВµРЎР‚РЎвЂљР ВµР В¶Р ВµР в„– РЎРѓ Р В»Р С‘РЎРѓРЎвЂљР В°Р СР С‘)."""
+    input_path = Path(input_file)
+    if input_path.suffix.lower() != ".dwg":
+        raise ValueError("convert_dwg_to_pdf_oda Р С•Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљ .dwg")
+    return _oda_convert(
+        input_path,
+        "PDF",
+        timeout=ODA_PDF_TIMEOUT_SEC,
+        glob_pattern="*.dwg",
+    )
+
+
+def convert_dwg_to_dxf(input_file: str) -> Path:
+    """DWG РІвЂ вЂ™ DXF РЎвЂЎР ВµРЎР‚Р ВµР В· ODAFileConverter."""
+    input_path = Path(input_file)
+    if input_path.suffix.lower() != ".dwg":
+        raise ValueError("convert_dwg_to_dxf Р С•Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљ .dwg")
+    return _oda_convert(
+        input_path,
+        "DXF",
+        timeout=ODA_DXF_TIMEOUT_SEC,
+        glob_pattern="*.dwg",
+    )
+
+
+def _load_dxf_document(dxf_path: Path):
+    import ezdxf
+    from ezdxf import recover
+
+    try:
+        doc = ezdxf.readfile(str(dxf_path))
+    except ezdxf.DXFError:
+        doc, _ = recover.readfile(str(dxf_path))
+        
+    for layout in doc.layouts:
+        try:
+            for vp in layout.query("VIEWPORT"):
+                if vp.dxf.view_direction_vector.z != 1.0:
+                    vp.dxf.view_direction_vector = (0, 0, 1)
+                    vp.dxf.view_target_point = (0, 0, 0)
+        except Exception:
+            pass
+            
+    return doc
+
+
+def _preview_dxf_cache_path(input_path: Path) -> Path:
+    PREVIEW_DXF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    st = input_path.stat()
+    safe_name = input_path.stem.replace("/", "_")[:80]
+    return PREVIEW_DXF_CACHE_DIR / f"{st.st_mtime_ns}_{st.st_size}_{safe_name}.dxf"
+
+
+def _dwg_to_dxf_for_preview(input_path: Path) -> Path:
+    cached = _preview_dxf_cache_path(input_path)
+    if cached.exists() and cached.stat().st_size > 0:
+        logger.info("Preview DXF cache hit: %s", input_path.name)
+        return cached
+    dxf_path = convert_dwg_to_dxf(str(input_path))
+    try:
+        shutil.copy2(dxf_path, cached)
+    finally:
+        shutil.rmtree(dxf_path.parent, ignore_errors=True)
+    return cached
+
+
+def _paper_layouts(doc) -> list:
+    layouts = []
+    for name in doc.layouts.names():
+        if name.upper() != "MODEL":
+            layouts.append(doc.layouts.get(name))
+    return layouts
+
+
+def _layout_figsize(layout) -> tuple[float, float]:
+    """Р В Р В°Р В·Р СР ВµРЎР‚ РЎРѓРЎвЂљРЎР‚Р В°Р Р…Р С‘РЎвЂ РЎвЂ№ Р С‘Р В· Р Р…Р В°РЎРѓРЎвЂљРЎР‚Р С•Р ВµР С” Р В»Р С‘РЎРѓРЎвЂљР В° Р С‘Р В»Р С‘ A3 Р В°Р В»РЎРЉР В±Р С•Р С Р С—Р С• РЎС“Р СР С•Р В»РЎвЂЎР В°Р Р…Р С‘РЎР‹."""
+    try:
+        page = layout.page_setup
+        width = float(getattr(page, "paper_width", 0) or 0)
+        height = float(getattr(page, "paper_height", 0) or 0)
+        if width > 1 and height > 1:
+            w_in = width / 25.4
+            h_in = height / 25.4
+            if w_in > 0.5 and h_in > 0.5:
+                return (w_in, h_in)
+    except Exception:
+        pass
+    return (16.54, 11.69)
+
+
+def _frame_figsize(frame: CadFrame) -> tuple[float, float]:
+    w_mm = abs(frame.xmax - frame.xmin)
+    h_mm = abs(frame.ymax - frame.ymin)
+    if frame.orientation == "landscape" and w_mm < h_mm:
+        w_mm, h_mm = h_mm, w_mm
+    elif frame.orientation == "portrait" and w_mm > h_mm:
+        w_mm, h_mm = h_mm, w_mm
+    return (max(w_mm, 50) / 25.4, max(h_mm, 50) / 25.4)
+
+
+class SafeFrontend:
+    """Р С›Р В±РЎвЂРЎР‚РЎвЂљР С”Р В° Р Р…Р В°Р Т‘ ezdxf Frontend: Р С—РЎР‚Р С•Р С—РЎС“РЎРѓР С”Р В°Р ВµРЎвЂљ Р В±Р С‘РЎвЂљРЎвЂ№Р Вµ РЎРѓРЎС“РЎвЂ°Р Р…Р С•РЎРѓРЎвЂљР С‘ Р Р† Р В±Р В»Р С•Р С”Р В°РЎвЂ¦."""
+
+    def __init__(self, frontend, is_monochrome: bool = False) -> None:
+        self._frontend = frontend
+        self._is_monochrome = is_monochrome
+        self._orig_draw_entity = frontend.draw_entity
+        self._orig_draw_composite_entity = frontend.draw_composite_entity
+        self._orig_draw_entities = frontend.draw_entities
+
+    def draw_layout(self, layout, finalize: bool = True) -> None:
+        self._frontend.draw_layout(layout, finalize=finalize)
+
+    def draw_entities(self, entities: Iterable, filter_func=None) -> None:
+        from ezdxf.addons.drawing.frontend import _draw_entities
+
+        safe = []
+        for entity in entities:
+            try:
+                safe.append(entity)
+            except Exception:
+                continue
+        if safe:
+            _draw_entities(self._frontend, self._frontend.ctx, safe, filter_func=filter_func)
+
+    def draw_entity(self, entity, properties=None) -> None:
+        try:
+            if self._is_monochrome:
+                if properties is None:
+                    properties = self._frontend.ctx.resolve_all(entity)
+                
+                preserve_color = False
+                try:
+                    c = entity.dxf.color
+                    
+                    tc_val = None
+                    if entity.dxf.hasattr('true_color'):
+                        tc_val = entity.dxf.true_color
+                    elif c == 256 and entity.doc:
+                        layer = entity.doc.layers.get(entity.dxf.layer)
+                        if layer and layer.dxf.hasattr('true_color'):
+                            tc_val = layer.dxf.true_color
+                            
+                    if tc_val is not None:
+                        if tc_val != 0x0 and tc_val != 0xFFFFFF:
+                            layer_name = str(entity.dxf.layer).lower()
+                            r = (tc_val >> 16) & 0xFF
+                            g = (tc_val >> 8) & 0xFF
+                            b = tc_val & 0xFF
+                            is_blue = (r < 100 and g < 150 and b > 150)
+                            if "подпис" in layer_name or "цвет" in layer_name or is_blue:
+                                preserve_color = True
+                except Exception:
+                    pass
+                
+                if not preserve_color:
+                    properties.color = "#FF0000"
+            self._orig_draw_entity(entity, properties)
+        except Exception as e:
+            logger.warning("Error rendering entity %s (%s): %s", entity.dxftype(), getattr(entity, 'handle', '?'), e)
+            self._frontend.skip_entity(entity, "render error")
+
+    def draw_composite_entity(self, entity, properties) -> None:
+        try:
+            if self._is_monochrome:
+                if properties is None:
+                    properties = self._frontend.ctx.resolve_all(entity)
+                
+                preserve_color = False
+                try:
+                    c = entity.dxf.color
+                    
+                    tc_val = None
+                    if entity.dxf.hasattr('true_color'):
+                        tc_val = entity.dxf.true_color
+                    elif c == 256 and entity.doc:
+                        layer = entity.doc.layers.get(entity.dxf.layer)
+                        if layer and layer.dxf.hasattr('true_color'):
+                            tc_val = layer.dxf.true_color
+                            
+                    if tc_val is not None:
+                        if tc_val != 0x0 and tc_val != 0xFFFFFF:
+                            layer_name = str(entity.dxf.layer).lower()
+                            r = (tc_val >> 16) & 0xFF
+                            g = (tc_val >> 8) & 0xFF
+                            b = tc_val & 0xFF
+                            is_blue = (r < 100 and g < 150 and b > 150)
+                            if "подпис" in layer_name or "цвет" in layer_name or is_blue:
+                                preserve_color = True
+                except Exception:
+                    pass
+                
+                if not preserve_color:
+                    properties.color = "#FF0000"
+            self._orig_draw_composite_entity(entity, properties)
+        except Exception as e:
+            logger.warning("Error rendering composite entity %s (%s): %s", entity.dxftype(), getattr(entity, 'handle', '?'), e)
+            self._frontend.skip_entity(entity, "composite render error")
+
+
+def _patch_frontend(frontend, is_monochrome: bool = False) -> SafeFrontend:
+    safe = SafeFrontend(frontend, is_monochrome=is_monochrome)
+    import types
+
+    frontend.draw_entities = types.MethodType(SafeFrontend.draw_entities, safe)  # type: ignore[method-assign]
+    frontend.draw_entity = types.MethodType(SafeFrontend.draw_entity, safe)  # type: ignore[method-assign]
+    frontend.draw_composite_entity = types.MethodType(  # type: ignore[method-assign]
+        SafeFrontend.draw_composite_entity, safe
+    )
+    return safe
+
+
+def _is_entity_in_box(
+    entity,
+    xmin: float,
+    xmax: float,
+    ymin: float,
+    ymax: float,
+    cache: dict | None = None,
+) -> bool:
+    if cache is not None:
+        try:
+            h = entity.dxf.handle
+        except Exception:
+            h = id(entity)
+        if h in cache:
+            coords = cache[h]
+        else:
+            coords = None
+            try:
+                from ezdxf import bbox
+                box = bbox.extents([entity])
+                if box:
+                    coords = (box.extmin.x, box.extmax.x, box.extmin.y, box.extmax.y)
+            except Exception:
+                pass
+            cache[h] = coords
+            
+        if coords is None:
+            return True
+        exmin, exmax, eymin, eymax = coords
+        return not (exmax < xmin or exmin > xmax or eymax < ymin or eymin > ymax)
+        
+    try:
+        from ezdxf import bbox
+        box = bbox.extents([entity])
+        if box:
+            exmin, exmax, eymin, eymax = box.extmin.x, box.extmax.x, box.extmin.y, box.extmax.y
+            return not (exmax < xmin or exmin > xmax or eymax < ymin or eymin > ymax)
+    except Exception:
+        pass
+    return True
+
+
+def _modelspace_entity_count(doc) -> int:
+    try:
+        return len(list(doc.modelspace()))
+    except Exception:
+        return 0
+
+
+def resolve_color_policy(layout, color_mode: str):
+    from ezdxf.addons.drawing.config import ColorPolicy
+    if color_mode == "monochrome":
+        return ColorPolicy.MONOCHROME
+    elif color_mode == "color":
+        return ColorPolicy.COLOR_SWAP_BW
+    
+    style_sheet = ""
+    try:
+        if layout:
+            if hasattr(layout, "dxf") and hasattr(layout.dxf, "current_style_sheet"):
+                style_sheet = str(layout.dxf.current_style_sheet).lower()
+            elif hasattr(layout, "get_plot_style_filename"):
+                style_sheet = str(layout.get_plot_style_filename()).lower()
+    except Exception:
+        pass
+        
+    doc = layout.doc if layout and hasattr(layout, 'doc') else None
+    if not style_sheet and doc:
+        try:
+            for l in doc.layouts:
+                s = ""
+                if hasattr(l, "dxf") and hasattr(l.dxf, "current_style_sheet"):
+                    s = str(l.dxf.current_style_sheet).lower()
+                elif hasattr(l, "get_plot_style_filename"):
+                    s = str(l.get_plot_style_filename()).lower()
+                if "monochrome" in s:
+                    style_sheet = s
+                    break
+        except Exception:
+            pass
+    
+    if "monochrome" in style_sheet:
+        return ColorPolicy.MONOCHROME
+    return ColorPolicy.COLOR_SWAP_BW
+
+
+def _render_modelspace(
+    doc,
+    ax,
+    *,
+    color_mode: str = "auto",
+    max_entities: int | None = None,
+    crop_box: tuple[float, float, float, float] | None = None,
+    bbox_cache: dict | None = None,
+    layout_for_style=None,
+) -> None:
+    if max_entities is not None:
+        count = _modelspace_entity_count(doc)
+        if count > max_entities:
+            raise RuntimeError(
+                f"Р РЋР В»Р С‘РЎв‚¬Р С”Р С•Р С Р СР Р…Р С•Р С–Р С• Р С•Р В±РЎР‰Р ВµР С”РЎвЂљР С•Р Р† Р Р† Р СР С•Р Т‘Р ВµР В»Р С‘ ({count} > {max_entities}) Р Т‘Р В»РЎРЏ Р С—РЎР‚Р ВµР Т‘Р С—РЎР‚Р С•РЎРѓР СР С•РЎвЂљРЎР‚Р В°. "
+                "Р вЂ™РЎвЂ№Р С—Р С•Р В»Р Р…Р С‘РЎвЂљР Вµ Р С”Р С•Р Р…Р Р†Р ВµРЎР‚РЎвЂљР В°РЎвЂ Р С‘РЎР‹ Р Р† PDF Р С‘ Р С•РЎвЂљР С”РЎР‚Р С•Р в„–РЎвЂљР Вµ Р’В«PDF РЎР‚РЎРЏР Т‘Р С•Р СР’В»."
+            )
+
+    from ezdxf.addons.drawing import Frontend, RenderContext
+    from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
+    from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
+
+    style_layout = layout_for_style if layout_for_style is not None else doc.modelspace()
+    color_policy = resolve_color_policy(style_layout, color_mode)
+    is_mono = (color_policy == ColorPolicy.MONOCHROME)
+    actual_policy = color_policy
+
+    ctx = RenderContext(doc)
+    out = MatplotlibBackend(ax, adjust_figure=False)
+    config = Configuration(
+        color_policy=actual_policy,
+        line_policy=LinePolicy.APPROXIMATE,
+        lineweight_scaling=2.0,
+        max_flattening_distance=2.0,
+        circle_approximation_count=16,
+        hatch_policy=Configuration().hatch_policy,
+    )
+    
+    _patch_color_policy_for_signatures()
+    _patch_filter_vp_entities()
+    
+    frontend = Frontend(ctx, out, config=config)
+    
+
+    entities = doc.modelspace()
+    if crop_box is not None:
+        xmin, xmax, ymin, ymax = crop_box
+        entities = [e for e in entities if _is_entity_in_box(e, xmin, xmax, ymin, ymax, bbox_cache)]
+
+    frontend.draw_entities(entities)
+
+
+def _layout_individual_viewport_extents(layout) -> list[dict]:
+    """Return per-viewport model+paper extents for each real VIEWPORT in *layout*.
+
+    Skips viewport id==1 (paper-space clipping viewport) and any with
+    model extents > 1 000 000 units (sanity filter).
+
+    Each entry has keys:
+        model_xmin, model_xmax, model_ymin, model_ymax
+        paper_w_mm, paper_h_mm
+    """
+    result: list[dict] = []
+    for vp in layout:
+        if vp.dxftype() != "VIEWPORT":
+            continue
+        try:
+            vp_id = vp.dxf.get("id", None)
+            if vp_id == 1:
+                continue
+            vc = vp.dxf.view_center_point
+            vh = float(vp.dxf.view_height)
+            pw = float(getattr(vp.dxf, "width", 0) or 0)
+            ph = float(getattr(vp.dxf, "height", 0) or 0)
+            if pw <= 0 or ph <= 0 or vh <= 0:
+                continue
+            vw = vh * (pw / ph)
+            if vw > 1_000_000 or vh > 1_000_000:
+                continue
+            result.append({
+                "model_xmin": vc.x - vw / 2,
+                "model_xmax": vc.x + vw / 2,
+                "model_ymin": vc.y - vh / 2,
+                "model_ymax": vc.y + vh / 2,
+                "paper_w_mm": pw,
+                "paper_h_mm": ph,
+            })
+        except Exception:
+            continue
+    logger.info("_layout_individual_viewport_extents: %d viewports", len(result))
+    return result
+
+
+def _layout_viewport_model_extents(
+    layout,
+) -> tuple[float, float, float, float] | None:
+    """Return the UNION of model-space extents of all real VIEWPORTs (preview use)."""
+    vps = _layout_individual_viewport_extents(layout)
+    if not vps:
+        return None
+    return (
+        min(v["model_xmin"] for v in vps),
+        max(v["model_xmax"] for v in vps),
+        min(v["model_ymin"] for v in vps),
+        max(v["model_ymax"] for v in vps),
+    )
+
+def _patch_color_policy_for_signatures():
+    import ezdxf.addons.drawing.pipeline as pipeline
+    import ezdxf.addons.drawing.properties as properties
+    
+    if hasattr(pipeline, '_orig_apply_color_policy'):
+        return
+        
+    pipeline._orig_apply_color_policy = pipeline.apply_color_policy
+    def new_apply_color_policy(color, color_policy, custom_color="#000000"):
+        if custom_color is None:
+            custom_color = "#000000"
+        if color and color.endswith("_KEEP"):
+            return color[:-5]
+        return pipeline._orig_apply_color_policy(color, color_policy, custom_color)
+    pipeline.apply_color_policy = new_apply_color_policy
+
+    properties._orig_resolve_all = properties.RenderContext.resolve_all
+    def new_resolve_all(self, entity):
+        p = properties._orig_resolve_all(self, entity)
+        
+        # ACI based color preservation
+        keep_color = False
+        c = entity.dxf.color
+        if entity.dxf.hasattr("true_color"):
+            tc = entity.dxf.true_color
+            r, g, b = (tc >> 16) & 0xFF, (tc >> 8) & 0xFF, tc & 0xFF
+            if r < 100 and g < 150 and b > 150:
+                keep_color = True
+        elif c not in (0, 256) and c in {5}:
+            keep_color = True
+        elif c == 256 and entity.doc:
+            layer = entity.doc.layers.get(entity.dxf.layer)
+            if layer:
+                if layer.dxf.hasattr("true_color"):
+                    tc = layer.dxf.true_color
+                    r, g, b = (tc >> 16) & 0xFF, (tc >> 8) & 0xFF, tc & 0xFF
+                    if r < 100 and g < 150 and b > 150:
+                        keep_color = True
+                elif layer.color in {5}:
+                    keep_color = True
+                    
+        if keep_color and p.color:
+            p.color = p.color + "_KEEP"
+            
+        return p
+    properties.RenderContext.resolve_all = new_resolve_all
+
+
+def _patch_filter_vp_entities():
+    try:
+        import ezdxf.addons.drawing.pipeline as pipeline
+        if hasattr(pipeline, '_orig_filter_vp_entities'):
+            return
+        pipeline._orig_filter_vp_entities = pipeline.filter_vp_entities
+        
+        def _fast_filter_vp_entities(msp, limits, bbox_cache=None):
+            min_x, min_y, max_x, max_y = limits
+            for e in msp:
+                dxftype = e.dxftype()
+                try:
+                    if dxftype == "LINE":
+                        s, en = e.dxf.start, e.dxf.end
+                        exmax = s.x if s.x > en.x else en.x
+                        exmin = s.x if s.x < en.x else en.x
+                        eymax = s.y if s.y > en.y else en.y
+                        eymin = s.y if s.y < en.y else en.y
+                        if exmax < min_x or exmin > max_x or eymax < min_y or eymin > max_y:
+                            continue
+                    elif dxftype == "CIRCLE":
+                        c, r = e.dxf.center, e.dxf.radius
+                        if (c.x + r) < min_x or (c.x - r) > max_x or (c.y + r) < min_y or (c.y - r) > max_y:
+                            continue
+                except Exception:
+                    pass
+                yield e
+
+        # pipeline.filter_vp_entities = _fast_filter_vp_entities
+    except Exception:
+        pass
+
+def _patch_mleader_zerodiv() -> None:
+    """Monkey-patch ezdxf LeaderData.transform to survive zero-length dogleg vectors.
+
+    Some DWG files contain MLEADER entities with a zero-length dogleg vector.  When
+    ezdxf's draw_layout processes such an entity it calls Vec3.normalize() on a zero
+    vector, raising ZeroDivisionError and aborting the whole render.  We intercept
+    the transform method and silently skip the bad leaders.
+    """
+    try:
+        from ezdxf.entities import mleader as _ml
+        if getattr(_ml.LeaderData, "_patched_zerodiv", False):
+            return
+        _orig = _ml.LeaderData.transform
+
+        def _safe(self, wcs):  # noqa: ANN001
+            try:
+                return _orig(self, wcs)
+            except ZeroDivisionError:
+                pass  # zero-length dogleg – skip silently
+
+        _ml.LeaderData.transform = _safe
+        _ml.LeaderData._patched_zerodiv = True
+        logger.debug("_patch_mleader_zerodiv applied")
+    except Exception as exc:
+        logger.warning("_patch_mleader_zerodiv failed: %s", exc)
+
+
+def _render_single_layout(doc, layout, ax, color_mode: str = "auto") -> None:
+    from ezdxf.addons.drawing import Frontend, RenderContext
+    from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
+    from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
+    import ezdxf.fonts.fonts as ezdxf_fonts
+    from pathlib import Path
+    import matplotlib.font_manager as fm
+    import glob
+
+    _patch_color_policy_for_signatures()
+    _patch_filter_vp_entities()
+    _patch_mleader_zerodiv()
+
+    for font_path in glob.glob("/app/fonts/*.ttf"):
+        try:
+            fm.fontManager.addfont(font_path)
+        except Exception:
+            pass
+    try:
+        ezdxf_fonts.font_manager.scan_folder(Path("/app/fonts"))
+    except Exception as e:
+        logger.warning(f"Error loading fonts into ezdxf: {e}")
+
+    color_policy = resolve_color_policy(layout, color_mode)
+    is_mono = (color_policy == ColorPolicy.MONOCHROME)
+    actual_policy = color_policy
+
+    ctx = RenderContext(doc)
+    out = MatplotlibBackend(ax, adjust_figure=False)
+    config = Configuration(
+        background_policy=ezdxf.addons.drawing.config.BackgroundPolicy.CUSTOM,
+        custom_bg_color="#FFFFFF",
+        color_policy=actual_policy,
+        line_policy=LinePolicy.SOLID,
+        lineweight_scaling=2.0,
+        max_flattening_distance=2.0,
+        circle_approximation_count=16,
+    )
+    frontend = Frontend(ctx, out, config=config)
+    
+    frontend.draw_layout(layout)
+
+
+
+def _apply_frame_crop(ax, frame: CadFrame) -> None:
+    ax.set_xlim(frame.xmin, frame.xmax)
+    ax.set_ylim(frame.ymin, frame.ymax)
+    ax.set_aspect("auto")
+    ax.margins(0)
+
+
+def _render_frame(
+    doc,
+    frame: CadFrame,
+    ax,
+    color_mode: str = "auto",
+    preview: bool = False,
+    bbox_cache: dict | None = None,
+) -> None:
+    """Render *frame* onto *ax* (model-space frames only).
+
+    Paper-space frames with viewports are handled upstream by
+    _render_paper_layout_viewport_pages; this path is used as a fallback
+    (preview or no viewports found).
+    """
+    entity_limit = PREVIEW_MAX_ENTITIES if preview else None
+    crop_box = (frame.xmin, frame.xmax, frame.ymin, frame.ymax)
+
+    if frame.source == "viewport_model":
+        layout = doc.layouts.get(frame.layout)
+        _render_modelspace(doc, ax, color_mode=color_mode, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache, layout_for_style=layout)
+        _apply_frame_crop(ax, frame)
+        return
+
+    if frame.layout.upper() == "MODEL":
+        _render_modelspace(doc, ax, color_mode=color_mode, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache)
+        _apply_frame_crop(ax, frame)
+        return
+
+
+    # Paper-space layout fallback (fast multi-axes rendering)
+    layout = doc.layouts.get(frame.layout)
+    viewports = [e for e in layout if e.dxftype() == "VIEWPORT" and e.dxf.status > 0]
+    
+    if not viewports:
+        _render_single_layout(doc, layout, ax, color_mode=color_mode)
+    else:
+        fig = ax.figure
+        # 1. Hide the original ax so it doesn't block
+        ax.set_visible(False)
+        
+        # Paper boundaries
+        pw = frame.xmax - frame.xmin
+        ph = frame.ymax - frame.ymin
+        
+        for vp in viewports:
+            try:
+                vc = vp.dxf.view_center_point
+                vh = float(vp.dxf.view_height)
+                vp_w = float(getattr(vp.dxf, "width", 0) or 0)
+                vp_h = float(getattr(vp.dxf, "height", 0) or 0)
+                if vp_h <= 0: continue
+                vw = vh * (vp_w / vp_h)
+                if vw <= 0 or vh <= 0: continue
+                
+                # Model boundaries
+                mod_xmin = vc.x - vw / 2
+                mod_xmax = vc.x + vw / 2
+                mod_ymin = vc.y - vh / 2
+                mod_ymax = vc.y + vh / 2
+                
+                # Relative figure coordinates
+                ax_left = (vp.dxf.center.x - vp_w / 2 - frame.xmin) / pw if pw > 0 else 0
+                ax_bottom = (vp.dxf.center.y - vp_h / 2 - frame.ymin) / ph if ph > 0 else 0
+                ax_width = vp_w / pw if pw > 0 else 1
+                ax_height = vp_h / ph if ph > 0 else 1
+                
+                # Clamp to 0-1 just in case
+                ax_left = max(0.0, min(1.0, ax_left))
+                ax_bottom = max(0.0, min(1.0, ax_bottom))
+                ax_width = max(0.0, min(1.0 - ax_left, ax_width))
+                ax_height = max(0.0, min(1.0 - ax_bottom, ax_height))
+                
+                if ax_width <= 0.01 or ax_height <= 0.01: continue
+                
+                ax_vp = fig.add_axes([ax_left, ax_bottom, ax_width, ax_height])
+                ax_vp.axis("off")
+                _render_modelspace(
+                    doc, ax_vp, color_mode=color_mode, max_entities=entity_limit, 
+                    crop_box=(mod_xmin, mod_xmax, mod_ymin, mod_ymax), 
+                    bbox_cache=bbox_cache,
+                    layout_for_style=layout
+                )
+                ax_vp.set_xlim(mod_xmin, mod_xmax)
+                ax_vp.set_ylim(mod_ymin, mod_ymax)
+                ax_vp.set_aspect("auto")
+                ax_vp.margins(0)
+            except Exception as e:
+                logger.warning("Fast VP render error: %s", e)
+
+        # 2. Render paper space entities on a transparent top layer
+        ax_paper = fig.add_axes([0, 0, 1, 1])
+        ax_paper.axis("off")
+        ax_paper.patch.set_alpha(0)
+        
+        from ezdxf.addons.drawing import Frontend, RenderContext
+        from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
+        from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
+        import ezdxf.addons.drawing.config
+        
+        color_policy = resolve_color_policy(layout, color_mode)
+        is_mono = (color_policy == ColorPolicy.MONOCHROME)
+        actual_policy = color_policy
+
+        ctx = RenderContext(doc)
+        out = MatplotlibBackend(ax_paper, adjust_figure=False)
+        config = Configuration(
+            background_policy=ezdxf.addons.drawing.config.BackgroundPolicy.CUSTOM,
+            custom_bg_color="#FFFFFF",
+            color_policy=actual_policy,
+            line_policy=LinePolicy.SOLID,
+        lineweight_scaling=2.0,
+            max_flattening_distance=2.0,
+            circle_approximation_count=16,
+        )
+        frontend = Frontend(ctx, out, config=config)
+        
+        layout_entities = [e for e in layout if e.dxftype() != "VIEWPORT"]
+        frontend.draw_entities(layout_entities)
+        
+        ax_paper.set_xlim(frame.xmin, frame.xmax)
+        ax_paper.set_ylim(frame.ymin, frame.ymax)
+        ax_paper.set_aspect("auto")
+        ax_paper.margins(0)
+    if frame.source in (
+        "viewport",
+        "polyline",
+        "block",
+        "sheet_border",
+        "viewport_union",
+        "stamp_frame",
+    ):
+        _apply_frame_crop(ax, frame)
+
+
+def _render_paper_layout_viewport_pages(
+    doc,
+    frame: CadFrame,
+    pdf_pages,
+    color_mode: str = "auto",
+    bbox_cache: dict | None = None,
+) -> bool:
+    """Render each viewport in a paper-space layout as a separate PDF page.
+
+    Returns True when at least one page was written, False if no usable viewports
+    were found (caller should fall back to the normal _render_frame path).
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    layout = doc.layouts.get(frame.layout)
+    vp_list = _layout_individual_viewport_extents(layout)
+    if not vp_list:
+        return False
+
+    logger.info("Paper layout %r: rendering %d viewports as separate pages", frame.layout, len(vp_list))
+    for i, vp in enumerate(vp_list):
+        check_cancelled()
+        figsize = (vp["paper_w_mm"] / 25.4, vp["paper_h_mm"] / 25.4)
+        fig = plt.figure(figsize=figsize, dpi=CAD_RENDER_DPI)
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.axis("off")
+        crop = (vp["model_xmin"], vp["model_xmax"], vp["model_ymin"], vp["model_ymax"])
+        _render_modelspace(doc, ax, color_mode=color_mode, crop_box=crop, bbox_cache=bbox_cache, layout_for_style=layout)
+        ax.set_xlim(vp["model_xmin"], vp["model_xmax"])
+        ax.set_ylim(vp["model_ymin"], vp["model_ymax"])
+        ax.set_aspect("auto")
+        ax.margins(0)
+        _save_figure(pdf_pages, fig)
+        plt.close(fig)
+        logger.info("  Viewport %d/%d done", i + 1, len(vp_list))
+
+    return True
+
+
+
+
+def _save_figure(pdf, fig) -> None:
+    pdf.savefig(fig, bbox_inches=None, pad_inches=0)
+
+
+
+
+
+def convert_dxf_to_pdf(
+    dxf_path: Path,
+    pdf_path: Path,
+    *,
+    meta: dict[str, Any] | None = None,
+) -> Path:
+    """Р В Р ВµР Р…Р Т‘Р ВµРЎР‚ DXF Р Р† PDF: Р С—Р С• РЎР‚Р В°Р С˜Р С”Р В°Р С˜ (Р С—РЎР‚Р С‘Р С•РЎР‚Р С‘РЎвЂљР ВµРЎвЂљ) Р С‘Р В»Р С‘ Р С—Р С• layout."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+
+    color_mode = (meta or {}).get("color_mode", "auto")
+    doc = _load_dxf_document(dxf_path)
+    all_frames = detect_frames_in_doc(doc)
+    render_frames = choose_render_frames(doc, all_frames) if CAD_RENDER_MODE != "layouts" else []
+    use_frames = bool(render_frames) and CAD_RENDER_MODE in ("auto", "frames")
+
+    if meta is not None:
+        meta["frames_detected"] = len(all_frames)
+        meta["frames_rendered"] = len(render_frames) if use_frames else 0
+        meta["render_mode"] = "frames" if use_frames else "layouts"
+        if all_frames:
+            meta["frames"] = frames_summary(all_frames)
+
+    bbox_cache = {}
+    with PdfPages(str(pdf_path)) as pdf:
+        if use_frames:
+            logger.info(
+                "DXF %s: РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚ %d РЎР‚Р В°Р С˜Р С•Р С”, dpi=%s",
+                dxf_path.name,
+                len(render_frames),
+                CAD_RENDER_DPI,
+            )
+            for frame in render_frames:
+                check_cancelled()
+                is_paper_frame = (
+                    frame.layout.upper() != "MODEL"
+                    and frame.source in (
+                        "stamp_frame", "viewport", "viewport_union", "sheet_border",
+                    )
+                )
+                if is_paper_frame:
+                    # PRIMARY: draw_layout renders the full paper-space sheet
+                    # (title block, borders, notes + all viewport model content).
+                    figsize = _frame_figsize(frame)
+                    fig = plt.figure(figsize=figsize, dpi=CAD_RENDER_DPI)
+                    ax = fig.add_axes([0, 0, 1, 1])
+                    ax.axis("off")
+                    try:
+                        _render_frame(doc, frame, ax, color_mode=color_mode, bbox_cache=bbox_cache)
+                        _save_figure(pdf, fig)
+                        plt.close(fig)
+                        continue
+                    except Exception:
+                        logger.warning(
+                            "draw_layout failed for %r, falling back to per-viewport",
+                            frame.layout, exc_info=True,
+                        )
+                        plt.close(fig)
+                    # FALLBACK: per-viewport pages (no title block but shows content)
+                    try:
+                        done = _render_paper_layout_viewport_pages(
+                            doc, frame, pdf, color_mode=color_mode, bbox_cache=bbox_cache,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Per-viewport fallback also failed (layout=%r)", frame.layout
+                        )
+                        done = False
+                    if done:
+                        continue
+
+                figsize = _frame_figsize(frame)
+                fig = plt.figure(figsize=figsize, dpi=CAD_RENDER_DPI)
+                ax = fig.add_axes([0, 0, 1, 1])
+                ax.axis("off")
+                try:
+                    _render_frame(doc, frame, ax, color_mode=color_mode, bbox_cache=bbox_cache)
+                    _save_figure(pdf, fig)
+                except Exception:
+                    logger.exception(
+                        "Error rendering frame %s (layout=%r source=%r)",
+                        frame, frame.layout, frame.source,
+                    )
+                    raise
+                finally:
+                    plt.close(fig)
+        else:
+            paper = _paper_layouts(doc)
+            render_targets = paper if paper else [doc.modelspace()]
+            logger.info(
+                "DXF %s: РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚ %d layout(s), dpi=%s",
+                dxf_path.name,
+                len(render_targets),
+                CAD_RENDER_DPI,
+            )
+            for layout in render_targets:
+                check_cancelled()
+                figsize = _layout_figsize(layout) if hasattr(layout, "page_setup") else (16.54, 11.69)
+                fig = plt.figure(figsize=figsize, dpi=CAD_RENDER_DPI)
+                ax = fig.add_axes([0, 0, 1, 1])
+                ax.set_aspect("equal")
+                ax.axis("off")
+                try:
+                    if hasattr(layout, "page_setup"):
+                        _render_single_layout(doc, layout, ax, color_mode=color_mode)
+                    else:
+                        _render_modelspace(doc, ax, color_mode=color_mode)
+                    _save_figure(pdf, fig)
+                finally:
+                    plt.close(fig)
+
+    plt.close("all")
+    del doc
+    gc.collect()
+
+    if not pdf_path.exists() or pdf_path.stat().st_size == 0:
+        raise RuntimeError("PDF Р Р…Р Вµ РЎРѓР С•Р В·Р Т‘Р В°Р Р… Р С—Р С•РЎРѓР В»Р Вµ РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚Р В° DXF.")
+    return pdf_path
+
+
+def _cad_render_targets(doc) -> tuple[list[Any], str, list[CadFrame]]:
+    """Р В¦Р ВµР В»Р С‘ РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚Р В°: РЎР‚Р В°Р СР С”Р С‘ Р С‘Р В»Р С‘ layout'РЎвЂ№."""
+    all_frames = detect_frames_in_doc(doc)
+    render_frames = choose_render_frames(doc, all_frames) if CAD_RENDER_MODE != "layouts" else []
+    use_frames = bool(render_frames) and CAD_RENDER_MODE in ("auto", "frames")
+    if use_frames:
+        return render_frames, "frames", all_frames
+    paper = _paper_layouts(doc)
+    targets: list[Any] = paper if paper else [doc.modelspace()]
+    return targets, "layouts", all_frames
+
+
+def render_cad_preview_png(
     input_file: str,
     *,
-    meta: dict | None = None,
-) -> tuple:
-    from pathlib import Path
-    import tempfile
-    import shutil
-    import subprocess
-    import logging
-    
-    logger = logging.getLogger('convert.cad')
-    
+    page: int = 1,
+    dpi: int | None = None,
+) -> tuple[bytes, int, dict[str, Any]]:
+    """Р С›Р Т‘Р С‘Р Р… Р С”Р В°Р Т‘РЎР‚ CAD (DWG/DXF) Р Р† PNG Р Т‘Р В»РЎРЏ Р С—РЎР‚Р ВµР Т‘Р С—РЎР‚Р С•РЎРѓР С˜Р С•РЎвЂљРЎР‚Р В°. Р вЂ™Р С•Р В·Р Р†РЎР‚Р В°РЎвЂ°Р В°Р ВµРЎвЂљ (png, pages, meta).    """
+    import io
+
+    color_mode = "auto"
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    preview_dpi = max(48, min(120, dpi or int(os.getenv("CONVERT_PREVIEW_DPI", "96"))))
     input_path = Path(input_file)
     suffix = input_path.suffix.lower()
-    
+    if suffix not in CAD_EXTENSIONS:
+        raise ValueError(f"Р С›Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљРЎРѓРЎРЏ DWG Р С‘Р В»Р С‘ DXF, Р С—Р С•Р В»РЎС“РЎвЂЎР ВµР Р…Р С•: {suffix}")
+
+    size_mb = input_path.stat().st_size / (1024 * 1024) if input_path.exists() else 0
+    if size_mb > PREVIEW_CAD_MAX_MB:
+        raise RuntimeError(
+            f"Р В¤Р В°Р в„–Р В» РЎРѓР В»Р С‘РЎв‚¬Р С”Р С•Р С Р В±Р С•Р В»РЎРЉРЎв‚¬Р С•Р в„– ({size_mb:.0f} Р СљР вЂ) Р Т‘Р В»РЎРЏ Р С—РЎР‚Р ВµР Т‘Р С—РЎР‚Р С•РЎРѓР СР С•РЎвЂљРЎР‚Р В° Р С‘РЎРѓРЎвЂ¦Р С•Р Т‘Р Р…Р С‘Р С”Р В°. "
+            f"Р РЋР Р…Р В°РЎвЂЎР В°Р В»Р В° Р Р†РЎвЂ№Р С—Р С•Р В»Р Р…Р С‘РЎвЂљР Вµ Р С”Р С•Р Р…Р Р†Р ВµРЎР‚РЎвЂљР В°РЎвЂ Р С‘РЎР‹ Р Р† PDF Р Р…Р В° РЎРѓРЎвЂљРЎР‚Р В°Р Р…Р С‘РЎвЂ Р Вµ Р’В«Р С™Р С•Р Р…Р Р†Р ВµРЎР‚РЎвЂљР В°РЎвЂ Р С‘РЎРЏР’В» "
+            f"(Р В»Р С‘Р СР С‘РЎвЂљ Р С—РЎР‚Р ВµР Т‘Р С—РЎР‚Р С•РЎРѓР СР С•РЎвЂљРЎР‚Р В° РІР‚вЂќ {PREVIEW_CAD_MAX_MB:.0f} Р СљР вЂ)."
+        )
+
+    tmp = Path(tempfile.mkdtemp(prefix="cad_preview_"))
+    try:
+        if suffix == ".dwg":
+            if not oda_available():
+                raise RuntimeError("ODAFileConverter Р Р…Р Вµ РЎС“РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р В»Р ВµР Р…")
+            cached_dxf = _dwg_to_dxf_for_preview(input_path)
+            work_dxf = tmp / cached_dxf.name
+            shutil.copy2(cached_dxf, work_dxf)
+        else:
+            work_dxf = tmp / input_path.name
+            shutil.copy2(input_path, work_dxf)
+
+        doc = _load_dxf_document(work_dxf)
+        targets, mode, all_frames = _cad_render_targets(doc)
+        total = max(1, len(targets))
+        page_idx = max(1, min(page, total)) - 1
+        target = targets[page_idx]
+
+        if mode == "frames":
+            frame = target
+            figsize = _frame_figsize(frame)
+            fig = plt.figure(figsize=figsize, dpi=preview_dpi)
+            ax = fig.add_axes([0, 0, 1, 1])
+            ax.axis("off")
+            try:
+                _render_frame(doc, frame, ax, color_mode=color_mode, preview=True)
+            finally:
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.05, facecolor="white")
+                plt.close(fig)
+            caption = frame.label or frame.layout
+            if frame.layer:
+                caption = f"{caption} ({frame.layer})"
+        else:
+            figsize = _layout_figsize(target) if hasattr(target, "page_setup") else (16.54, 11.69)
+            fig = plt.figure(figsize=figsize, dpi=preview_dpi)
+            ax = fig.add_axes([0, 0, 1, 1])
+            ax.set_aspect("equal")
+            ax.axis("off")
+            try:
+                if hasattr(target, "page_setup"):
+                    _render_single_layout(doc, target, ax, color_mode=color_mode)
+                else:
+                    _render_modelspace(doc, ax, color_mode=color_mode)
+            finally:
+                buf = io.BytesIO()
+                fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.05, facecolor="white")
+                plt.close(fig)
+            caption = getattr(target, "name", None) or "Model"
+
+        plt.close("all")
+        meta = {
+            "render_mode": mode,
+            "page": page_idx + 1,
+            "pages": total,
+            "caption": caption,
+            "frames_detected": len(all_frames),
+        }
+        return buf.getvalue(), total, meta
+    finally:
+        plt.close("all")
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def inspect_cad_frames(input_file: str) -> dict[str, Any]:
+    """Р РЋР С—Р С‘РЎРѓР С•Р С” РЎР‚Р В°Р СР С•Р С” Р Т‘Р В»РЎРЏ DWG/DXF (Р Т‘Р В»РЎРЏ UI/API)."""
+    input_path = Path(input_file)
+    suffix = input_path.suffix.lower()
+    if suffix not in CAD_EXTENSIONS:
+        raise ValueError(f"Р С›Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљРЎРѓРЎРЏ DWG Р С‘Р В»Р С‘ DXF, Р С—Р С•Р В»РЎС“РЎвЂЎР ВµР Р…Р С•: {suffix}")
+
+    tmp = Path(tempfile.mkdtemp(prefix="cad_frames_"))
+    try:
+        if suffix == ".dwg":
+            if not oda_available():
+                raise RuntimeError("ODAFileConverter Р Р…Р Вµ РЎС“РЎРѓРЎвЂљР В°Р Р…Р С•Р Р†Р В»Р ВµР Р…")
+            dxf_path = convert_dwg_to_dxf(str(input_path))
+            work_dxf = tmp / dxf_path.name
+            shutil.copy2(dxf_path, work_dxf)
+            shutil.rmtree(dxf_path.parent, ignore_errors=True)
+        else:
+            work_dxf = tmp / input_path.name
+            shutil.copy2(input_path, work_dxf)
+
+        doc = _load_dxf_document(work_dxf)
+        frames = detect_frames_in_doc(doc)
+        chosen = choose_render_frames(doc, frames)
+        return {
+            "path": str(input_path),
+            "detected": frames_summary(frames),
+            "will_render": frames_summary(chosen),
+        }
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def convert_cad_to_pdf(
+    input_file: str,
+    *,
+    meta: dict[str, Any] | None = None,
+) -> tuple[Path, dict[str, Any]]:
+    """
+    DWG/DXF РІвЂ вЂ™ PDF.
+    DWG: ODA РІвЂ вЂ™ PDF; Р С—РЎР‚Р С‘ Р С•РЎв‚¬Р С‘Р В±Р С”Р Вµ РІР‚вЂќ DWG РІвЂ вЂ™ DXF РІвЂ вЂ™ РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚ Р С—Р С• РЎР‚Р В°Р СР С”Р В°Р С/layout (ezdxf).
+    """
+    input_path = Path(input_file)
+    suffix = input_path.suffix.lower()
+    if suffix not in CAD_EXTENSIONS:
+        raise ValueError(f"Р С›Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљРЎРѓРЎРЏ DWG Р С‘Р В»Р С‘ DXF, Р С—Р С•Р В»РЎС“РЎвЂЎР ВµР Р…Р С•: {suffix}")
+
     meta = meta or {}
-    meta.setdefault('engine', None)
-    meta.setdefault('fallback', False)
+    meta.setdefault("engine", None)
+    meta.setdefault("fallback", False)
     windows_cad_ip = meta.get('windows_cad_ip', '').strip()
     dsd_path = meta.get('dsd_path')
     
-    tmp = Path(tempfile.mkdtemp(prefix='cad_pdf_'))
+    tmp = Path(tempfile.mkdtemp(prefix="cad_pdf_"))
     pdf_path = tmp / f"{input_path.stem}.pdf"
-    
+    size_mb = input_path.stat().st_size / (1024 * 1024) if input_path.exists() else 0
+
     if windows_cad_ip:
         try:
+            import subprocess
             if not windows_cad_ip.startswith("http"):
                 windows_cad_ip = "http://" + windows_cad_ip
             url = windows_cad_ip.rstrip('/') + '/convert'
@@ -50,7 +1306,9 @@
         except Exception as e:
             logger.warning('Could not connect to Windows CAD Server: %s', e)
 
+
     if suffix == ".dwg":
+        # Bypassed direct ODA PDF conversion to strictly use the frame-detection engine on the _Р РЃРЎвЂљР В°Р СР С—_РЎР‚Р В°Р СР С”Р В° layer.
         meta["fallback"] = True
         meta["engine"] = "ezdxf"
 
@@ -70,4 +1328,3 @@
     except Exception:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
-\n
