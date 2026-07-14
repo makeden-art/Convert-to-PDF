@@ -8,13 +8,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice-writer-nogui \
     libreoffice-calc-nogui \
-    libfontconfig1 libfreetype6 \
-    fonts-dejavu-core \
-    curl ca-certificates smbclient ghostscript librsvg2-bin \
+    curl ca-certificates smbclient ghostscript \
     && rm -rf /var/lib/apt/lists/*
 
 COPY app.py converter.py cad_converter.py frame_detect.py format_detect.py file_preview.py cad_preview_worker.py convert_page.html viewer_page.html convert_worker.py convert_jobs.py job_control.py VERSION windows_cad_server.py setup_cad_server.ps1 ./
-COPY fonts/ ./fonts/
 
 ENV PYTHONUNBUFFERED=1
 

@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
-from cad_converter import CAD_EXTENSIONS, convert_cad_to_pdf, inspect_cad_frames, oda_available
+from cad_converter import CAD_EXTENSIONS, convert_cad_to_pdf
 from convert_jobs import cancel_job, create_job, get_job, list_jobs, queue_status
 from file_preview import (
     preview_info,
@@ -162,7 +162,7 @@ async def health():
         "version": _version(),
         "service": "convert-to-pdf",
         "allowed_roots": [str(r) for r in allowed_roots()],
-        "cad_support": oda_available(),
+        "cad_support": True,
         "formats": sorted(SUPPORTED_ALL),
     }
 
@@ -251,37 +251,6 @@ async def api_resolve_paths(body: ResolveRequest):
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@app.get("/api/detect-frames")
-async def api_detect_frames(path: str):
-    try:
-        file_path = validate_file(path)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    suffix = file_path.suffix.lower()
-    if suffix not in CAD_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Только DWG/DXF")
-    if suffix == ".dwg":
-        raise HTTPException(
-            status_code=400,
-            detail="Поиск рамок для DWG отключен во избежание фоновой нагрузки на процессор."
-        )
-    try:
-        from converter import _is_smb_path, _smb_local_file, _smb_mounted
-
-        if _is_smb_path(file_path) and _smb_mounted():
-            def work():
-                with _smb_local_file(file_path) as local:
-                    return inspect_cad_frames(str(local))
-
-            result = await asyncio.to_thread(work)
-            result["path"] = str(file_path)
-        else:
-            result = await asyncio.to_thread(inspect_cad_frames, str(file_path))
-        return JSONResponse(result)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/preview-info")
@@ -618,8 +587,6 @@ async def api_convert(
             out = tmp / "result.pdf"
             shutil.copy(src, out)
         elif suffix in CAD_EXTENSIONS:
-            if not oda_available():
-                raise HTTPException(status_code=503, detail="ODAFileConverter не установлен")
             out = tmp / "result.pdf"
             pdf_tmp, _cad_meta = convert_cad_to_pdf(str(src), meta={"windows_cad_ip": windows_cad_ip})
             shutil.move(str(pdf_tmp), str(out))

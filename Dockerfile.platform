@@ -9,12 +9,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice-writer-nogui \
     libreoffice-calc-nogui \
-    libfontconfig1 libfreetype6 \
-    fonts-dejavu-core \
     curl ca-certificates smbclient ghostscript \
     && rm -rf /var/lib/apt/lists/*
 
-COPY convert-to-pdf/app.py convert-to-pdf/converter.py convert-to-pdf/cad_converter.py convert-to-pdf/frame_detect.py convert-to-pdf/format_detect.py convert-to-pdf/file_preview.py convert-to-pdf/convert_page.html convert-to-pdf/viewer_page.html convert-to-pdf/convert_worker.py convert-to-pdf/convert_jobs.py convert-to-pdf/job_control.py convert-to-pdf/VERSION convert-to-pdf/windows_cad_server.py convert-to-pdf/setup_cad_server.ps1 ./
+COPY convert-to-pdf/app.py convert-to-pdf/converter.py convert-to-pdf/cad_converter.py convert-to-pdf/format_detect.py convert-to-pdf/file_preview.py convert-to-pdf/convert_page.html convert-to-pdf/viewer_page.html convert-to-pdf/convert_worker.py convert-to-pdf/convert_jobs.py convert-to-pdf/job_control.py convert-to-pdf/VERSION convert-to-pdf/windows_cad_server.py convert-to-pdf/setup_cad_server.ps1 ./
 
 ENV PYTHONUNBUFFERED=1
 
