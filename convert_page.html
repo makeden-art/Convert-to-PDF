@@ -180,6 +180,21 @@
     </div>
 
     <div class="box">
+      <button type="button" class="collapse-toggle" id="win-toggle" aria-expanded="false" aria-controls="win-body">
+        <span>🖥 Настройка Windows сервера (AutoCAD)</span>
+        <span class="chevron">▼</span>
+      </button>
+      <p id="win-status" class="ver" style="margin-top:0">Статус сервера: неизвестно</p>
+      <div class="collapse-body is-collapsed" id="win-body">
+        <label for="win-ip">IP-адрес Windows-сервера с AutoCAD (с портом)</label>
+        <input type="text" id="win-ip" placeholder="192.168.88.10:8000" />
+        <button id="btn-win-check" type="button">Проверить подключение</button>
+        <p class="hint" style="margin-top:10px;">Для работы конвертации DWG в Windows необходим специальный сервер на Python.</p>
+        <a href="/api/cad-server-script" download="windows_cad_server.py" class="secondary" style="display:inline-block; padding:8px 12px; background:#1e293b; color:#cbd5e1; text-decoration:none; border-radius:6px; border:1px solid #334155; margin-top:5px;">Скачать скрипт сервера (windows_cad_server.py)</a>
+      </div>
+    </div>
+
+    <div class="box">
       <h2>📄 Конвертация</h2>
       <p class="hint">Выберите папку или файлы в дереве SMB-шары — или загрузите с компьютера. Клик по имени файла — просмотр в новой вкладке.</p>
       <div class="work-grid">
@@ -196,10 +211,9 @@
           <input type="file" id="file-upload" style="display:none" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.rtf,.dwg,.dxf" />
         <p class="sel-count" id="sel-count">На сервере: ничего не выбрано</p>
         <p class="sel-detail" id="sel-detail"></p>
-        <p class="frames-hint" id="frames-hint" style="display:none"></p>
-          <p class="sel-count" id="upload-count" style="color:#94a3b8">С компьютера: 0</p>
-          <div class="chk"><input type="checkbox" id="recursive" checked /><label for="recursive" style="margin:0">Включая вложенные подпапки (для выбранных папок)</label></div>
-          <div class="chk"><input type="checkbox" id="merge" /><label for="merge" style="margin:0">Собрать в один PDF</label></div>
+        <p class="sel-count" id="upload-count" style="color:#94a3b8">С компьютера: 0</p>
+        <div class="chk"><input type="checkbox" id="recursive" checked /><label for="recursive" style="margin:0">Включая вложенные подпапки (для выбранных папок)</label></div>
+        <div class="chk"><input type="checkbox" id="merge" /><label for="merge" style="margin:0">Собрать в один PDF</label></div>
           <div class="merge-panel" id="merge-panel">
             <p class="hint" style="margin:0 0 6px">Порядок в сборке — перетащите мышью или ↑ ↓:</p>
             <div class="merge-list" id="merge-list"></div>
@@ -249,7 +263,7 @@
     const treePathEl = document.getElementById('tree-path');
     const selCountEl = document.getElementById('sel-count');
     const selDetailEl = document.getElementById('sel-detail');
-    const framesHintEl = document.getElementById('frames-hint');
+    const selDetailEl = document.getElementById('sel-detail');
     const uploadCountEl = document.getElementById('upload-count');
     const logWork = document.getElementById('log-work');
     const dropUpload = document.getElementById('drop-upload');
@@ -348,13 +362,11 @@
         return fmt === 'dwg' || fmt === 'dxf' || name.endsWith('.dwg') || name.endsWith('.dxf');
       });
       if (cad.length !== 1) return;
-      framesHintEl.style.display = 'block';
-      framesHintEl.textContent = 'Поиск рамок…';
       try {
         const r = await fetch('/api/detect-frames?path=' + encodeURIComponent(cad[0].path));
         const j = await r.json();
         if (!r.ok) {
-          framesHintEl.textContent = 'Рамки: ' + (j.detail || 'не удалось определить');
+
           return;
         }
         const detected = (j.detected && j.detected.frames) || [];
@@ -379,7 +391,7 @@
         }
         framesHintEl.textContent = text;
       } catch (_) {
-        framesHintEl.textContent = 'Рамки: ошибка запроса';
+
       }
     }
 
@@ -1022,6 +1034,7 @@
       const number_pages = document.getElementById('number-pages').checked;
       const numbering_from_page = parseInt(document.getElementById('page-start').value, 10) || 1;
       const numbering_start = parseInt(document.getElementById('num-start').value, 10) || 1;
+
       const btn = document.getElementById('btn-server');
       btn.disabled = true;
       btn.textContent = 'Обработка…';
@@ -1034,20 +1047,23 @@
             paths: mergeOrder.map(f => f.path),
             merge: true,
             output_name,
-            recursive: document.getElementById('recursive').checked
+            recursive: document.getElementById('recursive').checked,
+            color_mode
           };
         } else if (orderedSelections.length > 0) {
           checkPayload = {
             paths: orderedSelections.map(s => s.path),
             merge: false,
-            recursive: document.getElementById('recursive').checked
+            recursive: document.getElementById('recursive').checked,
+            color_mode
           };
         } else if (currentPath) {
           checkPayload = {
             folder_path: currentPath,
             merge,
             output_name,
-            recursive: document.getElementById('recursive').checked
+            recursive: document.getElementById('recursive').checked,
+            color_mode
           };
         }
         if (checkPayload) {
@@ -1067,7 +1083,8 @@
             output_name,
             number_pages,
             numbering_from_page,
-            numbering_start
+            numbering_start,
+            color_mode
           });
           showLog('Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) +
             mergeSaveLog(j) + ', ошибок: ' + j.stats.error);
@@ -1075,7 +1092,8 @@
           const j = await apiPost('/api/convert-paths', {
             paths: orderedSelections.map(s => s.path),
             merge: false,
-            recursive: document.getElementById('recursive').checked
+            recursive: document.getElementById('recursive').checked,
+            color_mode
           });
           showLog('Готово: ' + j.stats.ok + ' OK, ошибок ' + j.stats.error + '\n' +
             j.files.map(f => f.status + ' | ' + f.source).join('\n'));
@@ -1087,7 +1105,8 @@
             output_name,
             number_pages,
             numbering_from_page,
-            numbering_start
+            numbering_start,
+            color_mode
           });
           if (j.merge) {
             showLog('Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) + mergeSaveLog(j));
@@ -1113,6 +1132,7 @@
       const number_pages = document.getElementById('number-pages').checked;
       const numbering_from_page = parseInt(document.getElementById('page-start').value, 10) || 1;
       const numbering_start = parseInt(document.getElementById('num-start').value, 10) || 1;
+
       const output_name = document.getElementById('output-name').value.trim() || 'сборка.pdf';
       const serverMerge = merge && hasServerMergeQueue();
       const hasUpload = uploadFiles.length > 0;
@@ -1143,7 +1163,8 @@
               recursive: document.getElementById('recursive').checked,
               number_pages,
               numbering_from_page,
-              numbering_start
+              numbering_start,
+              color_mode
             })
           });
           if (!r.ok) {
@@ -1180,9 +1201,12 @@
           if (filesToSend.length > maxMerge) { alert('Максимум ' + maxMerge + ' файлов'); return; }
           const fd = new FormData();
           filesToSend.forEach(f => fd.append('files', f));
-          fd.append('number_pages', number_pages ? 'true' : 'false');
-          fd.append('numbering_from_page', String(numbering_from_page));
-          fd.append('numbering_start', String(numbering_start));
+          if (number_pages) {
+            fd.append('number_pages', 'true');
+            fd.append('numbering_from_page', numbering_from_page);
+            fd.append('numbering_start', numbering_start);
+          }
+          fd.append('color_mode', color_mode);
           const r = await fetch('/api/convert-merge', { method: 'POST', body: fd });
           if (!r.ok) { showLog(await r.text()); return; }
           const blob = await r.blob();
@@ -1198,6 +1222,52 @@
         btn.disabled = false;
         btn.textContent = 'Скачать PDF';
       }
+    };
+
+    
+    /* Windows Server setup */
+    const winToggle = document.getElementById('win-toggle');
+    const winBody = document.getElementById('win-body');
+    const winIpInput = document.getElementById('win-ip');
+    const btnWinCheck = document.getElementById('btn-win-check');
+    const winStatus = document.getElementById('win-status');
+
+    winToggle.onclick = () => {
+      const c = winBody.classList.toggle('is-collapsed');
+      winToggle.setAttribute('aria-expanded', c ? 'false' : 'true');
+    };
+
+    let savedWinIp = localStorage.getItem('win_cad_ip') || '';
+    if (savedWinIp) winIpInput.value = savedWinIp;
+
+    winIpInput.addEventListener('change', () => {
+        localStorage.setItem('win_cad_ip', winIpInput.value.trim());
+    });
+
+    btnWinCheck.onclick = async () => {
+        const ip = winIpInput.value.trim();
+        if (!ip) {
+            winStatus.textContent = 'Статус: введите IP-адрес';
+            return;
+        }
+        localStorage.setItem('win_cad_ip', ip);
+        btnWinCheck.disabled = true;
+        winStatus.textContent = 'Статус: проверка...';
+        try {
+            // ping through our backend because browser CORS might block direct access
+            const r = await fetch('/api/cad-server-ping?ip=' + encodeURIComponent(ip));
+            if (r.ok) {
+                winStatus.textContent = 'Статус сервера: 🟢 Доступен';
+                winStatus.style.color = '#4ade80';
+            } else {
+                winStatus.textContent = 'Статус сервера: 🔴 Недоступен (' + r.status + ')';
+                winStatus.style.color = '#f87171';
+            }
+        } catch (e) {
+            winStatus.textContent = 'Статус сервера: 🔴 Ошибка проверки';
+            winStatus.style.color = '#f87171';
+        }
+        btnWinCheck.disabled = false;
     };
 
     /* SMB */

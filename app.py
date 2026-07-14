@@ -54,6 +54,8 @@ def _version() -> str:
 
 
 class FolderRequest(BaseModel):
+    windows_cad_ip: str = ""
+
     path: str
     recursive: bool = True
     merge: bool = False
@@ -61,9 +63,12 @@ class FolderRequest(BaseModel):
     number_pages: bool = False
     numbering_from_page: int = 1
     numbering_start: int = 1
+    color_mode: str = "color"
 
 
 class PathsRequest(BaseModel):
+    windows_cad_ip: str = ""
+
     paths: list[str]
     merge: bool = False
     output_name: str = "сборка.pdf"
@@ -71,6 +76,7 @@ class PathsRequest(BaseModel):
     number_pages: bool = False
     numbering_from_page: int = 1
     numbering_start: int = 1
+    color_mode: str = "color"
 
 
 class ResolveRequest(BaseModel):
@@ -429,6 +435,7 @@ async def api_convert_paths(body: PathsRequest):
                 number_pages=body.number_pages,
                 numbering_from_page=body.numbering_from_page,
                 numbering_start=body.numbering_start,
+                windows_cad_ip=body.windows_cad_ip,
             ),
             label=_paths_job_label(body),
             kind="convert_paths",
@@ -465,6 +472,7 @@ async def api_convert_merge_download(body: PathsRequest):
             recursive=body.recursive,
             numbering_from_page=from_page,
             numbering_start=start_num,
+            windows_cad_ip=body.windows_cad_ip,
         )
         filename = Path(body.output_name).name or "сборка.pdf"
         if not filename.lower().endswith(".pdf"):
@@ -497,6 +505,7 @@ async def api_convert_folder(body: FolderRequest):
                 number_pages=body.number_pages,
                 numbering_from_page=body.numbering_from_page,
                 numbering_start=body.numbering_start,
+                windows_cad_ip=body.windows_cad_ip,
             ),
             label=_folder_job_label(body),
             kind="convert_folder",
@@ -537,6 +546,7 @@ async def api_convert_merge(
     number_pages: bool = Form(False),
     numbering_from_page: int = Form(1),
     numbering_start: int = Form(1),
+    color_mode: str = Form("color"),
 ):
     if not files:
         raise HTTPException(status_code=400, detail="Передайте хотя бы один файл")
@@ -570,6 +580,7 @@ async def api_convert_merge(
             out,
             numbering_from_page=from_page,
             numbering_start=start_num,
+            color_mode=color_mode,
         )
         return FileResponse(
             path=str(out),
@@ -586,7 +597,10 @@ async def api_convert_merge(
 
 
 @app.post("/api/convert")
-async def api_convert(file: UploadFile = File(...)):
+async def api_convert(
+    file: UploadFile = File(...),
+    color_mode: str = Form("color"),
+):
     suffix = Path(file.filename or "upload").suffix.lower()
     if suffix not in SUPPORTED_ALL:
         raise HTTPException(
@@ -607,7 +621,7 @@ async def api_convert(file: UploadFile = File(...)):
             if not oda_available():
                 raise HTTPException(status_code=503, detail="ODAFileConverter не установлен")
             out = tmp / "result.pdf"
-            pdf_tmp, _cad_meta = convert_cad_to_pdf(str(src))
+            pdf_tmp, _cad_meta = convert_cad_to_pdf(str(src), meta={"color_mode": color_mode})
             shutil.move(str(pdf_tmp), str(out))
         else:
             out = _convert_with_libreoffice(src, tmp)
@@ -621,3 +635,22 @@ async def api_convert(file: UploadFile = File(...)):
     except Exception as e:
         shutil.rmtree(tmp, ignore_errors=True)
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/cad-server-ping")
+async def ping_cad_server(ip: str):
+    import httpx
+    if not ip:
+        raise HTTPException(status_code=400, detail="No IP")
+    if not ip.startswith("http"):
+        ip = "http://" + ip
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            resp = await client.get(ip)
+            return {"status": "ok", "code": resp.status_code}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+@app.get("/api/cad-server-script")
+async def download_cad_server():
+    return FileResponse("windows_cad_server.py", media_type="text/x-python", filename="windows_cad_server.py")

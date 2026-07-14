@@ -147,6 +147,30 @@ try:
 except Exception as e:
     logger.error("Failed to apply ezdxf monkey-patch: %s", e)
 
+try:
+    import ezdxf.addons.drawing.pipeline as _pipeline
+    from ezdxf.addons.drawing.config import ColorPolicy
+    _orig_apply_color_policy = _pipeline.apply_color_policy
+
+    def patched_apply_color_policy(color: str, policy, custom_color: str) -> str:
+        if policy == ColorPolicy.MONOCHROME:
+            try:
+                r = int(color[1:3], 16)
+                g = int(color[3:5], 16)
+                b = int(color[5:7], 16)
+                is_blue = (r < 100 and g < 150 and b > 150)
+                if is_blue:
+                    return color
+            except Exception:
+                pass
+            return "#000000" + color[7:]
+        return _orig_apply_color_policy(color, policy, custom_color)
+
+    _pipeline.apply_color_policy = patched_apply_color_policy
+    logger.info("Successfully applied ezdxf apply_color_policy monkey-patch.")
+except Exception as e:
+    logger.error("Failed to apply ezdxf apply_color_policy monkey-patch: %s", e)
+
 CAD_EXTENSIONS = {".dwg", ".dxf"}
 CAD_RENDER_DPI = max(72, int(os.getenv("CONVERT_CAD_DPI", "150")))
 CAD_RENDER_MODE = os.getenv("CONVERT_CAD_RENDER_MODE", "auto").strip().lower()
@@ -253,10 +277,20 @@ def _load_dxf_document(dxf_path: Path):
     from ezdxf import recover
 
     try:
-        return ezdxf.readfile(str(dxf_path))
+        doc = ezdxf.readfile(str(dxf_path))
     except ezdxf.DXFError:
         doc, _ = recover.readfile(str(dxf_path))
-        return doc
+        
+    for layout in doc.layouts:
+        try:
+            for vp in layout.query("VIEWPORT"):
+                if vp.dxf.view_direction_vector.z != 1.0:
+                    vp.dxf.view_direction_vector = (0, 0, 1)
+                    vp.dxf.view_target_point = (0, 0, 0)
+        except Exception:
+            pass
+            
+    return doc
 
 
 def _preview_dxf_cache_path(input_path: Path) -> Path:
@@ -316,8 +350,9 @@ def _frame_figsize(frame: CadFrame) -> tuple[float, float]:
 class SafeFrontend:
     """Р С›Р В±РЎвЂРЎР‚РЎвЂљР С”Р В° Р Р…Р В°Р Т‘ ezdxf Frontend: Р С—РЎР‚Р С•Р С—РЎС“РЎРѓР С”Р В°Р ВµРЎвЂљ Р В±Р С‘РЎвЂљРЎвЂ№Р Вµ РЎРѓРЎС“РЎвЂ°Р Р…Р С•РЎРѓРЎвЂљР С‘ Р Р† Р В±Р В»Р С•Р С”Р В°РЎвЂ¦."""
 
-    def __init__(self, frontend) -> None:
+    def __init__(self, frontend, is_monochrome: bool = False) -> None:
         self._frontend = frontend
+        self._is_monochrome = is_monochrome
         self._orig_draw_entity = frontend.draw_entity
         self._orig_draw_composite_entity = frontend.draw_composite_entity
         self._orig_draw_entities = frontend.draw_entities
@@ -337,8 +372,38 @@ class SafeFrontend:
         if safe:
             _draw_entities(self._frontend, self._frontend.ctx, safe, filter_func=filter_func)
 
-    def draw_entity(self, entity, properties) -> None:
+    def draw_entity(self, entity, properties=None) -> None:
         try:
+            if self._is_monochrome:
+                if properties is None:
+                    properties = self._frontend.ctx.resolve_all(entity)
+                
+                preserve_color = False
+                try:
+                    c = entity.dxf.color
+                    
+                    tc_val = None
+                    if entity.dxf.hasattr('true_color'):
+                        tc_val = entity.dxf.true_color
+                    elif c == 256 and entity.doc:
+                        layer = entity.doc.layers.get(entity.dxf.layer)
+                        if layer and layer.dxf.hasattr('true_color'):
+                            tc_val = layer.dxf.true_color
+                            
+                    if tc_val is not None:
+                        if tc_val != 0x0 and tc_val != 0xFFFFFF:
+                            layer_name = str(entity.dxf.layer).lower()
+                            r = (tc_val >> 16) & 0xFF
+                            g = (tc_val >> 8) & 0xFF
+                            b = tc_val & 0xFF
+                            is_blue = (r < 100 and g < 150 and b > 150)
+                            if "подпис" in layer_name or "цвет" in layer_name or is_blue:
+                                preserve_color = True
+                except Exception:
+                    pass
+                
+                if not preserve_color:
+                    properties.color = "#FF0000"
             self._orig_draw_entity(entity, properties)
         except Exception as e:
             logger.warning("Error rendering entity %s (%s): %s", entity.dxftype(), getattr(entity, 'handle', '?'), e)
@@ -346,14 +411,44 @@ class SafeFrontend:
 
     def draw_composite_entity(self, entity, properties) -> None:
         try:
+            if self._is_monochrome:
+                if properties is None:
+                    properties = self._frontend.ctx.resolve_all(entity)
+                
+                preserve_color = False
+                try:
+                    c = entity.dxf.color
+                    
+                    tc_val = None
+                    if entity.dxf.hasattr('true_color'):
+                        tc_val = entity.dxf.true_color
+                    elif c == 256 and entity.doc:
+                        layer = entity.doc.layers.get(entity.dxf.layer)
+                        if layer and layer.dxf.hasattr('true_color'):
+                            tc_val = layer.dxf.true_color
+                            
+                    if tc_val is not None:
+                        if tc_val != 0x0 and tc_val != 0xFFFFFF:
+                            layer_name = str(entity.dxf.layer).lower()
+                            r = (tc_val >> 16) & 0xFF
+                            g = (tc_val >> 8) & 0xFF
+                            b = tc_val & 0xFF
+                            is_blue = (r < 100 and g < 150 and b > 150)
+                            if "подпис" in layer_name or "цвет" in layer_name or is_blue:
+                                preserve_color = True
+                except Exception:
+                    pass
+                
+                if not preserve_color:
+                    properties.color = "#FF0000"
             self._orig_draw_composite_entity(entity, properties)
         except Exception as e:
             logger.warning("Error rendering composite entity %s (%s): %s", entity.dxftype(), getattr(entity, 'handle', '?'), e)
             self._frontend.skip_entity(entity, "composite render error")
 
 
-def _patch_frontend(frontend) -> SafeFrontend:
-    safe = SafeFrontend(frontend)
+def _patch_frontend(frontend, is_monochrome: bool = False) -> SafeFrontend:
+    safe = SafeFrontend(frontend, is_monochrome=is_monochrome)
     import types
 
     frontend.draw_entities = types.MethodType(SafeFrontend.draw_entities, safe)  # type: ignore[method-assign]
@@ -413,13 +508,52 @@ def _modelspace_entity_count(doc) -> int:
         return 0
 
 
+def resolve_color_policy(layout, color_mode: str):
+    from ezdxf.addons.drawing.config import ColorPolicy
+    if color_mode == "monochrome":
+        return ColorPolicy.MONOCHROME
+    elif color_mode == "color":
+        return ColorPolicy.COLOR_SWAP_BW
+    
+    style_sheet = ""
+    try:
+        if layout:
+            if hasattr(layout, "dxf") and hasattr(layout.dxf, "current_style_sheet"):
+                style_sheet = str(layout.dxf.current_style_sheet).lower()
+            elif hasattr(layout, "get_plot_style_filename"):
+                style_sheet = str(layout.get_plot_style_filename()).lower()
+    except Exception:
+        pass
+        
+    doc = layout.doc if layout and hasattr(layout, 'doc') else None
+    if not style_sheet and doc:
+        try:
+            for l in doc.layouts:
+                s = ""
+                if hasattr(l, "dxf") and hasattr(l.dxf, "current_style_sheet"):
+                    s = str(l.dxf.current_style_sheet).lower()
+                elif hasattr(l, "get_plot_style_filename"):
+                    s = str(l.get_plot_style_filename()).lower()
+                if "monochrome" in s:
+                    style_sheet = s
+                    break
+        except Exception:
+            pass
+    
+    if "monochrome" in style_sheet:
+        return ColorPolicy.MONOCHROME
+    return ColorPolicy.COLOR_SWAP_BW
+
+
 def _render_modelspace(
     doc,
     ax,
     *,
+    color_mode: str = "auto",
     max_entities: int | None = None,
     crop_box: tuple[float, float, float, float] | None = None,
     bbox_cache: dict | None = None,
+    layout_for_style=None,
 ) -> None:
     if max_entities is not None:
         count = _modelspace_entity_count(doc)
@@ -433,20 +567,27 @@ def _render_modelspace(
     from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
 
+    style_layout = layout_for_style if layout_for_style is not None else doc.modelspace()
+    color_policy = resolve_color_policy(style_layout, color_mode)
+    is_mono = (color_policy == ColorPolicy.MONOCHROME)
+    actual_policy = color_policy
+
     ctx = RenderContext(doc)
     out = MatplotlibBackend(ax, adjust_figure=False)
     config = Configuration(
-        color_policy=ColorPolicy.MONOCHROME,
+        color_policy=actual_policy,
         line_policy=LinePolicy.APPROXIMATE,
+        lineweight_scaling=2.0,
         max_flattening_distance=2.0,
         circle_approximation_count=16,
         hatch_policy=Configuration().hatch_policy,
     )
     
+    _patch_color_policy_for_signatures()
     _patch_filter_vp_entities()
     
     frontend = Frontend(ctx, out, config=config)
-    _patch_frontend(frontend)
+    
 
     entities = doc.modelspace()
     if crop_box is not None:
@@ -511,6 +652,54 @@ def _layout_viewport_model_extents(
         max(v["model_ymax"] for v in vps),
     )
 
+def _patch_color_policy_for_signatures():
+    import ezdxf.addons.drawing.pipeline as pipeline
+    import ezdxf.addons.drawing.properties as properties
+    
+    if hasattr(pipeline, '_orig_apply_color_policy'):
+        return
+        
+    pipeline._orig_apply_color_policy = pipeline.apply_color_policy
+    def new_apply_color_policy(color, color_policy, custom_color="#000000"):
+        if custom_color is None:
+            custom_color = "#000000"
+        if color and color.endswith("_KEEP"):
+            return color[:-5]
+        return pipeline._orig_apply_color_policy(color, color_policy, custom_color)
+    pipeline.apply_color_policy = new_apply_color_policy
+
+    properties._orig_resolve_all = properties.RenderContext.resolve_all
+    def new_resolve_all(self, entity):
+        p = properties._orig_resolve_all(self, entity)
+        
+        # ACI based color preservation
+        keep_color = False
+        c = entity.dxf.color
+        if entity.dxf.hasattr("true_color"):
+            tc = entity.dxf.true_color
+            r, g, b = (tc >> 16) & 0xFF, (tc >> 8) & 0xFF, tc & 0xFF
+            if r < 100 and g < 150 and b > 150:
+                keep_color = True
+        elif c not in (0, 256) and c in {5}:
+            keep_color = True
+        elif c == 256 and entity.doc:
+            layer = entity.doc.layers.get(entity.dxf.layer)
+            if layer:
+                if layer.dxf.hasattr("true_color"):
+                    tc = layer.dxf.true_color
+                    r, g, b = (tc >> 16) & 0xFF, (tc >> 8) & 0xFF, tc & 0xFF
+                    if r < 100 and g < 150 and b > 150:
+                        keep_color = True
+                elif layer.color in {5}:
+                    keep_color = True
+                    
+        if keep_color and p.color:
+            p.color = p.color + "_KEEP"
+            
+        return p
+    properties.RenderContext.resolve_all = new_resolve_all
+
+
 def _patch_filter_vp_entities():
     try:
         import ezdxf.addons.drawing.pipeline as pipeline
@@ -539,7 +728,7 @@ def _patch_filter_vp_entities():
                     pass
                 yield e
 
-        pipeline.filter_vp_entities = _fast_filter_vp_entities
+        # pipeline.filter_vp_entities = _fast_filter_vp_entities
     except Exception:
         pass
 
@@ -570,33 +759,46 @@ def _patch_mleader_zerodiv() -> None:
         logger.warning("_patch_mleader_zerodiv failed: %s", exc)
 
 
-def _render_single_layout(doc, layout, ax) -> None:
+def _render_single_layout(doc, layout, ax, color_mode: str = "auto") -> None:
     from ezdxf.addons.drawing import Frontend, RenderContext
     from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
     from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
+    import ezdxf.fonts.fonts as ezdxf_fonts
+    from pathlib import Path
+    import matplotlib.font_manager as fm
+    import glob
 
+    _patch_color_policy_for_signatures()
     _patch_filter_vp_entities()
     _patch_mleader_zerodiv()
 
-    # Загружаем ГОСТ-шрифты в Matplotlib напрямую (в обход fontconfig, чтобы не крашить ODA)
-    import matplotlib.font_manager as fm
-    import glob
     for font_path in glob.glob("/app/fonts/*.ttf"):
         try:
             fm.fontManager.addfont(font_path)
         except Exception:
             pass
+    try:
+        ezdxf_fonts.font_manager.scan_folder(Path("/app/fonts"))
+    except Exception as e:
+        logger.warning(f"Error loading fonts into ezdxf: {e}")
+
+    color_policy = resolve_color_policy(layout, color_mode)
+    is_mono = (color_policy == ColorPolicy.MONOCHROME)
+    actual_policy = color_policy
 
     ctx = RenderContext(doc)
     out = MatplotlibBackend(ax, adjust_figure=False)
     config = Configuration(
-        color_policy=ColorPolicy.MONOCHROME,
-        line_policy=LinePolicy.APPROXIMATE,
+        background_policy=ezdxf.addons.drawing.config.BackgroundPolicy.CUSTOM,
+        custom_bg_color="#FFFFFF",
+        color_policy=actual_policy,
+        line_policy=LinePolicy.SOLID,
+        lineweight_scaling=2.0,
         max_flattening_distance=2.0,
         circle_approximation_count=16,
     )
     frontend = Frontend(ctx, out, config=config)
-    _patch_frontend(frontend)
+    
     frontend.draw_layout(layout)
 
 
@@ -612,7 +814,7 @@ def _render_frame(
     doc,
     frame: CadFrame,
     ax,
-    *,
+    color_mode: str = "auto",
     preview: bool = False,
     bbox_cache: dict | None = None,
 ) -> None:
@@ -626,12 +828,13 @@ def _render_frame(
     crop_box = (frame.xmin, frame.xmax, frame.ymin, frame.ymax)
 
     if frame.source == "viewport_model":
-        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache)
+        layout = doc.layouts.get(frame.layout)
+        _render_modelspace(doc, ax, color_mode=color_mode, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache, layout_for_style=layout)
         _apply_frame_crop(ax, frame)
         return
 
     if frame.layout.upper() == "MODEL":
-        _render_modelspace(doc, ax, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache)
+        _render_modelspace(doc, ax, color_mode=color_mode, max_entities=entity_limit, crop_box=crop_box, bbox_cache=bbox_cache)
         _apply_frame_crop(ax, frame)
         return
 
@@ -641,7 +844,7 @@ def _render_frame(
     viewports = [e for e in layout if e.dxftype() == "VIEWPORT" and e.dxf.status > 0]
     
     if not viewports:
-        _render_single_layout(doc, layout, ax)
+        _render_single_layout(doc, layout, ax, color_mode=color_mode)
     else:
         fig = ax.figure
         # 1. Hide the original ax so it doesn't block
@@ -684,9 +887,10 @@ def _render_frame(
                 ax_vp = fig.add_axes([ax_left, ax_bottom, ax_width, ax_height])
                 ax_vp.axis("off")
                 _render_modelspace(
-                    doc, ax_vp, max_entities=entity_limit, 
+                    doc, ax_vp, color_mode=color_mode, max_entities=entity_limit, 
                     crop_box=(mod_xmin, mod_xmax, mod_ymin, mod_ymax), 
-                    bbox_cache=bbox_cache
+                    bbox_cache=bbox_cache,
+                    layout_for_style=layout
                 )
                 ax_vp.set_xlim(mod_xmin, mod_xmax)
                 ax_vp.set_ylim(mod_ymin, mod_ymax)
@@ -703,16 +907,25 @@ def _render_frame(
         from ezdxf.addons.drawing import Frontend, RenderContext
         from ezdxf.addons.drawing.config import Configuration, ColorPolicy, LinePolicy
         from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
+        import ezdxf.addons.drawing.config
+        
+        color_policy = resolve_color_policy(layout, color_mode)
+        is_mono = (color_policy == ColorPolicy.MONOCHROME)
+        actual_policy = color_policy
+
         ctx = RenderContext(doc)
         out = MatplotlibBackend(ax_paper, adjust_figure=False)
         config = Configuration(
-            color_policy=ColorPolicy.MONOCHROME,
-            line_policy=LinePolicy.APPROXIMATE,
+            background_policy=ezdxf.addons.drawing.config.BackgroundPolicy.CUSTOM,
+            custom_bg_color="#FFFFFF",
+            color_policy=actual_policy,
+            line_policy=LinePolicy.SOLID,
+        lineweight_scaling=2.0,
             max_flattening_distance=2.0,
             circle_approximation_count=16,
         )
         frontend = Frontend(ctx, out, config=config)
-        _patch_frontend(frontend)
+        
         layout_entities = [e for e in layout if e.dxftype() != "VIEWPORT"]
         frontend.draw_entities(layout_entities)
         
@@ -735,7 +948,7 @@ def _render_paper_layout_viewport_pages(
     doc,
     frame: CadFrame,
     pdf_pages,
-    *,
+    color_mode: str = "auto",
     bbox_cache: dict | None = None,
 ) -> bool:
     """Render each viewport in a paper-space layout as a separate PDF page.
@@ -760,7 +973,7 @@ def _render_paper_layout_viewport_pages(
         ax = fig.add_axes([0, 0, 1, 1])
         ax.axis("off")
         crop = (vp["model_xmin"], vp["model_xmax"], vp["model_ymin"], vp["model_ymax"])
-        _render_modelspace(doc, ax, crop_box=crop, bbox_cache=bbox_cache)
+        _render_modelspace(doc, ax, color_mode=color_mode, crop_box=crop, bbox_cache=bbox_cache, layout_for_style=layout)
         ax.set_xlim(vp["model_xmin"], vp["model_xmax"])
         ax.set_ylim(vp["model_ymin"], vp["model_ymax"])
         ax.set_aspect("auto")
@@ -787,13 +1000,14 @@ def convert_dxf_to_pdf(
     *,
     meta: dict[str, Any] | None = None,
 ) -> Path:
-    """Р В Р ВµР Р…Р Т‘Р ВµРЎР‚ DXF Р Р† PDF: Р С—Р С• РЎР‚Р В°Р СР С”Р В°Р С (Р С—РЎР‚Р С‘Р С•РЎР‚Р С‘РЎвЂљР ВµРЎвЂљ) Р С‘Р В»Р С‘ Р С—Р С• layout."""
+    """Р В Р ВµР Р…Р Т‘Р ВµРЎР‚ DXF Р Р† PDF: Р С—Р С• РЎР‚Р В°Р С˜Р С”Р В°Р С˜ (Р С—РЎР‚Р С‘Р С•РЎР‚Р С‘РЎвЂљР ВµРЎвЂљ) Р С‘Р В»Р С‘ Р С—Р С• layout."""
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
 
+    color_mode = (meta or {}).get("color_mode", "auto")
     doc = _load_dxf_document(dxf_path)
     all_frames = detect_frames_in_doc(doc)
     render_frames = choose_render_frames(doc, all_frames) if CAD_RENDER_MODE != "layouts" else []
@@ -810,7 +1024,7 @@ def convert_dxf_to_pdf(
     with PdfPages(str(pdf_path)) as pdf:
         if use_frames:
             logger.info(
-                "DXF %s: РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚ %d РЎР‚Р В°Р СР С•Р С”, dpi=%s",
+                "DXF %s: РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚ %d РЎР‚Р В°Р С˜Р С•Р С”, dpi=%s",
                 dxf_path.name,
                 len(render_frames),
                 CAD_RENDER_DPI,
@@ -831,7 +1045,7 @@ def convert_dxf_to_pdf(
                     ax = fig.add_axes([0, 0, 1, 1])
                     ax.axis("off")
                     try:
-                        _render_frame(doc, frame, ax, bbox_cache=bbox_cache)
+                        _render_frame(doc, frame, ax, color_mode=color_mode, bbox_cache=bbox_cache)
                         _save_figure(pdf, fig)
                         plt.close(fig)
                         continue
@@ -844,7 +1058,7 @@ def convert_dxf_to_pdf(
                     # FALLBACK: per-viewport pages (no title block but shows content)
                     try:
                         done = _render_paper_layout_viewport_pages(
-                            doc, frame, pdf, bbox_cache=bbox_cache,
+                            doc, frame, pdf, color_mode=color_mode, bbox_cache=bbox_cache,
                         )
                     except Exception:
                         logger.exception(
@@ -859,7 +1073,7 @@ def convert_dxf_to_pdf(
                 ax = fig.add_axes([0, 0, 1, 1])
                 ax.axis("off")
                 try:
-                    _render_frame(doc, frame, ax, bbox_cache=bbox_cache)
+                    _render_frame(doc, frame, ax, color_mode=color_mode, bbox_cache=bbox_cache)
                     _save_figure(pdf, fig)
                 except Exception:
                     logger.exception(
@@ -887,9 +1101,9 @@ def convert_dxf_to_pdf(
                 ax.axis("off")
                 try:
                     if hasattr(layout, "page_setup"):
-                        _render_single_layout(doc, layout, ax)
+                        _render_single_layout(doc, layout, ax, color_mode=color_mode)
                     else:
-                        _render_modelspace(doc, ax)
+                        _render_modelspace(doc, ax, color_mode=color_mode)
                     _save_figure(pdf, fig)
                 finally:
                     plt.close(fig)
@@ -921,9 +1135,10 @@ def render_cad_preview_png(
     page: int = 1,
     dpi: int | None = None,
 ) -> tuple[bytes, int, dict[str, Any]]:
-    """Р С›Р Т‘Р С‘Р Р… Р С”Р В°Р Т‘РЎР‚ CAD (DWG/DXF) Р Р† PNG Р Т‘Р В»РЎРЏ Р С—РЎР‚Р ВµР Т‘Р С—РЎР‚Р С•РЎРѓР СР С•РЎвЂљРЎР‚Р В°. Р вЂ™Р С•Р В·Р Р†РЎР‚Р В°РЎвЂ°Р В°Р ВµРЎвЂљ (png, pages, meta)."""
+    """Р С›Р Т‘Р С‘Р Р… Р С”Р В°Р Т‘РЎР‚ CAD (DWG/DXF) Р Р† PNG Р Т‘Р В»РЎРЏ Р С—РЎР‚Р ВµР Т‘Р С—РЎР‚Р С•РЎРѓР С˜Р С•РЎвЂљРЎР‚Р В°. Р вЂ™Р С•Р В·Р Р†РЎР‚Р В°РЎвЂ°Р В°Р ВµРЎвЂљ (png, pages, meta).    """
     import io
 
+    color_mode = "auto"
     import matplotlib
 
     matplotlib.use("Agg")
@@ -968,7 +1183,7 @@ def render_cad_preview_png(
             ax = fig.add_axes([0, 0, 1, 1])
             ax.axis("off")
             try:
-                _render_frame(doc, frame, ax, preview=True)
+                _render_frame(doc, frame, ax, color_mode=color_mode, preview=True)
             finally:
                 buf = io.BytesIO()
                 fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.05, facecolor="white")
@@ -984,9 +1199,9 @@ def render_cad_preview_png(
             ax.axis("off")
             try:
                 if hasattr(target, "page_setup"):
-                    _render_single_layout(doc, target, ax)
+                    _render_single_layout(doc, target, ax, color_mode=color_mode)
                 else:
-                    _render_modelspace(doc, ax)
+                    _render_modelspace(doc, ax, color_mode=color_mode)
             finally:
                 buf = io.BytesIO()
                 fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.05, facecolor="white")
@@ -1039,7 +1254,11 @@ def inspect_cad_frames(input_file: str) -> dict[str, Any]:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def convert_cad_to_pdf(input_file: str) -> tuple[Path, dict[str, Any]]:
+def convert_cad_to_pdf(
+    input_file: str,
+    *,
+    meta: dict[str, Any] | None = None,
+) -> tuple[Path, dict[str, Any]]:
     """
     DWG/DXF РІвЂ вЂ™ PDF.
     DWG: ODA РІвЂ вЂ™ PDF; Р С—РЎР‚Р С‘ Р С•РЎв‚¬Р С‘Р В±Р С”Р Вµ РІР‚вЂќ DWG РІвЂ вЂ™ DXF РІвЂ вЂ™ РЎР‚Р ВµР Р…Р Т‘Р ВµРЎР‚ Р С—Р С• РЎР‚Р В°Р СР С”Р В°Р С/layout (ezdxf).
@@ -1049,7 +1268,9 @@ def convert_cad_to_pdf(input_file: str) -> tuple[Path, dict[str, Any]]:
     if suffix not in CAD_EXTENSIONS:
         raise ValueError(f"Р С›Р В¶Р С‘Р Т‘Р В°Р ВµРЎвЂљРЎРѓРЎРЏ DWG Р С‘Р В»Р С‘ DXF, Р С—Р С•Р В»РЎС“РЎвЂЎР ВµР Р…Р С•: {suffix}")
 
-    meta: dict[str, Any] = {"engine": None, "fallback": False}
+    meta = meta or {}
+    meta.setdefault("engine", None)
+    meta.setdefault("fallback", False)
     tmp = Path(tempfile.mkdtemp(prefix="cad_pdf_"))
     pdf_path = tmp / f"{input_path.stem}.pdf"
     size_mb = input_path.stat().st_size / (1024 * 1024) if input_path.exists() else 0
