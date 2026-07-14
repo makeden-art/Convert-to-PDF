@@ -109,7 +109,11 @@ def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.ctb"),
     cmd = f'"{ACAD_PATH}" /i "{safe_dwg_path}" /l ru-RU /s "{scr_path}"'
     
     start_time = time.time()
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True, errors="ignore")
+    try:
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, errors="ignore", timeout=180)
+    except subprocess.TimeoutExpired:
+        subprocess.run(f'taskkill /F /IM accoreconsole.exe', shell=True)
+        return {"error": "AutoCAD timeout 180s. Process killed.", "log": ""}
     
     import glob
     if not os.path.exists(safe_pdf_path) and safe_dsd_path:
