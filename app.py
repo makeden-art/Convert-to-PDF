@@ -63,7 +63,7 @@ class FolderRequest(BaseModel):
     number_pages: bool = False
     numbering_from_page: int = 1
     numbering_start: int = 1
-    color_mode: str = "color"
+    windows_cad_ip: str = ""
 
 
 class PathsRequest(BaseModel):
@@ -76,7 +76,7 @@ class PathsRequest(BaseModel):
     number_pages: bool = False
     numbering_from_page: int = 1
     numbering_start: int = 1
-    color_mode: str = "color"
+    windows_cad_ip: str = ""
 
 
 class ResolveRequest(BaseModel):
@@ -546,7 +546,7 @@ async def api_convert_merge(
     number_pages: bool = Form(False),
     numbering_from_page: int = Form(1),
     numbering_start: int = Form(1),
-    color_mode: str = Form("color"),
+    windows_cad_ip: str = Form(""),
 ):
     if not files:
         raise HTTPException(status_code=400, detail="Передайте хотя бы один файл")
@@ -580,7 +580,7 @@ async def api_convert_merge(
             out,
             numbering_from_page=from_page,
             numbering_start=start_num,
-            color_mode=color_mode,
+            windows_cad_ip=windows_cad_ip,
         )
         return FileResponse(
             path=str(out),
@@ -599,7 +599,7 @@ async def api_convert_merge(
 @app.post("/api/convert")
 async def api_convert(
     file: UploadFile = File(...),
-    color_mode: str = Form("color"),
+    windows_cad_ip: str = Form(""),
 ):
     suffix = Path(file.filename or "upload").suffix.lower()
     if suffix not in SUPPORTED_ALL:
@@ -621,7 +621,7 @@ async def api_convert(
             if not oda_available():
                 raise HTTPException(status_code=503, detail="ODAFileConverter не установлен")
             out = tmp / "result.pdf"
-            pdf_tmp, _cad_meta = convert_cad_to_pdf(str(src), meta={"color_mode": color_mode})
+            pdf_tmp, _cad_meta = convert_cad_to_pdf(str(src), meta={"windows_cad_ip": windows_cad_ip})
             shutil.move(str(pdf_tmp), str(out))
         else:
             out = _convert_with_libreoffice(src, tmp)

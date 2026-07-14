@@ -776,7 +776,7 @@ def convert_paths(
             inputs,
             output_name,
             recursive=False,
-            color_mode=color_mode,
+            windows_cad_ip=windows_cad_ip,
             numbering_from_page=from_page,
             numbering_start=start_num,
         )
@@ -785,7 +785,7 @@ def convert_paths(
     stats = {"ok": 0, "skipped": 0, "error": 0}
     for src in inputs:
         check_cancelled()
-        item = convert_file_in_place(src, color_mode=color_mode)
+        item = convert_file_in_place(src, windows_cad_ip=windows_cad_ip)
         results.append(item)
         stats[item["status"]] = stats.get(item["status"], 0) + 1
 
@@ -925,11 +925,11 @@ def _run_merge_parts(
     if workers <= 1:
         for idx, src in enumerate(inputs):
             check_cancelled()
-            part_results.append(_convert_merge_part(idx, src, tmp, color_mode=color_mode))
+            part_results.append(_convert_merge_part(idx, src, tmp, windows_cad_ip=windows_cad_ip))
             release_memory()
         return part_results
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = [ex.submit(_convert_merge_part, idx, src, tmp, color_mode) for idx, src in enumerate(inputs)]
+        futs = [ex.submit(_convert_merge_part, idx, src, tmp, windows_cad_ip) for idx, src in enumerate(inputs)]
         for fut in futs:
             check_cancelled()
             part_results.append(fut.result())
@@ -971,7 +971,7 @@ def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = ""
 
     try:
         proc = run_monitored(
-            [sys.executable, str(_WORKER_SCRIPT), str(src), str(dest), color_mode],
+            [sys.executable, str(_WORKER_SCRIPT), str(src), str(dest), windows_cad_ip],
             timeout=timeout_sec,
             preexec_fn=_child_memory_limit,
         )
@@ -1045,8 +1045,8 @@ def _convert_source_to_temp_pdf(src: Path, dest: Path, windows_cad_ip: str = "")
     """Конвертировать файл с сервера (локальный или SMB) во временный PDF."""
     if _is_smb_path(src) and _smb_mounted():
         with _smb_local_file(src) as local_src:
-            return _convert_local_file_to_pdf(local_src, dest, color_mode=color_mode)
-    return _convert_local_file_to_pdf(src, dest, color_mode=color_mode)
+            return _convert_local_file_to_pdf(local_src, dest, windows_cad_ip=windows_cad_ip)
+    return _convert_local_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip)
 
 
 def _save_merged_pdf(local_pdf: Path, dest: Path) -> Path:
@@ -1085,10 +1085,10 @@ def convert_file_in_place(src: Path, windows_cad_ip: str = "") -> dict:
         if _is_smb_path(src) and _smb_mounted():
             with _smb_local_file(src) as local_src:
                 tmp_pdf = local_src.with_suffix(".pdf")
-                cad_meta = _convert_local_file_to_pdf(local_src, tmp_pdf, color_mode=color_mode)
+                cad_meta = _convert_local_file_to_pdf(local_src, tmp_pdf, windows_cad_ip=windows_cad_ip)
                 saved = _smb_put_file(tmp_pdf, dest)
         else:
-            cad_meta = _convert_local_file_to_pdf(src, dest, color_mode=color_mode)
+            cad_meta = _convert_local_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip)
             saved = dest
         msg = "Сконвертировано"
         if cad_meta and cad_meta.get("engine") == "ezdxf" and cad_meta.get("fallback"):
@@ -1253,7 +1253,7 @@ def convert_folder(
             inputs,
             output_name,
             recursive,
-            color_mode=color_mode,
+            windows_cad_ip=windows_cad_ip,
             numbering_from_page=from_page,
             numbering_start=start_num,
         )
@@ -1263,7 +1263,7 @@ def convert_folder(
 
     for f in inputs:
         check_cancelled()
-        item = convert_file_in_place(f, color_mode=color_mode)
+        item = convert_file_in_place(f, windows_cad_ip=windows_cad_ip)
         results.append(item)
         stats[item["status"]] = stats.get(item["status"], 0) + 1
 
@@ -1280,7 +1280,7 @@ def convert_folder(
 def _convert_merge_part(idx: int, src: Path, tmp: Path, windows_cad_ip: str = "") -> tuple[int, Path | None, dict]:
     part = tmp / f"{idx:04d}.pdf"
     try:
-        _convert_source_to_temp_pdf(src, part, color_mode=color_mode)
+        _convert_source_to_temp_pdf(src, part, windows_cad_ip=windows_cad_ip)
         return idx, part, {
             "source": str(src),
             "pdf": str(part),
@@ -1322,7 +1322,7 @@ def _convert_folder_merged(
     stats = {"ok": 0, "skipped": 0, "error": 0}
 
     try:
-        part_results = _run_merge_parts(inputs, tmp, color_mode=color_mode)
+        part_results = _run_merge_parts(inputs, tmp, windows_cad_ip=windows_cad_ip)
 
         part_results.sort(key=lambda x: x[0])
         for _, part, item in part_results:
@@ -1401,7 +1401,7 @@ def convert_paths_merged_download(
         inputs,
         safe_name,
         False,
-        color_mode=color_mode,
+        windows_cad_ip=windows_cad_ip,
         numbering_from_page=numbering_from_page,
         numbering_start=numbering_start,
         download_to=dest,
@@ -1427,7 +1427,7 @@ def convert_uploads_to_merged_pdf(
     stats = {"ok": 0, "error": 0}
 
     try:
-        part_results = _run_merge_parts(sources, tmp, color_mode=color_mode)
+        part_results = _run_merge_parts(sources, tmp, windows_cad_ip=windows_cad_ip)
 
         part_results.sort(key=lambda x: x[0])
         for _, part, item in part_results:
