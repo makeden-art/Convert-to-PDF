@@ -30,7 +30,7 @@ WORK_DIR = os.path.abspath("cad_server_workdir")
 os.makedirs(WORK_DIR, exist_ok=True)
 
 @app.post("/convert")
-async def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.ctb")):
+def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.ctb"), dsd_file: UploadFile = File(None)):
     # 1. Сохраняем входящий чертеж
     safe_filename = file.filename.replace(" ", "_")
     dwg_path = os.path.join(WORK_DIR, safe_filename)
@@ -43,7 +43,7 @@ async def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.
     with open(dwg_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
-    # 2. Формируем SCRIPT для надежной печати (одной строкой для обхода защиты AutoCAD)
+    # 2. Формируем SCRIPT для надежной печати
     import tempfile
     import uuid
     safe_uid = uuid.uuid4().hex
@@ -54,11 +54,32 @@ async def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.
     safe_pdf_path = os.path.join(temp_dir, f"temp_{safe_uid}.pdf")
     shutil.copy2(dwg_path, safe_dwg_path)
 
-    # Весь LISP код на одной строке внутри .scr файла
-    # Используем entmod для внедрения стиля печати прямо в настройки Листов,
-    # а затем используем встроенную команду EXPORT PDF, которая идеально сохраняет форматы бумаги!
     scr_path = os.path.join(temp_dir, f"print_{safe_uid}.scr")
-    lisp_code = f"""(setq dict (dictsearch (namedobjdict) "ACAD_LAYOUT"))
+    safe_dsd_path = None
+    
+    if dsd_file and dsd_file.filename:
+        safe_dsd_path = os.path.join(temp_dir, f"temp_{safe_uid}.dsd")
+        dsd_content = dsd_file.file.read()
+        try:
+            dsd_text = dsd_content.decode('utf-8')
+        except UnicodeDecodeError:
+            dsd_text = dsd_content.decode('cp1251', errors='ignore')
+            
+        # Подменяем пути DWG на наш локальный временный файл
+        lines = dsd_text.splitlines()
+        new_lines = []
+        for line in lines:
+            if line.upper().startswith("DWG="):
+                new_lines.append(f"DWG={safe_dwg_path}")
+            else:
+                new_lines.append(line)
+        
+        with open(safe_dsd_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(new_lines))
+            
+        lisp_code = f'(command "_.-PUBLISH" "{safe_dsd_path.replace("\\\\", "/")}")\n(command "_.QUIT" "_Y")\n'
+    else:
+        lisp_code = f"""(setq dict (dictsearch (namedobjdict) "ACAD_LAYOUT"))
 (while (setq item (assoc 350 dict))
   (setq ent (cdr item))
   (setq edata (entget ent))
@@ -73,7 +94,7 @@ async def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.
   (entmod edata)
   (setq dict (cdr (member item dict)))
 )
-(command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}")
+(command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\\\", "/")}")
 (command "_.QUIT" "_Y")
 """
     # Удаляем переносы строк для надежности (AutoCAD CLI построчно)
@@ -90,15 +111,21 @@ async def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.
     start_time = time.time()
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True, errors="ignore")
     
-    # Копируем PDF обратно
+    import glob
+    if not os.path.exists(safe_pdf_path) and safe_dsd_path:
+        possible_pdfs = glob.glob(os.path.join(temp_dir, f"temp_{safe_uid}*.pdf"))
+        if possible_pdfs:
+            safe_pdf_path = possible_pdfs[0]
+            
     if os.path.exists(safe_pdf_path):
         shutil.copy2(safe_pdf_path, pdf_path)
         
     # Убираем за собой
     try:
         os.remove(safe_dwg_path)
-        os.remove(safe_pdf_path)
+        if os.path.exists(safe_pdf_path): os.remove(safe_pdf_path)
         os.remove(scr_path)
+        if safe_dsd_path and os.path.exists(safe_dsd_path): os.remove(safe_dsd_path)
     except Exception:
         pass
     
