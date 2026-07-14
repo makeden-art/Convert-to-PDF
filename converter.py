@@ -956,7 +956,7 @@ def _convert_timeout_for(src: Path) -> int:
     return FILE_CONVERT_TIMEOUT_SEC
 
 
-def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = "") -> dict | None:
+def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None) -> dict | None:
     """Конвертация в отдельном процессе — OOM дочернего не роняет uvicorn."""
     import sys
     import json
@@ -999,14 +999,14 @@ def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = ""
     return meta
 
 
-def _convert_local_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "") -> dict | None:
+def _convert_local_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None) -> dict | None:
     if CONVERT_ISOLATE:
-        return convert_file_to_pdf_isolated(src, dest, color_mode=color_mode)
+        return convert_file_to_pdf_isolated(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path)
     else:
-        return convert_file_to_pdf(src, dest, color_mode=color_mode)
+        return convert_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path)
 
 
-def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "") -> dict | None:
+def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None) -> dict | None:
     """Конвертировать один локальный файл в указанный PDF. Для CAD возвращает meta."""
     src = src.resolve()
     suffix = src.suffix.lower()
@@ -1028,7 +1028,7 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "") -> dict
             if not oda_available():
                 raise RuntimeError("ODAFileConverter не установлен (DWG/DXF недоступны)")
             with _cad_sem:
-                pdf_tmp, cad_meta = convert_cad_to_pdf(str(src), meta={"windows_cad_ip": windows_cad_ip})
+                pdf_tmp, cad_meta = convert_cad_to_pdf(str(src), meta={"windows_cad_ip": windows_cad_ip, "dsd_path": dsd_path})
             try:
                 shutil.move(str(pdf_tmp), str(dest))
             finally:
