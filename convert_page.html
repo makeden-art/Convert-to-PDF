@@ -1,8 +1,8 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <title>РџРµСЂРµРІРѕРґ РІ PDF</title>
+  <title>Перевод в PDF</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body { font-family: system-ui, sans-serif; background: #0f172a; color: #e5e7eb; margin: 0; min-height: 100vh; padding: 24px; }
@@ -150,100 +150,100 @@
 </head>
 <body>
   <div class="wrap">
-    <a href="/" class="back-link">в†ђ РќР° РіР»Р°РІРЅСѓСЋ</a>
+    <a href="/" class="back-link">← На главную</a>
     <div class="box">
-      <h1>РџРµСЂРµРІРѕРґ РІ PDF</h1>
-      <p>РћС„РёСЃРЅС‹Рµ Рё CAD-С„РѕСЂРјР°С‚С‹ в†’ PDF. PDF <b>СЂСЏРґРѕРј</b> СЃ РѕСЂРёРіРёРЅР°Р»РѕРј РёР»Рё СЃР±РѕСЂРєР° РґРѕ <b>{{MAX_MERGE}}</b> С„Р°Р№Р»РѕРІ РІ РѕРґРёРЅ PDF.</p>
-      <p class="ver" id="smb-root-hint">Р Р°Р±РѕС‚Р° СЃ С„Р°Р№Р»Р°РјРё вЂ” С‚РѕР»СЊРєРѕ С‡РµСЂРµР· РїРѕРґРєР»СЋС‡С‘РЅРЅСѓСЋ SMB-РїР°РїРєСѓ.</p>
+      <h1>Перевод в PDF</h1>
+      <p>Офисные и CAD-форматы → PDF. PDF <b>рядом</b> с оригиналом или сборка до <b>{{MAX_MERGE}}</b> файлов в один PDF.</p>
+      <p class="ver" id="smb-root-hint">Работа с файлами — только через подключённую SMB-папку.</p>
     </div>
 
     <div class="box">
       <button type="button" class="collapse-toggle" id="smb-toggle" aria-expanded="false" aria-controls="smb-body">
-        <span>рџЊђ РЎРµС‚РµРІР°СЏ РїР°РїРєР° (SMB)</span>
-        <span class="chevron">в–ј</span>
+        <span>🌐 Сетевая папка (SMB)</span>
+        <span class="chevron">▼</span>
       </button>
-      <p id="smb-status" class="ver" style="margin-top:0">SMB: РїСЂРѕРІРµСЂРєР°вЂ¦</p>
+      <p id="smb-status" class="ver" style="margin-top:0">SMB: проверка…</p>
       <div class="collapse-body is-collapsed" id="smb-body">
-        <label for="smb-server">РЎРµСЂРІРµСЂ</label>
+        <label for="smb-server">Сервер</label>
         <input type="text" id="smb-server" placeholder="192.168.88.14" />
-        <label for="smb-share">РРјСЏ С€Р°СЂС‹</label>
-        <input type="text" id="smb-share" placeholder="scan РёР»Рё scan/pdf" />
-        <label for="smb-user">Р›РѕРіРёРЅ</label>
-        <input type="text" id="smb-user" placeholder="DOMAIN\user РёР»Рё user@domain.local" />
-        <label for="smb-pass">РџР°СЂРѕР»СЊ</label>
-        <input type="password" id="smb-pass" placeholder="вЂўвЂўвЂўвЂўвЂўвЂў" />
-        <div class="chk"><input type="checkbox" id="smb-anon" /><label for="smb-anon" style="margin:0">РђРЅРѕРЅРёРјРЅС‹Р№ РґРѕСЃС‚СѓРї (guest)</label></div>
-        <button id="btn-smb-mount" type="button">РџРѕРґРєР»СЋС‡РёС‚СЊ SMB</button>
-        <button id="btn-smb-unmount" type="button" class="secondary" style="margin-left:8px">РћС‚РєР»СЋС‡РёС‚СЊ</button>
+        <label for="smb-share">Имя шары</label>
+        <input type="text" id="smb-share" placeholder="scan или scan/pdf" />
+        <label for="smb-user">Логин</label>
+        <input type="text" id="smb-user" placeholder="DOMAIN\user или user@domain.local" />
+        <label for="smb-pass">Пароль</label>
+        <input type="password" id="smb-pass" placeholder="••••••" />
+        <div class="chk"><input type="checkbox" id="smb-anon" /><label for="smb-anon" style="margin:0">Анонимный доступ (guest)</label></div>
+        <button id="btn-smb-mount" type="button">Подключить SMB</button>
+        <button id="btn-smb-unmount" type="button" class="secondary" style="margin-left:8px">Отключить</button>
         <pre id="log-smb" style="display:none"></pre>
       </div>
     </div>
 
     <div class="box">
       <button type="button" class="collapse-toggle" id="win-toggle" aria-expanded="false" aria-controls="win-body">
-        <span>рџ–Ґ РќР°СЃС‚СЂРѕР№РєР° Windows СЃРµСЂРІРµСЂР° (AutoCAD)</span>
-        <span class="chevron">в–ј</span>
+        <span>🖥 Настройка Windows сервера (AutoCAD)</span>
+        <span class="chevron">▼</span>
       </button>
-      <p id="win-status" class="ver" style="margin-top:0">РЎС‚Р°С‚СѓСЃ СЃРµСЂРІРµСЂР°: РЅРµРёР·РІРµСЃС‚РЅРѕ</p>
+      <p id="win-status" class="ver" style="margin-top:0">Статус сервера: неизвестно</p>
       <div class="collapse-body is-collapsed" id="win-body">
-        <label for="win-ip">IP-Р°РґСЂРµСЃ Windows-СЃРµСЂРІРµСЂР° СЃ AutoCAD (СЃ РїРѕСЂС‚РѕРј)</label>
+        <label for="win-ip">IP-адрес Windows-сервера с AutoCAD (с портом)</label>
         <input type="text" id="win-ip" placeholder="192.168.88.10:8000" />
-        <button id="btn-win-check" type="button">РџСЂРѕРІРµСЂРёС‚СЊ РїРѕРґРєР»СЋС‡РµРЅРёРµ</button>
-        <p class="hint" style="margin-top:10px;">Р”Р»СЏ РЅР°СЃС‚СЂРѕР№РєРё СЃРµСЂРІРµСЂР° РїР°РєРµС‚РЅРѕР№ РєРѕРЅРІРµСЂС‚Р°С†РёРё СЃРєРѕРїРёСЂСѓР№С‚Рµ Рё РІС‹РїРѕР»РЅРёС‚Рµ СЌС‚Рё РґРІРµ РєРѕРјР°РЅРґС‹ РІ <b>PowerShell РѕС‚ РёРјРµРЅРё РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂР°</b> РЅР° РІР°С€РµРј Windows-РєРѕРјРїСЊСЋС‚РµСЂРµ СЃ AutoCAD:</p>
-        <pre id="setup-cmd-box" style="background: #1e293b; color: #e2e8f0; padding: 10px; border-radius: 6px; margin-top: 8px; user-select: all; white-space: pre-wrap; font-family: monospace; font-size: 13px;">Р—Р°РіСЂСѓР·РєР° СЃРєСЂРёРїС‚Р°...</pre>
+        <button id="btn-win-check" type="button">Проверить подключение</button>
+        <p class="hint" style="margin-top:10px;">Для настройки сервера пакетной конвертации скопируйте и выполните эти две команды в <b>PowerShell от имени Администратора</b> на вашем Windows-компьютере с AutoCAD:</p>
+        <pre id="setup-cmd-box" style="background: #1e293b; color: #e2e8f0; padding: 10px; border-radius: 6px; margin-top: 8px; user-select: all; white-space: pre-wrap; font-family: monospace; font-size: 13px;">Загрузка скрипта...</pre>
           <script>
             document.getElementById('setup-cmd-box').textContent = 'Stop-Process -Name accoreconsole -Force -ErrorAction SilentlyContinue ; Stop-Service -Name CadServer -Force -ErrorAction SilentlyContinue ; Invoke-WebRequest -Uri "' + window.location.origin + '/api/setup-cad-server" -OutFile "$env:TEMP\\setup_cad_server.ps1" ; & "$env:TEMP\\setup_cad_server.ps1" "' + window.location.host + '"';
           </script>
-        <p class="hint" style="margin-top:10px;">Р”Р»СЏ РѕР±РЅРѕРІР»РµРЅРёСЏ СЃРєСЂРёРїС‚Р° РїСЂРѕСЃС‚Рѕ Р·Р°РїСѓСЃС‚РёС‚Рµ СЌС‚Рё Р¶Рµ РєРѕРјР°РЅРґС‹ РїРѕРІС‚РѕСЂРЅРѕ.</p>
+        <p class="hint" style="margin-top:10px;">Для обновления скрипта просто запустите эти же команды повторно.</p>
       </div>
     </div>
 
     <div class="box">
-      <h2>рџ“„ РљРѕРЅРІРµСЂС‚Р°С†РёСЏ</h2>
-      <p class="hint">Р’С‹Р±РµСЂРёС‚Рµ РїР°РїРєСѓ РёР»Рё С„Р°Р№Р»С‹ РІ РґРµСЂРµРІРµ SMB-С€Р°СЂС‹ вЂ” РёР»Рё Р·Р°РіСЂСѓР·РёС‚Рµ СЃ РєРѕРјРїСЊСЋС‚РµСЂР°. РљР»РёРє РїРѕ РёРјРµРЅРё С„Р°Р№Р»Р° вЂ” РїСЂРѕСЃРјРѕС‚СЂ РІ РЅРѕРІРѕР№ РІРєР»Р°РґРєРµ.</p>
+      <h2>📄 Конвертация</h2>
+      <p class="hint">Выберите папку или файлы в дереве SMB-шары — или загрузите с компьютера. Клик по имени файла — просмотр в новой вкладке.</p>
       <div class="work-grid">
         <div class="tree-panel">
           <div class="tree-toolbar">
-            <button type="button" id="tree-up" class="secondary" style="padding:6px 10px">в†‘</button>
-            <button type="button" id="tree-refresh" class="secondary" style="padding:6px 10px">в†»</button>
+            <button type="button" id="tree-up" class="secondary" style="padding:6px 10px">↑</button>
+            <button type="button" id="tree-refresh" class="secondary" style="padding:6px 10px">↻</button>
             <span class="tree-path" id="tree-path">/</span>
           </div>
           <div class="tree-list" id="tree-list"></div>
         </div>
         <div class="action-panel">
-          <div class="drop" id="drop-upload">рџ“Ћ Р—Р°РіСЂСѓР·РёС‚СЊ СЃ РєРѕРјРїСЊСЋС‚РµСЂР° (РѕРґРёРЅ РёР»Рё РЅРµСЃРєРѕР»СЊРєРѕ С„Р°Р№Р»РѕРІ)</div>
+          <div class="drop" id="drop-upload">📎 Загрузить с компьютера (один или несколько файлов)</div>
           <input type="file" id="file-upload" style="display:none" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.rtf,.dwg,.dxf" />
-        <p class="sel-count" id="sel-count">РќР° СЃРµСЂРІРµСЂРµ: РЅРёС‡РµРіРѕ РЅРµ РІС‹Р±СЂР°РЅРѕ</p>
+        <p class="sel-count" id="sel-count">На сервере: ничего не выбрано</p>
         <p class="sel-detail" id="sel-detail"></p>
-        <p class="sel-count" id="upload-count" style="color:#94a3b8">РЎ РєРѕРјРїСЊСЋС‚РµСЂР°: 0</p>
-        <div class="chk"><input type="checkbox" id="recursive" checked /><label for="recursive" style="margin:0">Р’РєР»СЋС‡Р°СЏ РІР»РѕР¶РµРЅРЅС‹Рµ РїРѕРґРїР°РїРєРё (РґР»СЏ РІС‹Р±СЂР°РЅРЅС‹С… РїР°РїРѕРє)</label></div>
-        <div class="chk"><input type="checkbox" id="merge" /><label for="merge" style="margin:0">РЎРѕР±СЂР°С‚СЊ РІ РѕРґРёРЅ PDF</label></div>
+        <p class="sel-count" id="upload-count" style="color:#94a3b8">С компьютера: 0</p>
+        <div class="chk"><input type="checkbox" id="recursive" checked /><label for="recursive" style="margin:0">Включая вложенные подпапки (для выбранных папок)</label></div>
+        <div class="chk"><input type="checkbox" id="merge" /><label for="merge" style="margin:0">Собрать в один PDF</label></div>
           <div class="merge-panel" id="merge-panel">
-            <p class="hint" style="margin:0 0 6px">РџРѕСЂСЏРґРѕРє РІ СЃР±РѕСЂРєРµ вЂ” РїРµСЂРµС‚Р°С‰РёС‚Рµ РјС‹С€СЊСЋ РёР»Рё в†‘ в†“:</p>
+            <p class="hint" style="margin:0 0 6px">Порядок в сборке — перетащите мышью или ↑ ↓:</p>
             <div class="merge-list" id="merge-list"></div>
           </div>
           <div class="num-row" id="num-row" style="display:none">
-            <div class="chk" style="margin:0"><input type="checkbox" id="number-pages" /><label for="number-pages" style="margin:0">РќСѓРјРµСЂРѕРІР°С‚СЊ СЃС‚СЂР°РЅРёС†С‹</label></div>
-            <label for="page-start" style="margin:0;color:#9ca3af">СЃ СЃС‚СЂР°РЅРёС†С‹</label>
-            <input type="number" id="page-start" min="1" max="9999" value="1" autocomplete="off" title="РЎС‚СЂР°РЅРёС†Р° РґРѕРєСѓРјРµРЅС‚Р°, РЅР° РєРѕС‚РѕСЂРѕР№ РїРѕСЏРІСЏС‚СЃСЏ С†РёС„СЂС‹" />
-            <label for="num-start" style="margin:0;color:#9ca3af">СЃ С‡РёСЃР»Р°</label>
-            <input type="number" id="num-start" min="1" max="9999" value="1" autocomplete="off" title="РџРµСЂРІРѕРµ С‡РёСЃР»Рѕ РЅР° РІС‹Р±СЂР°РЅРЅРѕР№ СЃС‚СЂР°РЅРёС†Рµ" />
-            <span class="hint" style="margin:0">(СЂР°РЅСЊС€Рµ вЂ” Р±РµР· С†РёС„СЂ)</span>
+            <div class="chk" style="margin:0"><input type="checkbox" id="number-pages" /><label for="number-pages" style="margin:0">Нумеровать страницы</label></div>
+            <label for="page-start" style="margin:0;color:#9ca3af">с страницы</label>
+            <input type="number" id="page-start" min="1" max="9999" value="1" autocomplete="off" title="Страница документа, на которой появятся цифры" />
+            <label for="num-start" style="margin:0;color:#9ca3af">с числа</label>
+            <input type="number" id="num-start" min="1" max="9999" value="1" autocomplete="off" title="Первое число на выбранной странице" />
+            <span class="hint" style="margin:0">(раньше — без цифр)</span>
             <p class="num-preview" id="num-preview"></p>
           </div>
-          <label for="output-name">РРјСЏ РёС‚РѕРіРѕРІРѕРіРѕ PDF (РїСЂРё СЃР±РѕСЂРєРµ)</label>
-          <input type="text" id="output-name" value="СЃР±РѕСЂРєР°.pdf" />
+          <label for="output-name">Имя итогового PDF (при сборке)</label>
+          <input type="text" id="output-name" value="сборка.pdf" />
           <div class="btn-row">
-            <button type="button" id="btn-server">РљРѕРЅРІРµСЂС‚РёСЂРѕРІР°С‚СЊ РЅР° СЃРµСЂРІРµСЂРµ</button>
-            <button type="button" id="btn-download">РЎРєР°С‡Р°С‚СЊ PDF</button>
+            <button type="button" id="btn-server">Конвертировать на сервере</button>
+            <button type="button" id="btn-download">Скачать PDF</button>
           </div>
           <pre id="log-work" style="display:none"></pre>
-          <button type="button" id="btn-cancel-active">РћС‚РјРµРЅРёС‚СЊ Р·Р°РґР°РЅРёРµ</button>
+          <button type="button" id="btn-cancel-active">Отменить задание</button>
         </div>
       </div>
       <div class="jobs-panel">
-        <h3 style="margin:16px 0 8px;font-size:14px">рџ“‹ РћС‡РµСЂРµРґСЊ Рё РёСЃС‚РѕСЂРёСЏ</h3>
-        <p id="jobs-queue-hint">Р—Р°РіСЂСѓР·РєР°вЂ¦</p>
+        <h3 style="margin:16px 0 8px;font-size:14px">📋 Очередь и история</h3>
+        <p id="jobs-queue-hint">Загрузка…</p>
         <div class="jobs-list" id="jobs-list"></div>
       </div>
     </div>
@@ -314,7 +314,7 @@
       const dirs = orderedSelections.filter(s => s.type === 'dir');
       const files = orderedSelections.filter(s => s.type === 'file');
       if (!orderedSelections.length) {
-        selCountEl.textContent = 'РќР° СЃРµСЂРІРµСЂРµ: РЅРёС‡РµРіРѕ РЅРµ РІС‹Р±СЂР°РЅРѕ';
+        selCountEl.textContent = 'На сервере: ничего не выбрано';
         selDetailEl.textContent = '';
         framesHintEl.style.display = 'none';
         framesHintEl.textContent = '';
@@ -322,9 +322,9 @@
         return;
       }
       const parts = [];
-      if (dirs.length) parts.push(dirs.length + ' ' + plural(dirs.length, 'РїР°РїРєР°', 'РїР°РїРєРё', 'РїР°РїРѕРє'));
-      if (files.length) parts.push(files.length + ' ' + plural(files.length, 'С„Р°Р№Р»', 'С„Р°Р№Р»Р°', 'С„Р°Р№Р»РѕРІ'));
-      selCountEl.textContent = 'РќР° СЃРµСЂРІРµСЂРµ РІС‹Р±СЂР°РЅРѕ: ' + parts.join(', ');
+      if (dirs.length) parts.push(dirs.length + ' ' + plural(dirs.length, 'папка', 'папки', 'папок'));
+      if (files.length) parts.push(files.length + ' ' + plural(files.length, 'файл', 'файла', 'файлов'));
+      selCountEl.textContent = 'На сервере выбрано: ' + parts.join(', ');
       scheduleResolveCount();
     }
 
@@ -337,7 +337,7 @@
 
     function scheduleResolveCount() {
       clearTimeout(resolveTimer);
-      selDetailEl.textContent = 'РџРѕРґСЃС‡С‘С‚ С„Р°Р№Р»РѕРІвЂ¦';
+      selDetailEl.textContent = 'Подсчёт файлов…';
       resolveTimer = setTimeout(resolveFileCount, 350);
     }
 
@@ -345,7 +345,7 @@
       if (!item || !item.format_label) return '';
       const warn = item.format_warning && !item.format_valid ? ' title="' + item.format_warning + '"' : '';
       const title = item.format_warning ? ' title="' + item.format_warning + '"' : warn;
-      const icon = item.format_icon || 'рџ“„';
+      const icon = item.format_icon || '📄';
       return '<span class="format-badge"' + title + '>' + icon + ' ' + item.format_label + '</span>';
     }
 
@@ -357,7 +357,6 @@
     }
 
     async function previewCadFrames(files) {
-      // Р Р°РјРєРё Р±РѕР»СЊС€Рµ РЅРµ РёС‰РµРј, С‚Р°Рє РєР°Рє РєРѕРЅРІРµСЂС‚РµСЂ РґРµР»РµРіРёСЂСѓРµС‚ Р·Р°РґР°С‡Сѓ Windows-СЃРµСЂРІРµСЂСѓ
       framesHintEl.style.display = 'none';
       framesHintEl.textContent = '';
       const cad = (files || []).filter(f => {
@@ -376,22 +375,22 @@
         const detected = (j.detected && j.detected.frames) || [];
         const will = (j.will_render && j.will_render.frames) || [];
         if (!detected.length) {
-          framesHintEl.textContent = 'Р Р°РјРєРё РЅРµ РЅР°Р№РґРµРЅС‹ вЂ” Р±СѓРґРµС‚ СЌРєСЃРїРѕСЂС‚ РїРѕ Р»РёСЃС‚Р°Рј/layout';
+          framesHintEl.textContent = 'Рамки не найдены — будет экспорт по листам/layout';
           return;
         }
         if (!will.length) {
           framesHintEl.textContent =
-            'РќР°Р№РґРµРЅРѕ ' + detected.length + ' СЌР»РµРјРµРЅС‚РѕРІ, СЌРєСЃРїРѕСЂС‚ вЂ” С†РµР»С‹РјРё Р»РёСЃС‚Р°РјРё (layout). ' +
-            'Р”Р»СЏ В«РљР°Р»СЊРјРёСѓСЃВ» СЌС‚Рѕ РєРѕСЂСЂРµРєС‚РЅРѕ: РЅР° Р»РёСЃС‚Рµ РЅРµСЃРєРѕР»СЊРєРѕ viewport.';
+            'Найдено ' + detected.length + ' элементов, экспорт — целыми листами (layout). ' +
+            'Для «Кальмиус» это корректно: на листе несколько viewport.';
           return;
         }
         const lines = will.slice(0, 6).map(f =>
-          'вЂў ' + (f.layout || '?') + ': ' + (f.label || (f.width_mm + 'Г—' + f.height_mm + ' РјРј'))
+          '• ' + (f.layout || '?') + ': ' + (f.label || (f.width_mm + '×' + f.height_mm + ' мм'))
         );
-        let text = 'Р Р°РјРєРё Рє РїРµСЂРµРІРѕРґСѓ: ' + will.length + (will.length === 1 ? '' : '') + '\n' + lines.join('\n');
-        if (will.length > 6) text += '\nвЂ¦ РµС‰С‘ ' + (will.length - 6);
+        let text = 'Рамки к переводу: ' + will.length + (will.length === 1 ? '' : '') + '\n' + lines.join('\n');
+        if (will.length > 6) text += '\n… ещё ' + (will.length - 6);
         if (detected.length > will.length) {
-          text += '\n(РІСЃРµРіРѕ РЅР°Р№РґРµРЅРѕ ' + detected.length + ')';
+          text += '\n(всего найдено ' + detected.length + ')';
         }
         framesHintEl.textContent = text;
       } catch (_) {
@@ -423,19 +422,19 @@
         });
         const j = await r.json();
         if (!r.ok) {
-          selDetailEl.textContent = j.detail || 'РћС€РёР±РєР° РїРѕРґСЃС‡С‘С‚Р°';
+          selDetailEl.textContent = j.detail || 'Ошибка подсчёта';
           return;
         }
         resolvedFileCount = (j.files || []).length;
-        selDetailEl.textContent = 'Рљ РѕР±СЂР°Р±РѕС‚РєРµ: ' + resolvedFileCount + ' ' +
-          plural(resolvedFileCount, 'С„Р°Р№Р»', 'С„Р°Р№Р»Р°', 'С„Р°Р№Р»РѕРІ');
+        selDetailEl.textContent = 'К обработке: ' + resolvedFileCount + ' ' +
+          plural(resolvedFileCount, 'файл', 'файла', 'файлов');
         scheduleFramePreview(j.files || []);
         if (document.getElementById('merge').checked) {
           mergeOrder = j.files || [];
           renderMergeList();
         }
       } catch (e) {
-        selDetailEl.textContent = 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґСЃС‡РёС‚Р°С‚СЊ С„Р°Р№Р»С‹';
+        selDetailEl.textContent = 'Не удалось подсчитать файлы';
       }
     }
 
@@ -471,17 +470,17 @@
         });
         const j = await r.json();
         if (!r.ok) {
-          mergeList.innerHTML = '<div class="merge-item">' + (j.detail || 'РћС€РёР±РєР°') + '</div>';
+          mergeList.innerHTML = '<div class="merge-item">' + (j.detail || 'Ошибка') + '</div>';
           return;
         }
         mergeOrder = j.files || [];
         resolvedFileCount = mergeOrder.length;
-        selDetailEl.textContent = 'Рљ РѕР±СЂР°Р±РѕС‚РєРµ: ' + resolvedFileCount + ' ' +
-          plural(resolvedFileCount, 'С„Р°Р№Р»', 'С„Р°Р№Р»Р°', 'С„Р°Р№Р»РѕРІ');
+        selDetailEl.textContent = 'К обработке: ' + resolvedFileCount + ' ' +
+          plural(resolvedFileCount, 'файл', 'файла', 'файлов');
       } else if (hasUpload) {
         mergeOrder = uploadFiles.map(f => ({ path: f.name, name: f.name, upload: true, file: f }));
       } else {
-        mergeList.innerHTML = '<div class="merge-item">Р’С‹Р±РµСЂРёС‚Рµ С„Р°Р№Р»С‹ РёР»Рё РїР°РїРєРё</div>';
+        mergeList.innerHTML = '<div class="merge-item">Выберите файлы или папки</div>';
         mergeOrder = [];
         return;
       }
@@ -502,8 +501,8 @@
       resolvedFileCount = mergeOrder.length;
       if (selDetailEl) {
         selDetailEl.textContent = mergeOrder.length
-          ? ('Рљ РѕР±СЂР°Р±РѕС‚РєРµ: ' + mergeOrder.length + ' ' + plural(mergeOrder.length, 'С„Р°Р№Р»', 'С„Р°Р№Р»Р°', 'С„Р°Р№Р»РѕРІ'))
-          : 'РќРµС‚ С„Р°Р№Р»РѕРІ РІ СЃР±РѕСЂРєРµ';
+          ? ('К обработке: ' + mergeOrder.length + ' ' + plural(mergeOrder.length, 'файл', 'файла', 'файлов'))
+          : 'Нет файлов в сборке';
       }
       renderMergeList();
     }
@@ -515,27 +514,27 @@
     function renderMergeList() {
       mergeList.innerHTML = '';
       if (!mergeOrder.length) {
-        mergeList.innerHTML = '<div class="merge-item">РќРµС‚ С„Р°Р№Р»РѕРІ РґР»СЏ СЃР±РѕСЂРєРё</div>';
+        mergeList.innerHTML = '<div class="merge-item">Нет файлов для сборки</div>';
         return;
       }
       const header = document.createElement('div');
       header.className = 'merge-item';
       header.style.color = '#94a3b8';
       header.style.borderBottom = 'none';
-      header.textContent = 'Р’СЃРµРіРѕ РІ СЃР±РѕСЂРєРµ: ' + mergeOrder.length + ' ' +
-        plural(mergeOrder.length, 'С„Р°Р№Р»', 'С„Р°Р№Р»Р°', 'С„Р°Р№Р»РѕРІ');
+      header.textContent = 'Всего в сборке: ' + mergeOrder.length + ' ' +
+        plural(mergeOrder.length, 'файл', 'файла', 'файлов');
       mergeList.appendChild(header);
       mergeOrder.forEach((item, idx) => {
         const row = document.createElement('div');
         row.className = 'merge-item draggable-row' + formatRowClass(item);
         row.draggable = true;
         row.innerHTML =
-          '<span class="drag-handle" title="РџРµСЂРµС‚Р°С‰РёС‚Рµ">в ї</span>' +
-          '<button type="button" class="secondary" data-up="' + idx + '">в†‘</button>' +
-          '<button type="button" class="secondary" data-down="' + idx + '">в†“</button>' +
-          '<button type="button" class="secondary btn-remove" data-remove="' + idx + '" title="РСЃРєР»СЋС‡РёС‚СЊ РёР· СЃР±РѕСЂРєРё">вњ•</button>' +
+          '<span class="drag-handle" title="Перетащите">⠿</span>' +
+          '<button type="button" class="secondary" data-up="' + idx + '">↑</button>' +
+          '<button type="button" class="secondary" data-down="' + idx + '">↓</button>' +
+          '<button type="button" class="secondary btn-remove" data-remove="' + idx + '" title="Исключить из сборки">✕</button>' +
           '<span class="fname">' + (idx + 1) + '. ' + item.name +
-          (item.format_valid === false ? ' вљ ' : (item.extension_ok === false ? ' вљ ' : '')) +
+          (item.format_valid === false ? ' ⚠' : (item.extension_ok === false ? ' ⚠' : '')) +
           '</span>' +
           formatBadgeHtml(item);
 
@@ -585,8 +584,8 @@
       }
       const fromPage = Math.max(1, parseInt(document.getElementById('page-start').value, 10) || 1);
       const fromNum = Math.max(1, parseInt(document.getElementById('num-start').value, 10) || 1);
-      el.textContent = 'РџСЂРёРјРµСЂ: СЃС‚СЂ. ' + fromPage + ' в†’ В«' + fromNum + 'В», СЃС‚СЂ. ' +
-        (fromPage + 1) + ' в†’ В«' + (fromNum + 1) + 'В»вЂ¦ (СЃС‚Р°СЂС‹Рµ РЅРѕРјРµСЂР° РІ СѓРіР»Сѓ Р·Р°РєСЂР°С€РёРІР°СЋС‚СЃСЏ)';
+      el.textContent = 'Пример: стр. ' + fromPage + ' → «' + fromNum + '», стр. ' +
+        (fromPage + 1) + ' → «' + (fromNum + 1) + '»… (старые номера в углу закрашиваются)';
     }
     document.getElementById('number-pages').onchange = () => {
       updateNumberingPreview();
@@ -602,44 +601,44 @@
         body: JSON.stringify(payload)
       });
       const j = await r.json();
-      if (!r.ok) throw new Error(j.detail || 'РћС€РёР±РєР° РїСЂРѕРІРµСЂРєРё Р·Р°РїРёСЃРё');
+      if (!r.ok) throw new Error(j.detail || 'Ошибка проверки записи');
 
       if (j.blocked && j.blocked.length) {
         const lines = j.blocked.map(b =>
-          'В«' + b.name + 'В»: ' + (b.message || 'С„Р°Р№Р» РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РІ РґСЂСѓРіРѕР№ РїСЂРѕРіСЂР°РјРјРµ')
+          '«' + b.name + '»: ' + (b.message || 'файл используется в другой программе')
         ).join('\n');
         alert(
-          'Р—Р°РїРёСЃСЊ РЅРµРІРѕР·РјРѕР¶РЅР° вЂ” РєРѕРЅРІРµСЂС‚Р°С†РёСЏ РЅРµ Р·Р°РїСѓС‰РµРЅР°.\n\n' + lines +
-          '\n\nР—Р°РєСЂРѕР№С‚Рµ С„Р°Р№Р» РЅР° Windows Рё РїРѕРІС‚РѕСЂРёС‚Рµ.'
+          'Запись невозможна — конвертация не запущена.\n\n' + lines +
+          '\n\nЗакройте файл на Windows и повторите.'
         );
         return false;
       }
 
       if (j.existing && j.existing.length) {
         const names = j.existing.map(e => e.name).join('\n');
-        return confirm('Р¤Р°Р№Р» СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚, РїРµСЂРµР·Р°РїРёСЃР°С‚СЊ?\n\n' + names);
+        return confirm('Файл уже существует, перезаписать?\n\n' + names);
       }
       return true;
     }
     function updateUploadCount() {
-      uploadCountEl.textContent = 'РЎ РєРѕРјРїСЊСЋС‚РµСЂР°: ' + uploadFiles.length;
+      uploadCountEl.textContent = 'С компьютера: ' + uploadFiles.length;
       dropUpload.textContent = uploadFiles.length
-        ? ('рџ“Ћ ' + uploadFiles.length + ' С„Р°Р№Р»(РѕРІ): ' + uploadFiles.map(f => f.name).join(', '))
-        : 'рџ“Ћ Р—Р°РіСЂСѓР·РёС‚СЊ СЃ РєРѕРјРїСЊСЋС‚РµСЂР° (РѕРґРёРЅ РёР»Рё РЅРµСЃРєРѕР»СЊРєРѕ С„Р°Р№Р»РѕРІ)';
+        ? ('📎 ' + uploadFiles.length + ' файл(ов): ' + uploadFiles.map(f => f.name).join(', '))
+        : '📎 Загрузить с компьютера (один или несколько файлов)';
       refreshMergePanel();
     }
 
     async function loadTree(path) {
-      treeList.innerHTML = '<div class="tree-item">Р—Р°РіСЂСѓР·РєР°вЂ¦</div>';
+      treeList.innerHTML = '<div class="tree-item">Загрузка…</div>';
       const q = path ? ('?path=' + encodeURIComponent(path)) : '';
       const r = await fetch('/api/browse' + q);
       const j = await r.json();
       if (!r.ok) {
-        treeList.innerHTML = '<div class="tree-item">' + (j.detail || 'РћС€РёР±РєР°') + '</div>';
+        treeList.innerHTML = '<div class="tree-item">' + (j.detail || 'Ошибка') + '</div>';
         return;
       }
       if (j.smb_mounted === false) {
-        treeList.innerHTML = '<div class="tree-item">рџ”Њ SMB РЅРµ РїРѕРґРєР»СЋС‡С‘РЅ вЂ” РїРѕРґРєР»СЋС‡РёС‚Рµ С€Р°СЂСѓ РІС‹С€Рµ</div>';
+        treeList.innerHTML = '<div class="tree-item">🔌 SMB не подключён — подключите шару выше</div>';
         return;
       }
       currentPath = j.path || '';
@@ -660,7 +659,7 @@
           : '<span class="chk-box" style="width:16px"></span>';
 
         if (e.type === 'dir') {
-          row.innerHTML = cb + '<span class="icon">рџ“Ѓ</span><span class="name">' + e.name + '</span>';
+          row.innerHTML = cb + '<span class="icon">📁</span><span class="name">' + e.name + '</span>';
           row.querySelector('.name').onclick = () => loadTree(e.path);
           const checkbox = row.querySelector('input[type=checkbox]');
           if (checkbox) {
@@ -671,16 +670,16 @@
             };
           }
         } else {
-          const fileIcon = e.format_icon || 'рџ“„';
+          const fileIcon = e.format_icon || '📄';
           const viewHref = viewerUrl(e.path, e.name);
           const viewLink = e.convertible
             ? ('<a class="btn-preview" href="' + viewHref +
-               '" target="_blank" rel="noopener noreferrer" title="РџСЂРѕСЃРјРѕС‚СЂ РІ РЅРѕРІРѕР№ РІРєР»Р°РґРєРµ">рџ‘Ѓ</a>')
+               '" target="_blank" rel="noopener noreferrer" title="Просмотр в новой вкладке">👁</a>')
             : '';
           row.innerHTML = cb + '<span class="icon">' + fileIcon + '</span>' +
             (e.convertible
               ? ('<a class="name previewable" href="' + viewHref +
-                 '" target="_blank" rel="noopener noreferrer" title="РџСЂРѕСЃРјРѕС‚СЂ РІ РЅРѕРІРѕР№ РІРєР»Р°РґРєРµ">' +
+                 '" target="_blank" rel="noopener noreferrer" title="Просмотр в новой вкладке">' +
                  escapeHtml(e.name) + '</a>')
               : ('<span class="name">' + escapeHtml(e.name) + '</span>')) +
             (e.format_label ? formatBadgeHtml(e) : '') + viewLink;
@@ -730,34 +729,34 @@
       const secs = Math.round(finished - started);
       if (secs <= 0) return "";
       const m = Math.floor(secs / 60), s = secs % 60;
-      return m > 0 ? (m + " РјРёРЅ " + s + " СЃРµРє") : (s + " СЃРµРє");
+      return m > 0 ? (m + " мин " + s + " сек") : (s + " сек");
     }
 
     function jobStatusText(job) {
       const st = job.status || '';
-      if (st === 'running') return 'в–¶ РІС‹РїРѕР»РЅСЏРµС‚СЃСЏ';
+      if (st === 'running') return '▶ выполняется';
       if (st === 'queued') {
         const p = job.queue_position;
-        if (p === 1) return 'вЏі СЃР»РµРґСѓСЋС‰РёР№';
-        if (p > 1) return 'вЏі РѕС‡РµСЂРµРґСЊ #' + p;
-        return 'вЏі РІ РѕС‡РµСЂРµРґРё';
+        if (p === 1) return '⏳ следующий';
+        if (p > 1) return '⏳ очередь #' + p;
+        return '⏳ в очереди';
       }
-      if (st === 'done') return 'вњ“ РіРѕС‚РѕРІРѕ';
-      if (st === 'error') return 'вњ— РѕС€РёР±РєР°';
-      if (st === 'cancelled') return 'вЉ РѕС‚РјРµРЅРµРЅРѕ';
+      if (st === 'done') return '✓ готово';
+      if (st === 'error') return '✗ ошибка';
+      if (st === 'cancelled') return '⊘ отменено';
       return st;
     }
 
     async function cancelJob(jobId, btn) {
       if (!jobId) return false;
-      if (!confirm('РћС‚РјРµРЅРёС‚СЊ СЌС‚Рѕ Р·Р°РґР°РЅРёРµ?')) return false;
-      if (btn) { btn.disabled = true; btn.textContent = 'вЂ¦'; }
+      if (!confirm('Отменить это задание?')) return false;
+      if (btn) { btn.disabled = true; btn.textContent = '…'; }
       try {
         const r = await fetch('/api/convert-jobs/' + encodeURIComponent(jobId) + '/cancel', { method: 'POST' });
         let j = {};
         try { j = await r.json(); } catch (_) {}
         if (!r.ok) {
-          alert(j.detail || j.error || ('РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РјРµРЅРёС‚СЊ (HTTP ' + r.status + ')'));
+          alert(j.detail || j.error || ('Не удалось отменить (HTTP ' + r.status + ')'));
           return false;
         }
         if (activeJobId === jobId) pollAbort = true;
@@ -767,7 +766,7 @@
         alert(e.message || String(e));
         return false;
       } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'РћС‚РјРµРЅРёС‚СЊ'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Отменить'; }
       }
     }
 
@@ -814,10 +813,10 @@
       const info = jobFilesInfo(job);
       if (!info) return '';
       const head = info.kind === 'result'
-        ? ('РћР±СЂР°Р±РѕС‚Р°РЅРѕ С„Р°Р№Р»РѕРІ: ' + info.total + (info.truncated ? ' (РїРѕРєР°Р·Р°РЅС‹ РїРµСЂРІС‹Рµ 500)' : ''))
-        : ('Рљ РїРµСЂРµРІРѕРґСѓ: ' + info.total + (info.truncated ? ' (РїРѕРєР°Р·Р°РЅС‹ РїРµСЂРІС‹Рµ 500)' : ''));
+        ? ('Обработано файлов: ' + info.total + (info.truncated ? ' (показаны первые 500)' : ''))
+        : ('К переводу: ' + info.total + (info.truncated ? ' (показаны первые 500)' : ''));
       const rows = info.files.map(f => {
-        const name = f.name || (f.path || '').split('/').pop() || f.path || 'вЂ”';
+        const name = f.name || (f.path || '').split('/').pop() || f.path || '—';
         let meta = f.format || '';
         let cls = '';
         if (info.kind === 'result') {
@@ -852,12 +851,12 @@
         const j = await r.json();
         const q = j.queue || {};
         if (q.running_job) {
-          hint.textContent = 'РЎРµР№С‡Р°СЃ: В«' + q.running_job.label + 'В»' +
-            (q.queued ? (' В· РІ РѕС‡РµСЂРµРґРё РµС‰С‘ ' + q.queued) : '');
+          hint.textContent = 'Сейчас: «' + q.running_job.label + '»' +
+            (q.queued ? (' · в очереди ещё ' + q.queued) : '');
         } else if (q.queued) {
-          hint.textContent = 'РћС‡РµСЂРµРґСЊ: ' + q.queued + ' ' + plural(q.queued, 'Р·Р°РґР°С‡Р°', 'Р·Р°РґР°С‡Рё', 'Р·Р°РґР°С‡');
+          hint.textContent = 'Очередь: ' + q.queued + ' ' + plural(q.queued, 'задача', 'задачи', 'задач');
         } else {
-          hint.textContent = 'РћС‡РµСЂРµРґСЊ РїСѓСЃС‚Р° вЂ” РјРѕР¶РЅРѕ Р·Р°РїСѓСЃРєР°С‚СЊ РєРѕРЅРІРµСЂС‚Р°С†РёСЋ';
+          hint.textContent = 'Очередь пуста — можно запускать конвертацию';
         }
         list.innerHTML = '';
         (j.jobs || []).forEach(job => {
@@ -868,7 +867,7 @@
           const summary = job.result_summary || {};
           let extra = '';
           if (job.status === 'done' && summary.merged_pdf) {
-            extra = ' в†’ ' + summary.merged_pdf.split('/').pop();
+            extra = ' → ' + summary.merged_pdf.split('/').pop();
           } else if (job.status === 'done' && summary.stats) {
             extra = ' (' + (summary.stats.ok || 0) + ' OK)';
           } else if (job.status === 'error' || job.status === 'cancelled') {
@@ -877,22 +876,22 @@
           const filesInfo = jobFilesInfo(job);
           const isOpen = expandedJobIds.has(job.job_id);
           const expandBtn = filesInfo
-            ? '<button type="button" class="job-expand" data-expand-job="' + job.job_id + '" title="РџРѕРєР°Р·Р°С‚СЊ С„Р°Р№Р»С‹">' +
-              (isOpen ? 'в–ѕ' : 'в–ё') + '</button>'
-            : '<span class="job-expand disabled">В·</span>';
+            ? '<button type="button" class="job-expand" data-expand-job="' + job.job_id + '" title="Показать файлы">' +
+              (isOpen ? '▾' : '▸') + '</button>'
+            : '<span class="job-expand disabled">·</span>';
           const cancelBtn = (job.status === 'queued' || job.status === 'running')
-            ? '<button type="button" class="job-cancel" data-cancel-job="' + job.job_id + '">РћС‚РјРµРЅРёС‚СЊ</button>'
+            ? '<button type="button" class="job-cancel" data-cancel-job="' + job.job_id + '">Отменить</button>'
             : '';
           row.innerHTML =
             expandBtn +
             '<span class="job-st">' + jobStatusText(job) + '</span>' +
             '<span class="job-label">' + (job.label || job.job_id || '') + extra +
-            (filesInfo && !isOpen ? ' В· ' + filesInfo.total + ' С„Р°Р№Р»РѕРІ' : '') +
+            (filesInfo && !isOpen ? ' · ' + filesInfo.total + ' файлов' : '') +
             '</span>' +
             cancelBtn +
             '<span class="job-time">' +
             '<span class="job-date">' + formatJobTime(job.finished || job.created) + '</span>' +
-            (formatDuration(job.started, job.finished) ? ' <span class="job-dur">вЏ± ' + formatDuration(job.started, job.finished) + '</span>' : '') +
+            (formatDuration(job.started, job.finished) ? ' <span class="job-dur">⏱ ' + formatDuration(job.started, job.finished) + '</span>' : '') +
             '</span>';
           block.appendChild(row);
           if (filesInfo) {
@@ -913,7 +912,7 @@
           };
         });
         if (!(j.jobs || []).length) {
-          list.innerHTML = '<div class="job-row"><span class="job-label" style="color:#64748b">РСЃС‚РѕСЂРёСЏ РїСѓСЃС‚Р°</span></div>';
+          list.innerHTML = '<div class="job-row"><span class="job-label" style="color:#64748b">История пуста</span></div>';
         }
       } catch (_) { /* ignore */ }
     }
@@ -922,9 +921,9 @@
       setActiveJob(jobId);
       try {
         for (let i = 0; i < 900; i++) {
-          if (pollAbort) throw new Error('РћС‚РјРµРЅРµРЅРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј');
+          if (pollAbort) throw new Error('Отменено пользователем');
           await new Promise(r => setTimeout(r, 2000));
-          if (pollAbort) throw new Error('РћС‚РјРµРЅРµРЅРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј');
+          if (pollAbort) throw new Error('Отменено пользователем');
           let r;
           try {
             r = await fetch('/api/convert-jobs/' + jobId);
@@ -936,16 +935,16 @@
           if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
           if (j.status === 'queued' && j.queue_position > 0) {
             const qmsg = j.queue_position === 1
-              ? 'РЎР»РµРґСѓСЋС‰РёР№ РІ РѕС‡РµСЂРµРґРёвЂ¦'
-              : ('Р’ РѕС‡РµСЂРµРґРё (РїРѕР·РёС†РёСЏ ' + j.queue_position + ')вЂ¦');
+              ? 'Следующий в очереди…'
+              : ('В очереди (позиция ' + j.queue_position + ')…');
             showLog((logWork.textContent || '').split('\n')[0] + '\n' + qmsg);
           }
           if (j.status === 'running') refreshJobsHistory();
           if (j.status === 'done') { refreshJobsHistory(); return j.result; }
-          if (j.status === 'cancelled') { refreshJobsHistory(); throw new Error(j.error || 'РћС‚РјРµРЅРµРЅРѕ РїРѕР»СЊР·РѕРІР°С‚РµР»РµРј'); }
-          if (j.status === 'error') { refreshJobsHistory(); throw new Error(j.error || 'РћС€РёР±РєР° РєРѕРЅРІРµСЂС‚Р°С†РёРё'); }
+          if (j.status === 'cancelled') { refreshJobsHistory(); throw new Error(j.error || 'Отменено пользователем'); }
+          if (j.status === 'error') { refreshJobsHistory(); throw new Error(j.error || 'Ошибка конвертации'); }
         }
-        throw new Error('РџСЂРµРІС‹С€РµРЅРѕ РІСЂРµРјСЏ РѕР¶РёРґР°РЅРёСЏ (30 РјРёРЅ).\nРћР±РЅРѕРІРёС‚Рµ СЃС‚СЂР°РЅРёС†Сѓ Рё РїСЂРѕРІРµСЂСЊС‚Рµ СЂРµР·СѓР»СЊС‚Р°С‚ РЅР° СЃРµСЂРІРµСЂРµ.');
+        throw new Error('Превышено время ожидания (30 мин).\nОбновите страницу и проверьте результат на сервере.');
       } finally {
         setActiveJob(null);
       }
@@ -962,7 +961,7 @@
           signal: ctrl.signal
         });
         if (r.status === 502 || r.status === 503) {
-          throw new Error('РЎРµСЂРІРёСЃ РєРѕРЅРІРµСЂС‚Р°С†РёРё Р·Р°РІРёСЃ РёР»Рё РїРµСЂРµР·Р°РїСѓСЃРєР°Р»СЃСЏ.\nРћР±РЅРѕРІРёС‚Рµ СЃС‚СЂР°РЅРёС†Сѓ (Ctrl+F5) Рё РїРѕРїСЂРѕР±СѓР№С‚Рµ СЃРЅРѕРІР°.');
+          throw new Error('Сервис конвертации завис или перезапускался.\nОбновите страницу (Ctrl+F5) и попробуйте снова.');
         }
         const j = await r.json();
         if (r.status === 202 && j.job_id) {
@@ -972,10 +971,10 @@
         return j;
       } catch (e) {
         if (e.name === 'AbortError') {
-          throw new Error('РџСЂРµРІС‹С€РµРЅРѕ РІСЂРµРјСЏ РѕР¶РёРґР°РЅРёСЏ (30 РјРёРЅ).\nРћР±РЅРѕРІРёС‚Рµ СЃС‚СЂР°РЅРёС†Сѓ Рё РїРѕРїСЂРѕР±СѓР№С‚Рµ РјРµРЅСЊС€Рµ С„Р°Р№Р»РѕРІ.');
+          throw new Error('Превышено время ожидания (30 мин).\nОбновите страницу и попробуйте меньше файлов.');
         }
         if (e instanceof TypeError) {
-          throw new Error('РЎРµС‚СЊ РЅРµРґРѕСЃС‚СѓРїРЅР° РёР»Рё СЃРµСЂРІРёСЃ РїРµСЂРµР·Р°РїСѓСЃРєР°РµС‚СЃСЏ.\nРћР±РЅРѕРІРёС‚Рµ СЃС‚СЂР°РЅРёС†Сѓ (Ctrl+F5) Рё РѕС‚РєСЂРѕР№С‚Рµ /convert С‡РµСЂРµР· РїРѕСЂС‚Р°Р».');
+          throw new Error('Сеть недоступна или сервис перезапускается.\nОбновите страницу (Ctrl+F5) и откройте /convert через портал.');
         }
         throw e;
       } finally {
@@ -990,8 +989,8 @@
         const sec = Math.floor((Date.now() - t0) / 1000);
         const m = Math.floor(sec / 60);
         const s = sec % 60;
-        const elapsed = m > 0 ? (m + ' РјРёРЅ ' + s + ' СЃРµРє') : (s + ' СЃРµРє');
-        showLog(baseMsg + '\nРџСЂРѕС€Р»Рѕ: ' + elapsed);
+        const elapsed = m > 0 ? (m + ' мин ' + s + ' сек') : (s + ' сек');
+        showLog(baseMsg + '\nПрошло: ' + elapsed);
       };
       tick();
       clearInterval(progressTimer);
@@ -1004,8 +1003,8 @@
 
     function numberingLog(j) {
       if (!j.numbering_from_page) return '';
-      let s = '\nРќСѓРјРµСЂР°С†РёСЏ: СЃ ' + j.numbering_from_page + '-Р№ СЃС‚СЂР°РЅРёС†С‹';
-      if (j.numbering_start && j.numbering_start !== 1) s += ', РЅР°С‡РёРЅР°СЏ СЃ ' + j.numbering_start;
+      let s = '\nНумерация: с ' + j.numbering_from_page + '-й страницы';
+      if (j.numbering_start && j.numbering_start !== 1) s += ', начиная с ' + j.numbering_start;
       return s;
     }
 
@@ -1013,35 +1012,35 @@
       if (!j.saved_as_alt) return '';
       const requested = (j.merged_pdf_requested || j.merged_pdf || '').split('/').pop();
       const saved = (j.merged_pdf || '').split('/').pop();
-      return '\nвљ  Р¤Р°Р№Р» В«' + requested + 'В» РЅРµ РїРµСЂРµР·Р°РїРёСЃР°РЅ вЂ” РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РІ РґСЂСѓРіРѕР№ РїСЂРѕРіСЂР°РјРјРµ.\n' +
-        'РЎРѕС…СЂР°РЅРµРЅРѕ РєР°Рє В«' + saved + 'В»';
+      return '\n⚠ Файл «' + requested + '» не перезаписан — используется в другой программе.\n' +
+        'Сохранено как «' + saved + '»';
     }
 
     function progressMessage(merge, fileCount) {
       if (merge && fileCount > 1) {
         const estMin = Math.max(1, Math.round(fileCount * 1.5));
         const estMax = Math.max(estMin + 1, Math.round(fileCount * 1.75));
-        return 'РЎР±РѕСЂРєР° ' + fileCount + ' ' + plural(fileCount, 'С„Р°Р№Р»Р°', 'С„Р°Р№Р»РѕРІ', 'С„Р°Р№Р»РѕРІ') +
-          ' РІ РѕРґРёРЅ PDFвЂ¦\nРћС†РµРЅРєР°: ' + estMin + 'вЂ“' + estMax + ' РјРёРЅ.\n' +
-          'Word/Excel РєРѕРЅРІРµСЂС‚РёСЂСѓСЋС‚СЃСЏ РїРѕ РѕРґРЅРѕРјСѓ вЂ” РЅРµ Р·Р°РєСЂС‹РІР°Р№С‚Рµ СЃС‚СЂР°РЅРёС†Сѓ.';
+        return 'Сборка ' + fileCount + ' ' + plural(fileCount, 'файла', 'файлов', 'файлов') +
+          ' в один PDF…\nОценка: ' + estMin + '–' + estMax + ' мин.\n' +
+          'Word/Excel конвертируются по одному — не закрывайте страницу.';
       }
       if (fileCount > 1) {
-        return 'РљРѕРЅРІРµСЂС‚Р°С†РёСЏ ' + fileCount + ' ' + plural(fileCount, 'С„Р°Р№Р»Р°', 'С„Р°Р№Р»РѕРІ', 'С„Р°Р№Р»РѕРІ') +
-          'вЂ¦\nРљР°Р¶РґС‹Р№ С„Р°Р№Р» СЃРєР°С‡РёРІР°РµС‚СЃСЏ СЃ SMB вЂ” РїРѕРґРѕР¶РґРёС‚Рµ.';
+        return 'Конвертация ' + fileCount + ' ' + plural(fileCount, 'файла', 'файлов', 'файлов') +
+          '…\nКаждый файл скачивается с SMB — подождите.';
       }
-      return 'РљРѕРЅРІРµСЂС‚Р°С†РёСЏвЂ¦\nРЎРєР°С‡РёРІР°РЅРёРµ СЃ SMB Рё РїСЂРµРѕР±СЂР°Р·РѕРІР°РЅРёРµ РІ PDF.';
+      return 'Конвертация…\nСкачивание с SMB и преобразование в PDF.';
     }
 
     document.getElementById('btn-server').onclick = async () => {
       const merge = document.getElementById('merge').checked;
-      const output_name = document.getElementById('output-name').value.trim() || 'СЃР±РѕСЂРєР°.pdf';
+      const output_name = document.getElementById('output-name').value.trim() || 'сборка.pdf';
       const number_pages = document.getElementById('number-pages').checked;
       const numbering_from_page = parseInt(document.getElementById('page-start').value, 10) || 1;
       const numbering_start = parseInt(document.getElementById('num-start').value, 10) || 1;
 
       const btn = document.getElementById('btn-server');
       btn.disabled = true;
-      btn.textContent = 'РћР±СЂР°Р±РѕС‚РєР°вЂ¦';
+      btn.textContent = 'Обработка…';
       const fileCount = merge && mergeOrder.length ? mergeOrder.length : resolvedFileCount;
 
       try {
@@ -1073,7 +1072,7 @@
         if (checkPayload) {
           const ok = await confirmOverwrite(checkPayload);
           if (!ok) {
-            showLog('РћС‚РјРµРЅРµРЅРѕ вЂ” РєРѕРЅРІРµСЂС‚Р°С†РёСЏ РЅРµ Р·Р°РїСѓС‰РµРЅР°.');
+            showLog('Отменено — конвертация не запущена.');
             return;
           }
         }
@@ -1090,8 +1089,8 @@
             numbering_start,
             windows_cad_ip: winIpInput.value.trim()
           });
-          showLog('РЎР±РѕСЂРєР°: ' + j.merged_pdf + '\nР¤Р°Р№Р»РѕРІ: ' + j.pages_from + numberingLog(j) +
-            mergeSaveLog(j) + ', РѕС€РёР±РѕРє: ' + j.stats.error);
+          showLog('Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) +
+            mergeSaveLog(j) + ', ошибок: ' + j.stats.error);
         } else if (orderedSelections.length > 0) {
           const j = await apiPost('/api/convert-paths', {
             paths: orderedSelections.map(s => s.path),
@@ -1099,7 +1098,7 @@
             recursive: document.getElementById('recursive').checked,
             windows_cad_ip: winIpInput.value.trim()
           });
-          showLog('Р“РѕС‚РѕРІРѕ: ' + j.stats.ok + ' OK, РѕС€РёР±РѕРє ' + j.stats.error + '\n' +
+          showLog('Готово: ' + j.stats.ok + ' OK, ошибок ' + j.stats.error + '\n' +
             j.files.map(f => f.status + ' | ' + f.source).join('\n'));
         } else if (currentPath) {
           const j = await apiPost('/api/convert-folder', {
@@ -1113,20 +1112,20 @@
             windows_cad_ip: winIpInput.value.trim()
           });
           if (j.merge) {
-            showLog('РЎР±РѕСЂРєР°: ' + j.merged_pdf + '\nР¤Р°Р№Р»РѕРІ: ' + j.pages_from + numberingLog(j) + mergeSaveLog(j));
+            showLog('Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) + mergeSaveLog(j));
           } else {
-            showLog('Р“РѕС‚РѕРІРѕ: ' + j.stats.ok + ' С„Р°Р№Р»РѕРІ\n' +
+            showLog('Готово: ' + j.stats.ok + ' файлов\n' +
               j.files.map(f => f.status + ' | ' + f.source).join('\n'));
           }
         } else {
-          alert('Р’С‹Р±РµСЂРёС‚Рµ С„Р°Р№Р»С‹/РїР°РїРєРё РІ РґРµСЂРµРІРµ РёР»Рё РѕС‚РєСЂРѕР№С‚Рµ РїР°РїРєСѓ');
+          alert('Выберите файлы/папки в дереве или откройте папку');
         }
       } catch (e) {
         showLog(e.message || String(e));
       } finally {
         stopProgress();
         btn.disabled = false;
-        btn.textContent = 'РљРѕРЅРІРµСЂС‚РёСЂРѕРІР°С‚СЊ РЅР° СЃРµСЂРІРµСЂРµ';
+        btn.textContent = 'Конвертировать на сервере';
         loadTree(currentPath);
       }
     };
@@ -1137,22 +1136,22 @@
       const numbering_from_page = parseInt(document.getElementById('page-start').value, 10) || 1;
       const numbering_start = parseInt(document.getElementById('num-start').value, 10) || 1;
 
-      const output_name = document.getElementById('output-name').value.trim() || 'СЃР±РѕСЂРєР°.pdf';
+      const output_name = document.getElementById('output-name').value.trim() || 'сборка.pdf';
       const serverMerge = merge && hasServerMergeQueue();
       const hasUpload = uploadFiles.length > 0;
 
       if (!serverMerge && !hasUpload) {
-        alert('Р’С‹Р±РµСЂРёС‚Рµ С„Р°Р№Р»С‹ РЅР° СЃРµСЂРІРµСЂРµ (СЃР±РѕСЂРєР°) РёР»Рё Р·Р°РіСЂСѓР·РёС‚Рµ СЃ РєРѕРјРїСЊСЋС‚РµСЂР°');
+        alert('Выберите файлы на сервере (сборка) или загрузите с компьютера');
         return;
       }
       if (serverMerge && !mergeOrder.length) {
-        alert('РќРµС‚ С„Р°Р№Р»РѕРІ РІ СЃР±РѕСЂРєРµ');
+        alert('Нет файлов в сборке');
         return;
       }
 
       const btn = document.getElementById('btn-download');
       btn.disabled = true;
-      btn.textContent = 'РћР±СЂР°Р±РѕС‚РєР°вЂ¦';
+      btn.textContent = 'Обработка…';
       const fileCount = merge && mergeOrder.length ? mergeOrder.length : uploadFiles.length;
       startProgress(progressMessage(merge, fileCount));
       try {
@@ -1183,7 +1182,7 @@
           a.download = output_name.endsWith('.pdf') ? output_name : output_name + '.pdf';
           a.click();
           URL.revokeObjectURL(a.href);
-          showLog('РЎР±РѕСЂРєР° PDF СЃРєР°С‡Р°РЅР°' + numberingLog({
+          showLog('Сборка PDF скачана' + numberingLog({
             numbering_from_page: number_pages ? numbering_from_page : null,
             numbering_start: number_pages ? numbering_start : null
           }));
@@ -1197,12 +1196,12 @@
           a.href = URL.createObjectURL(blob);
           a.download = (uploadFiles[0].name.replace(/\.[^.]+$/, '') || 'document') + '.pdf';
           a.click();
-          showLog('PDF СЃРєР°С‡Р°РЅ');
+          showLog('PDF скачан');
         } else {
           const filesToSend = merge && mergeOrder.length
             ? mergeOrder.map(item => item.file || uploadFiles.find(f => f.name === item.name)).filter(Boolean)
             : uploadFiles;
-          if (filesToSend.length > maxMerge) { alert('РњР°РєСЃРёРјСѓРј ' + maxMerge + ' С„Р°Р№Р»РѕРІ'); return; }
+          if (filesToSend.length > maxMerge) { alert('Максимум ' + maxMerge + ' файлов'); return; }
           const fd = new FormData();
           filesToSend.forEach(f => fd.append('files', f));
           if (number_pages) {
@@ -1216,15 +1215,15 @@
           const blob = await r.blob();
           const a = document.createElement('a');
           a.href = URL.createObjectURL(blob);
-          a.download = document.getElementById('output-name').value.trim() || 'СЃР±РѕСЂРєР°.pdf';
+          a.download = document.getElementById('output-name').value.trim() || 'сборка.pdf';
           a.click();
-          showLog('РЎР±РѕСЂРєР° PDF СЃРєР°С‡Р°РЅР°' + (number_pages
-            ? (' (СЃ ' + numbering_from_page + '-Р№ СЃС‚СЂ., С‡РёСЃР»Р° СЃ ' + numbering_start + ')') : ''));
+          showLog('Сборка PDF скачана' + (number_pages
+            ? (' (с ' + numbering_from_page + '-й стр., числа с ' + numbering_start + ')') : ''));
         }
       } finally {
         stopProgress();
         btn.disabled = false;
-        btn.textContent = 'РЎРєР°С‡Р°С‚СЊ PDF';
+        btn.textContent = 'Скачать PDF';
       }
     };
 
@@ -1254,24 +1253,24 @@
     btnWinCheck.onclick = async () => {
         const ip = winIpInput.value.trim();
         if (!ip) {
-            winStatus.textContent = 'РЎС‚Р°С‚СѓСЃ: РІРІРµРґРёС‚Рµ IP-Р°РґСЂРµСЃ';
+            winStatus.textContent = 'Статус: введите IP-адрес';
             return;
         }
         localStorage.setItem('win_cad_ip', ip);
         btnWinCheck.disabled = true;
-        winStatus.textContent = 'РЎС‚Р°С‚СѓСЃ: РїСЂРѕРІРµСЂРєР°...';
+        winStatus.textContent = 'Статус: проверка...';
         try {
             // ping through our backend because browser CORS might block direct access
             const r = await fetch('/api/cad-server-ping?ip=' + encodeURIComponent(ip));
             if (r.ok) {
-                winStatus.textContent = 'РЎС‚Р°С‚СѓСЃ СЃРµСЂРІРµСЂР°: рџџў Р”РѕСЃС‚СѓРїРµРЅ';
+                winStatus.textContent = 'Статус сервера: 🟢 Доступен';
                 winStatus.style.color = '#4ade80';
             } else {
-                winStatus.textContent = 'РЎС‚Р°С‚СѓСЃ СЃРµСЂРІРµСЂР°: рџ”ґ РќРµРґРѕСЃС‚СѓРїРµРЅ (' + r.status + ')';
+                winStatus.textContent = 'Статус сервера: 🔴 Недоступен (' + r.status + ')';
                 winStatus.style.color = '#f87171';
             }
         } catch (e) {
-            winStatus.textContent = 'РЎС‚Р°С‚СѓСЃ СЃРµСЂРІРµСЂР°: рџ”ґ РћС€РёР±РєР° РїСЂРѕРІРµСЂРєРё';
+            winStatus.textContent = 'Статус сервера: 🔴 Ошибка проверки';
             winStatus.style.color = '#f87171';
         }
         btnWinCheck.disabled = false;
@@ -1290,7 +1289,7 @@
       if (!mount) return '';
       const host = mount.server || (mount.unc || '').replace(/^\/\//, '').split('/')[0] || '';
       const share = mount.share_label || mount.share || (mount.unc || '').split('/').filter(Boolean)[1] || '';
-      if (host && share) return host + ' в†’ ' + share;
+      if (host && share) return host + ' → ' + share;
       return host || share || '';
     }
 
@@ -1312,7 +1311,7 @@
           lastErr = e;
         }
       }
-      throw lastErr || new Error('РџРѕСЂС‚Р°Р» РЅРµРґРѕСЃС‚СѓРїРµРЅ. РћС‚РєСЂРѕР№С‚Рµ СЃС‚СЂР°РЅРёС†Сѓ С‡РµСЂРµР· /convert РЅР° РїРѕСЂС‚Сѓ 80 РёР»Рё 8080.');
+      throw lastErr || new Error('Портал недоступен. Откройте страницу через /convert на порту 80 или 8080.');
     }
 
     async function refreshSmb() {
@@ -1321,32 +1320,32 @@
         const j = await r.json();
         const label = formatSmbConnected(j.mount);
         if (j.mounted && label) {
-          smbStatus.textContent = 'SMB: РїРѕРґРєР»СЋС‡РµРЅРѕ вЂ” ' + label;
+          smbStatus.textContent = 'SMB: подключено — ' + label;
           document.getElementById('smb-root-hint').textContent =
-            'Р Р°Р±РѕС‚Р° СЃ С„Р°Р№Р»Р°РјРё: ' + label;
+            'Работа с файлами: ' + label;
           if (!currentPath) loadTree('');
         } else if (j.mounted && j.convert_path) {
-          smbStatus.textContent = 'SMB: РїРѕРґРєР»СЋС‡РµРЅРѕ';
+          smbStatus.textContent = 'SMB: подключено';
           if (!currentPath) loadTree('');
         } else if (j.configured) {
-          smbStatus.textContent = 'SMB: РЅР°СЃС‚СЂРѕРµРЅРѕ, РЅРµ СЃРјРѕРЅС‚РёСЂРѕРІР°РЅРѕ';
+          smbStatus.textContent = 'SMB: настроено, не смонтировано';
           document.getElementById('smb-root-hint').textContent =
-            'РџРѕРґРєР»СЋС‡РёС‚Рµ SMB-С€Р°СЂСѓ РґР»СЏ РґРѕСЃС‚СѓРїР° Рє С„Р°Р№Р»Р°Рј';
+            'Подключите SMB-шару для доступа к файлам';
         } else {
-          smbStatus.textContent = 'SMB: РЅРµ РїРѕРґРєР»СЋС‡РµРЅРѕ';
+          smbStatus.textContent = 'SMB: не подключено';
           document.getElementById('smb-root-hint').textContent =
-            'РџРѕРґРєР»СЋС‡РёС‚Рµ SMB-С€Р°СЂСѓ РґР»СЏ РґРѕСЃС‚СѓРїР° Рє С„Р°Р№Р»Р°Рј';
+            'Подключите SMB-шару для доступа к файлам';
         }
       } catch (e) {
-        smbStatus.textContent = 'SMB: СЃС‚Р°С‚СѓСЃ РЅРµРґРѕСЃС‚СѓРїРµРЅ';
+        smbStatus.textContent = 'SMB: статус недоступен';
       }
     }
     document.getElementById('btn-smb-mount').onclick = async () => {
       const server = document.getElementById('smb-server').value.trim();
       const share = document.getElementById('smb-share').value.trim();
-      if (!server || !share) { alert('РЈРєР°Р¶РёС‚Рµ СЃРµСЂРІРµСЂ Рё С€Р°СЂСѓ'); return; }
+      if (!server || !share) { alert('Укажите сервер и шару'); return; }
       logSmb.style.display = 'block';
-      logSmb.textContent = 'РџРѕРґРєР»СЋС‡РµРЅРёРµвЂ¦';
+      logSmb.textContent = 'Подключение…';
       try {
         const r = await portalFetch('/api/platform/smb/mount', {
           method: 'POST',
@@ -1361,7 +1360,7 @@
         });
         const j = await r.json();
         logSmb.textContent = r.ok
-          ? ('РџРѕРґРєР»СЋС‡РµРЅРѕ: ' + (formatSmbConnected(j.mount) || j.mount.convert_path || ''))
+          ? ('Подключено: ' + (formatSmbConnected(j.mount) || j.mount.convert_path || ''))
           : (j.detail || JSON.stringify(j));
         if (r.ok) { refreshSmb(); if (j.mount.convert_path) loadTree(''); }
       } catch (e) {
@@ -1373,7 +1372,7 @@
       try {
         const r = await portalFetch('/api/platform/smb/unmount', { method: 'POST' });
         const j = await r.json();
-        logSmb.textContent = r.ok ? 'РћС‚РєР»СЋС‡РµРЅРѕ' : (j.detail || JSON.stringify(j));
+        logSmb.textContent = r.ok ? 'Отключено' : (j.detail || JSON.stringify(j));
         refreshSmb();
       } catch (e) {
         logSmb.textContent = e.message || String(e);
@@ -1392,4 +1391,3 @@
   </script>
 </body>
 </html>
-
