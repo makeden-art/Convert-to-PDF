@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Automatic installation/update of Windows CAD Server (windows_cad_server.py)
-    and starting it as a Windows service (NSSM) with auto-start.
+    and starting it via the Startup folder so it runs as the current user.
 #>
 
 $PortalIp = $args[0]
@@ -14,7 +14,6 @@ $CadScriptUrl  = "http://$PortalIp/api/cad-server-script"
 $ServiceName   = 'CadServer'
 $WorkDir       = 'C:\CadServer'
 $PythonPath    = 'C:\Python312\python.exe'
-$NssmUrl       = 'https://nssm.cc/release/nssm-2.24.zip'
 $NssmDir       = "$env:ProgramFiles\NSSM"
 
 function Write-Info ($msg) { Write-Host "[INFO] $msg" -ForegroundColor Cyan }
@@ -54,40 +53,33 @@ if (-not (Test-Path $PythonPath)) {
     }
 } else { Write-Info "Python found: $PythonPath" }
 
-if (-not (Test-Path $NssmDir)) {
-    Write-Info "Downloading NSSM (service manager)..."
-    $zip = "$env:TEMP\nssm.zip"
-    Invoke-WebRequest -Uri $NssmUrl -OutFile $zip -UseBasicParsing
-    Expand-Archive -Path $zip -DestinationPath $NssmDir -Force
-    $nssmExe = Get-ChildItem $NssmDir -Recurse -Filter nssm.exe | Where-Object {$_.FullName -match 'win64'} | Select-Object -First 1
-    if (-not $nssmExe) { Write-ErrorExit "nssm.exe not found" }
-    $NssmPath = $nssmExe.FullName
-    Write-Info "NSSM ready: $NssmPath"
-} else {
-    $NssmPath = Get-ChildItem $NssmDir -Recurse -Filter nssm.exe | Select-Object -First 1 | %{$_.FullName}
-    Write-Info "NSSM already installed: $NssmPath"
+Write-Info "Checking for old NSSM service..."
+$service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($service) {
+    Write-Info "Stopping and removing old NSSM service..."
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+    if (Test-Path "$NssmDir\win64\nssm.exe") {
+        & "$NssmDir\win64\nssm.exe" remove $ServiceName confirm
+    }
 }
 
-if (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue) {
-    Write-Info "Service $ServiceName already exists. Updating settings..."
-    Stop-Service -Name $ServiceName -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
-} else {
-    Write-Info "Creating new service $ServiceName..."
-    & $NssmPath install $ServiceName $PythonPath $ScriptPath | Out-Null
-}
+Write-Info "Creating startup script..."
+$BatPath = "$WorkDir\start_cad_server.bat"
+Set-Content -Path $BatPath -Value "@echo off`r`nstart /min `"$PythonPath`" `"$WorkDir\windows_cad_server.py`""
 
-& $NssmPath set $ServiceName AppDirectory $WorkDir | Out-Null
-& $NssmPath set $ServiceName Start SERVICE_AUTO_START | Out-Null
-& $NssmPath set $ServiceName AppRestartDelay 5000 | Out-Null
+Write-Info "Creating shortcut in Startup folder..."
+$WshShell = New-Object -ComObject WScript.Shell
+$StartupFolder = [Environment]::GetFolderPath('Startup')
+$Shortcut = $WshShell.CreateShortcut("$StartupFolder\CadServer.lnk")
+$Shortcut.TargetPath = $BatPath
+$Shortcut.WorkingDirectory = $WorkDir
+$Shortcut.WindowStyle = 7 # Minimized
+$Shortcut.Save()
 
-Write-Info "Starting service..."
-Start-Service -Name $ServiceName
+Write-Info "Starting CAD Server as current user..."
+Stop-Process -Name python -Force -ErrorAction SilentlyContinue
+Stop-Process -Name accoreconsole -Force -ErrorAction SilentlyContinue
+Start-Process -FilePath $BatPath -WindowStyle Hidden
 
-$svc = Get-Service -Name $ServiceName
-if ($svc.Status -eq 'Running') {
-    Write-Host "`nDONE! Server is running in the background." -ForegroundColor Green
-    Write-Host "It will automatically start when Windows boots."
-} else {
-    Write-Warn "`nService registered but failed to start. Check Windows event logs."
-}
+Write-Host "`nDONE! Server is running in the background as the current user." -ForegroundColor Green
+Write-Host "It will automatically start when you log in to Windows."
