@@ -77,9 +77,13 @@ def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.ctb"),
         with open(safe_dsd_path, "w", encoding="utf-8") as f:
             f.write("\n".join(new_lines))
             
-        lisp_code = f'(command "_.-PUBLISH" "{safe_dsd_path.replace("\\\\", "/")}")\n(command "_.QUIT" "_Y")\n'
+        lisp_code = f'(setvar "FILEDIA" 0)\n(setvar "CMDDIA" 0)\n(setvar "PROXYNOTICE" 0)\n(setvar "EXPERT" 5)\n(command "_.-PUBLISH" "{safe_dsd_path.replace("\\\\", "/")}")\n(command "_.QUIT" "_Y")\n'
     else:
-        lisp_code = f"""(setq dict (dictsearch (namedobjdict) "ACAD_LAYOUT"))
+        lisp_code = f"""(setvar "FILEDIA" 0)
+(setvar "CMDDIA" 0)
+(setvar "PROXYNOTICE" 0)
+(setvar "EXPERT" 5)
+(setq dict (dictsearch (namedobjdict) "ACAD_LAYOUT"))
 (while (setq item (assoc 350 dict))
   (setq ent (cdr item))
   (setq edata (entget ent))
