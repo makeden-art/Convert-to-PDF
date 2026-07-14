@@ -1,8 +1,8 @@
 import os
 import subprocess
 import time
-from fastapi import FastAPI, File, UploadFile, Form
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi.responses import FileResponse, JSONResponse
 import uvicorn
 import shutil
 import glob
@@ -56,7 +56,7 @@ async def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.
     scr_path = os.path.join(temp_dir, f"print_{safe_uid}.scr")
     # Тот самый старый стабильный скрипт с EXPORT PDF, но с добавлением EXPERT 5
     # и без команды QUIT (AutoCAD сам закрывается при окончании скрипта, если он в одну строку)
-    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setq dict (dictsearch (namedobjdict) "ACAD_LAYOUT")) (while (setq item (assoc 350 dict)) (setq ent (cdr item)) (setq edata (entget ent)) (if (assoc 7 edata) (setq edata (subst (cons 7 "{ctb}") (assoc 7 edata) edata)) (setq edata (append edata (list (cons 7 "{ctb}"))))) (setq flags (cdr (assoc 70 edata))) (if flags (setq edata (subst (cons 70 (logior flags 32)) (assoc 70 edata) edata))) (entmod edata) (setq dict (cdr (member item dict)))) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\\\", "/")}")"""
+    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setq dict (dictsearch (namedobjdict) "ACAD_LAYOUT")) (while (setq item (assoc 350 dict)) (setq ent (cdr item)) (setq edata (entget ent)) (if (assoc 7 edata) (setq edata (subst (cons 7 "{ctb}") (assoc 7 edata) edata)) (setq edata (append edata (list (cons 7 "{ctb}"))))) (setq flags (cdr (assoc 70 edata))) (if flags (setq edata (subst (cons 70 (logior flags 32)) (assoc 70 edata) edata))) (entmod edata) (setq dict (cdr (member item dict)))) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}")"""
     
     # Записываем скрипт в одну строку в кодировке ANSI для стабильности
     with open(scr_path, "w", encoding="cp1251") as f:
@@ -72,7 +72,7 @@ async def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, errors="ignore", timeout=180)
     except subprocess.TimeoutExpired:
         subprocess.run('taskkill /F /IM accoreconsole.exe', shell=True)
-        return {"error": "AutoCAD timeout 180s. Process killed.", "log": ""}
+        return JSONResponse(status_code=504, content={"error": "AutoCAD timeout 180s. Process killed.", "log": ""})
     
     # Копируем PDF обратно
     if os.path.exists(safe_pdf_path):
@@ -94,7 +94,7 @@ async def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.
     else:
         print("ОШИБКА ПЕЧАТИ:")
         print(result.stdout)
-        return {"error": "Не удалось создать PDF. Проверьте консоль сервера.", "log": result.stdout}
+        return JSONResponse(status_code=500, content={"error": "Не удалось создать PDF. Проверьте консоль сервера.", "log": result.stdout})
 
 if __name__ == "__main__":
     print("--------------------------------------------------")
