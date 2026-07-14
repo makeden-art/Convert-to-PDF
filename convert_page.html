@@ -1241,7 +1241,10 @@
     };
 
     let savedWinIp = localStorage.getItem('win_cad_ip') || '';
-    if (savedWinIp) winIpInput.value = savedWinIp;
+    if (savedWinIp) {
+        winIpInput.value = savedWinIp;
+        setTimeout(() => btnWinCheck.click(), 100);
+    }
 
     winIpInput.addEventListener('change', () => {
         localStorage.setItem('win_cad_ip', winIpInput.value.trim());

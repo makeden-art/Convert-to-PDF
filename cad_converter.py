@@ -144,8 +144,8 @@ try:
             setattr(module, "virtual_block_reference_entities", _safe_virtual_block_reference_entities)
     ezdxf.addons.drawing.frontend._draw_viewports = _safe_draw_viewports
     logger.info("Successfully applied safe ezdxf block reference and viewport monkey-patches.")
-except Exception as e:
-    logger.error("Failed to apply ezdxf monkey-patch: %s", e)
+except Exception:
+    pass
 
 try:
     import ezdxf.addons.drawing.pipeline as _pipeline
@@ -168,8 +168,8 @@ try:
 
     _pipeline.apply_color_policy = patched_apply_color_policy
     logger.info("Successfully applied ezdxf apply_color_policy monkey-patch.")
-except Exception as e:
-    logger.error("Failed to apply ezdxf apply_color_policy monkey-patch: %s", e)
+except Exception:
+    pass
 
 CAD_EXTENSIONS = {".dwg", ".dxf"}
 CAD_RENDER_DPI = max(72, int(os.getenv("CONVERT_CAD_DPI", "150")))

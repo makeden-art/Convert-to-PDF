@@ -1025,8 +1025,8 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
     tmp = Path(tempfile.mkdtemp(prefix="cvt_one_"))
     try:
         if suffix in SUPPORTED_CAD:
-            if not oda_available():
-                raise RuntimeError("ODAFileConverter не установлен (DWG/DXF недоступны)")
+            if not windows_cad_ip and not oda_available():
+                raise RuntimeError("ODAFileConverter не установлен (DWG/DXF конвертация)")
             with _cad_sem:
                 pdf_tmp, cad_meta = convert_cad_to_pdf(str(src), meta={"windows_cad_ip": windows_cad_ip, "dsd_path": dsd_path})
             try:
