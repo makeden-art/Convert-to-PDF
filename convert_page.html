@@ -1051,14 +1051,14 @@
             merge: true,
             output_name,
             recursive: document.getElementById('recursive').checked,
-            color_mode
+            windows_cad_ip: winIpInput.value.trim()
           };
         } else if (orderedSelections.length > 0) {
           checkPayload = {
             paths: orderedSelections.map(s => s.path),
             merge: false,
             recursive: document.getElementById('recursive').checked,
-            color_mode
+            windows_cad_ip: winIpInput.value.trim()
           };
         } else if (currentPath) {
           checkPayload = {
@@ -1066,7 +1066,7 @@
             merge,
             output_name,
             recursive: document.getElementById('recursive').checked,
-            color_mode
+            windows_cad_ip: winIpInput.value.trim()
           };
         }
         if (checkPayload) {
@@ -1087,7 +1087,7 @@
             number_pages,
             numbering_from_page,
             numbering_start,
-            color_mode
+            windows_cad_ip: winIpInput.value.trim()
           });
           showLog('Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) +
             mergeSaveLog(j) + ', ошибок: ' + j.stats.error);
@@ -1096,7 +1096,7 @@
             paths: orderedSelections.map(s => s.path),
             merge: false,
             recursive: document.getElementById('recursive').checked,
-            color_mode
+            windows_cad_ip: winIpInput.value.trim()
           });
           showLog('Готово: ' + j.stats.ok + ' OK, ошибок ' + j.stats.error + '\n' +
             j.files.map(f => f.status + ' | ' + f.source).join('\n'));
@@ -1109,7 +1109,7 @@
             number_pages,
             numbering_from_page,
             numbering_start,
-            color_mode
+            windows_cad_ip: winIpInput.value.trim()
           });
           if (j.merge) {
             showLog('Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) + mergeSaveLog(j));
@@ -1167,7 +1167,7 @@
               number_pages,
               numbering_from_page,
               numbering_start,
-              color_mode
+              windows_cad_ip: winIpInput.value.trim()
             })
           });
           if (!r.ok) {
@@ -1209,7 +1209,7 @@
             fd.append('numbering_from_page', numbering_from_page);
             fd.append('numbering_start', numbering_start);
           }
-          fd.append('color_mode', color_mode);
+          fd.append('windows_cad_ip', winIpInput.value.trim());
           const r = await fetch('/api/convert-merge', { method: 'POST', body: fd });
           if (!r.ok) { showLog(await r.text()); return; }
           const blob = await r.blob();
