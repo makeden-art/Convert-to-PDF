@@ -8,7 +8,24 @@ import shutil
 
 app = FastAPI(title="AutoCAD Print Server")
 
-ACAD_PATH = r"E:\Autodesk\acad\AutoCAD 2022\accoreconsole.exe"
+import glob
+
+def find_accoreconsole():
+    search_paths = [
+        r"C:\Program Files\Autodesk\AutoCAD *\accoreconsole.exe",
+        r"D:\Program Files\Autodesk\AutoCAD *\accoreconsole.exe",
+        r"E:\Program Files\Autodesk\AutoCAD *\accoreconsole.exe",
+        r"C:\Autodesk\AutoCAD *\accoreconsole.exe",
+        r"D:\Autodesk\AutoCAD *\accoreconsole.exe",
+        r"E:\Autodesk\acad\AutoCAD *\accoreconsole.exe"
+    ]
+    for pattern in search_paths:
+        matches = glob.glob(pattern)
+        if matches:
+            return sorted(matches, reverse=True)[0]
+    return r"C:\Program Files\Autodesk\AutoCAD 2022\accoreconsole.exe"
+
+ACAD_PATH = find_accoreconsole()
 WORK_DIR = os.path.abspath("cad_server_workdir")
 os.makedirs(WORK_DIR, exist_ok=True)
 
