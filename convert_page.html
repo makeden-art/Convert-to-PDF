@@ -189,8 +189,12 @@
         <label for="win-ip">IP-адрес Windows-сервера с AutoCAD (с портом)</label>
         <input type="text" id="win-ip" placeholder="192.168.88.10:8000" />
         <button id="btn-win-check" type="button">Проверить подключение</button>
-        <p class="hint" style="margin-top:10px;">Для работы конвертации DWG в Windows необходим специальный сервер на Python.</p>
-        <a href="/api/cad-server-script" download="windows_cad_server.py" class="secondary" style="display:inline-block; padding:8px 12px; background:#1e293b; color:#cbd5e1; text-decoration:none; border-radius:6px; border:1px solid #334155; margin-top:5px;">Скачать скрипт сервера (windows_cad_server.py)</a>
+        <p class="hint" style="margin-top:10px;">Для настройки сервера пакетной конвертации скопируйте и выполните эти две команды в <b>PowerShell от имени Администратора</b> на вашем Windows-компьютере с AutoCAD:</p>
+        <pre id="setup-cmd-box" style="background: #1e293b; color: #e2e8f0; padding: 10px; border-radius: 6px; margin-top: 8px; user-select: all; white-space: pre-wrap; font-family: monospace; font-size: 13px;">Загрузка скрипта...</pre>
+        <script>
+          document.getElementById('setup-cmd-box').textContent = 'Invoke-WebRequest -Uri "' + window.location.origin + '/api/setup-cad-server" -OutFile "$env:TEMP\\setup_cad_server.ps1"\n& "$env:TEMP\\setup_cad_server.ps1" "' + window.location.host + '"';
+        </script>
+        <p class="hint" style="margin-top:10px;">Для обновления скрипта просто запустите эти же команды повторно.</p>
       </div>
     </div>
 

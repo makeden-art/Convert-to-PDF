@@ -654,3 +654,8 @@ async def ping_cad_server(ip: str):
 @app.get("/api/cad-server-script")
 async def download_cad_server():
     return FileResponse("windows_cad_server.py", media_type="text/x-python", filename="windows_cad_server.py")
+
+@app.get("/api/setup-cad-server")
+async def download_setup_cad_server():
+    return FileResponse("setup_cad_server.ps1", media_type="application/octet-stream", filename="setup_cad_server.ps1")
+
