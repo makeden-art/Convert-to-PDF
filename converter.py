@@ -1356,27 +1356,33 @@ def _convert_folder_merged(
             saved_path = download_to
         else:
             saved_path = _save_merged_pdf(local_merged, merged_path)
+            
+        ret = {
+            "folder": str(folder),
+            "recursive": recursive,
+            "merge": True,
+            "merged_pdf": str(saved_path),
+            "merged_pdf_requested": str(download_to or merged_path),
+            "saved_as_alt": not download_to and str(saved_path) != str(merged_path),
+            "pages_from": len(pdf_parts),
+            "total": len(results),
+            "stats": stats,
+            "files": list(results),
+            "numbering_from_page": numbering_from_page,
+            "numbering_start": numbering_start,
+            "download": download_to is not None,
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
         pdf_parts.clear()
         results.clear()
         release_memory()
-
-    return {
-        "folder": str(folder),
-        "recursive": recursive,
-        "merge": True,
-        "merged_pdf": str(saved_path),
-        "merged_pdf_requested": str(download_to or merged_path),
-        "saved_as_alt": not download_to and str(saved_path) != str(merged_path),
-        "pages_from": len(pdf_parts),
-        "total": len(results),
-        "stats": stats,
-        "files": results,
-        "numbering_from_page": numbering_from_page,
-        "numbering_start": numbering_start,
-        "download": download_to is not None,
-    }
+        
+    return ret
 
 
 def convert_paths_merged_download(

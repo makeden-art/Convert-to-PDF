@@ -1095,9 +1095,15 @@
             numbering_start,
             windows_cad_ip: winIpInput.value.trim()
           });
-          showLog('Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) +
-            mergeSaveLog(j) + ', ошибок: ' + j.stats.error);
-        } else if (orderedSelections.length > 0) {
+          let logMsg = 'Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) +
+            mergeSaveLog(j) + ', ошибок: ' + (j.stats ? j.stats.error : 0);
+          if (j.files && j.files.length > 0 && j.stats && j.stats.error > 0) {
+            const errFiles = j.files.filter(f => f.status === 'error' || f.status === 'skipped');
+            if (errFiles.length > 0) {
+              logMsg += '\nОшибки:\n' + errFiles.map(f => '❌ ' + f.source.split(/[\\/]/).pop() + (f.message ? ' - ' + f.message : '')).join('\n');
+            }
+          }
+          showLog(logMsg);
           const j = await apiPost('/api/convert-paths', {
             paths: orderedSelections.map(s => s.path),
             merge: false,
@@ -1118,7 +1124,14 @@
             windows_cad_ip: winIpInput.value.trim()
           });
           if (j.merge) {
-            showLog('Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) + mergeSaveLog(j));
+            let logMsg = 'Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) + mergeSaveLog(j);
+            if (j.files && j.files.length > 0 && j.stats && j.stats.error > 0) {
+              const errFiles = j.files.filter(f => f.status === 'error' || f.status === 'skipped');
+              if (errFiles.length > 0) {
+                logMsg += '\nОшибки:\n' + errFiles.map(f => '❌ ' + f.source.split(/[\\/]/).pop() + (f.message ? ' - ' + f.message : '')).join('\n');
+              }
+            }
+            showLog(logMsg);
           } else {
             showLog('Готово: ' + j.stats.ok + ' файлов\n' +
               j.files.map(f => f.status + ' | ' + f.source).join('\n'));

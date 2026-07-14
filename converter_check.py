@@ -1477,6 +1477,22 @@ def _convert_folder_merged(
             saved_path = download_to
         else:
             saved_path = _save_merged_pdf(local_merged, merged_path)
+            
+        ret = {
+            "folder": str(folder),
+            "recursive": recursive,
+            "merge": True,
+            "merged_pdf": str(saved_path),
+            "merged_pdf_requested": str(download_to or merged_path),
+            "saved_as_alt": not download_to and str(saved_path) != str(merged_path),
+            "pages_from": len(pdf_parts),
+            "total": len(results),
+            "stats": stats,
+            "files": list(results),
+            "numbering_from_page": numbering_from_page,
+            "numbering_start": numbering_start,
+            "download": download_to is not None,
+        }
             # Сохраняем манифест сборки (.cache.json) рядом с итоговым PDF
             try:
                 manifest_path = saved_path.with_suffix(".pdf.cache.json")
