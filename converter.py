@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from contextlib import contextmanager
 from pathlib import Path
 
-from cad_converter import CAD_EXTENSIONS, convert_cad_to_pdf, oda_available
+from cad_converter import CAD_EXTENSIONS, convert_cad_to_pdf
 from format_detect import (
     FormatInfo,
     _extension_fallback,
@@ -1025,8 +1025,8 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
     tmp = Path(tempfile.mkdtemp(prefix="cvt_one_"))
     try:
         if suffix in SUPPORTED_CAD:
-            if not windows_cad_ip and not oda_available():
-                raise RuntimeError("ODAFileConverter не установлен (DWG/DXF конвертация)")
+            if not windows_cad_ip:
+                raise RuntimeError("Не указан Windows CAD IP для конвертации DWG/DXF")
             with _cad_sem:
                 pdf_tmp, cad_meta = convert_cad_to_pdf(str(src), meta={"windows_cad_ip": windows_cad_ip, "dsd_path": dsd_path})
             try:
