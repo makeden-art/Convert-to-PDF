@@ -8,19 +8,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice-writer-nogui \
     libreoffice-calc-nogui \
-    xvfb xauth \
-    libxcb-util1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
-    libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
-    libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0 \
-    libfontconfig1 libfreetype6 libgl1 libglib2.0-0 \
+    libfontconfig1 libfreetype6 \
     fonts-dejavu-core \
     curl ca-certificates smbclient ghostscript librsvg2-bin \
-    && rm -rf /var/lib/apt/lists/* \
-    && ln -s /usr/lib/x86_64-linux-gnu/libxcb-util.so.1 /usr/lib/x86_64-linux-gnu/libxcb-util.so.0 || true
-
-# ODA для DWG→DXF (deb кладётся в контекст сборки CI или platform root)
-COPY ODAFileConverter*.deb /tmp/oda.deb
-RUN dpkg -i /tmp/oda.deb || (apt-get update && apt-get install -f -y) && rm -f /tmp/oda.deb
+    && rm -rf /var/lib/apt/lists/*
 
 COPY app.py converter.py cad_converter.py frame_detect.py format_detect.py file_preview.py cad_preview_worker.py convert_page.html viewer_page.html convert_worker.py convert_jobs.py job_control.py VERSION windows_cad_server.py setup_cad_server.ps1 ./
 COPY fonts/ ./fonts/
