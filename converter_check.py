@@ -11,11 +11,12 @@ import threading
 import time
 import uuid
 import gc
+import hashlib
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from contextlib import contextmanager
 from pathlib import Path
 
-from cad_converter import CAD_EXTENSIONS, convert_cad_to_pdf
+from cad_converter import CAD_EXTENSIONS, convert_cad_to_pdf, oda_available
 from format_detect import (
     FormatInfo,
     _extension_fallback,
@@ -52,6 +53,54 @@ def allowed_roots() -> list[Path]:
         "/data,/workspace,/opt/road-pdf-platform",
     )
     return [Path(p.strip()).resolve() for p in raw.split(",") if p.strip()]
+
+
+def get_file_content_hash(path: Path) -> str:
+    """Быстрый хэш файла на основе размера, mtime и структуры байт."""
+    try:
+        stat = path.stat()
+        h = hashlib.md5()
+        # Добавляем имя, размер и время изменения
+        h.update(f"{path.name}_{stat.st_size}_{stat.st_mtime}".encode())
+        # Если файл не пустой, берем крайние байты для страховки от коллизий при подмене
+        if stat.st_size > 0:
+            with open(path, "rb") as f:
+                h.update(f.read(8192))
+                if stat.st_size > 8192:
+                    f.seek(-8192, 2)
+                    h.update(f.read(8192))
+        return h.hexdigest()
+    except Exception:
+        return hashlib.md5(f"{path}_{time.time()}".encode()).hexdigest()
+
+
+def get_global_cache_dir() -> Path:
+    """Глобальная папка кэша (резервная)."""
+    d = Path(os.getenv("CONVERT_CACHE_DIR", "/data/cache/convert"))
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        test_file = d / f".test_write_{uuid.uuid4().hex}"
+        test_file.touch()
+        test_file.unlink()
+        return d
+    except Exception:
+        fallback = Path(tempfile.gettempdir()) / "convert_cache"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+
+def get_local_cache_dir(src_file: Path) -> Path:
+    """Локальная папка проекта `.convert_cache`. Если папка read-only, отдает глобальную."""
+    parent = src_file.parent
+    cache_dir = parent / ".convert_cache"
+    try:
+        cache_dir.mkdir(exist_ok=True)
+        test_file = cache_dir / f".test_write_{uuid.uuid4().hex}"
+        test_file.touch()
+        test_file.unlink()
+        return cache_dir
+    except Exception:
+        return get_global_cache_dir()
 
 
 def server_path_exists(path: Path) -> bool:
@@ -759,7 +808,6 @@ def convert_paths(
     merge: bool = False,
     output_name: str = "сборка.pdf",
     recursive: bool = True,
-    windows_cad_ip: str = "",
     number_pages: bool = False,
     numbering_from_page: int = 1,
     numbering_start: int = 1,
@@ -776,7 +824,6 @@ def convert_paths(
             inputs,
             output_name,
             recursive=False,
-            windows_cad_ip=windows_cad_ip,
             numbering_from_page=from_page,
             numbering_start=start_num,
         )
@@ -785,7 +832,7 @@ def convert_paths(
     stats = {"ok": 0, "skipped": 0, "error": 0}
     for src in inputs:
         check_cancelled()
-        item = convert_file_in_place(src, windows_cad_ip=windows_cad_ip)
+        item = convert_file_in_place(src)
         results.append(item)
         stats[item["status"]] = stats.get(item["status"], 0) + 1
 
@@ -918,23 +965,32 @@ def _apply_pdf_numbering(path: Path, *, from_page: int, start: int) -> None:
 
 
 def _run_merge_parts(
-    inputs: list[Path], tmp: Path, windows_cad_ip: str = ""
+    inputs: list[Path], tmp: Path
 ) -> list[tuple[int, Path | None, dict]]:
-    """Конвертация частей сборки: по умолчанию последовательно (экономия RAM)."""
-    workers = min(MERGE_WORKERS, len(inputs))
+    """Конвертация частей сборки: по умолчанию параллельно."""
+    import multiprocessing
+    workers = min(4, len(inputs)) if len(inputs) > 1 else 1
     part_results: list[tuple[int, Path | None, dict]] = []
     if workers <= 1:
         for idx, src in enumerate(inputs):
             check_cancelled()
-            part_results.append(_convert_merge_part(idx, src, tmp, windows_cad_ip=windows_cad_ip))
+            part_results.append(_convert_merge_part(idx, src, tmp))
             release_memory()
         return part_results
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = [ex.submit(_convert_merge_part, idx, src, tmp, windows_cad_ip) for idx, src in enumerate(inputs)]
-        for fut in futs:
+        
+    args_list = [(idx, src, tmp) for idx, src in enumerate(inputs)]
+    
+    with multiprocessing.Pool(workers) as pool:
+        res = pool.starmap_async(_convert_merge_part, args_list)
+        while not res.ready():
             check_cancelled()
-            part_results.append(fut.result())
-            release_memory()
+            res.wait(timeout=1.0)
+        try:
+            items = res.get()
+            part_results.extend(items)
+        except Exception as e:
+            raise RuntimeError(f"Ошибка при параллельной конвертации сборки: {e}")
+            
     return part_results
 
 
@@ -957,22 +1013,14 @@ def _convert_timeout_for(src: Path) -> int:
     return FILE_CONVERT_TIMEOUT_SEC
 
 
-def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None) -> dict | None:
+def convert_file_to_pdf_isolated(src: Path, dest: Path) -> None:
     """Конвертация в отдельном процессе — OOM дочернего не роняет uvicorn."""
     import sys
-    import json
 
     timeout_sec = _convert_timeout_for(src)
-    meta_file = dest.with_suffix(".meta.json")
-    if meta_file.exists():
-        try:
-            meta_file.unlink()
-        except Exception:
-            pass
-
     try:
         proc = run_monitored(
-            [sys.executable, str(_WORKER_SCRIPT), str(src), str(dest), windows_cad_ip],
+            [sys.executable, str(_WORKER_SCRIPT), str(src), str(dest)],
             timeout=timeout_sec,
             preexec_fn=_child_memory_limit,
         )
@@ -990,24 +1038,15 @@ def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = ""
     if not dest.is_file():
         raise RuntimeError(f"PDF не создан: {src.name}")
 
-    meta = None
-    if meta_file.exists():
-        try:
-            meta = json.loads(meta_file.read_text(encoding="utf-8"))
-            meta_file.unlink()
-        except Exception:
-            pass
-    return meta
 
-
-def _convert_local_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None) -> dict | None:
+def _convert_local_file_to_pdf(src: Path, dest: Path) -> None:
     if CONVERT_ISOLATE:
-        return convert_file_to_pdf_isolated(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path)
+        convert_file_to_pdf_isolated(src, dest)
     else:
-        return convert_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path)
+        convert_file_to_pdf(src, dest)
 
 
-def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None) -> dict | None:
+def convert_file_to_pdf(src: Path, dest: Path) -> dict | None:
     """Конвертировать один локальный файл в указанный PDF. Для CAD возвращает meta."""
     src = src.resolve()
     suffix = src.suffix.lower()
@@ -1026,14 +1065,11 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
     tmp = Path(tempfile.mkdtemp(prefix="cvt_one_"))
     try:
         if suffix in SUPPORTED_CAD:
-            if not windows_cad_ip:
-                raise RuntimeError("Не указан Windows CAD IP для конвертации DWG/DXF")
+            if not oda_available():
+                raise RuntimeError("ODAFileConverter не установлен (DWG/DXF недоступны)")
             with _cad_sem:
-                pdf_tmp, cad_meta = convert_cad_to_pdf(str(src), meta={"windows_cad_ip": windows_cad_ip, "dsd_path": dsd_path})
-            try:
-                shutil.move(str(pdf_tmp), str(dest))
-            finally:
-                shutil.rmtree(pdf_tmp.parent, ignore_errors=True)
+                pdf_tmp, cad_meta = convert_cad_to_pdf(str(src))
+            shutil.move(str(pdf_tmp), str(dest))
             return cad_meta
         pdf_tmp = _convert_with_libreoffice(src, tmp)
         shutil.move(str(pdf_tmp), str(dest))
@@ -1042,12 +1078,13 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _convert_source_to_temp_pdf(src: Path, dest: Path, windows_cad_ip: str = "") -> dict | None:
+def _convert_source_to_temp_pdf(src: Path, dest: Path) -> None:
     """Конвертировать файл с сервера (локальный или SMB) во временный PDF."""
     if _is_smb_path(src) and _smb_mounted():
         with _smb_local_file(src) as local_src:
-            return _convert_local_file_to_pdf(local_src, dest, windows_cad_ip=windows_cad_ip)
-    return _convert_local_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip)
+            _convert_local_file_to_pdf(local_src, dest)
+        return
+    _convert_local_file_to_pdf(src, dest)
 
 
 def _save_merged_pdf(local_pdf: Path, dest: Path) -> Path:
@@ -1059,7 +1096,7 @@ def _save_merged_pdf(local_pdf: Path, dest: Path) -> Path:
     return dest
 
 
-def convert_file_in_place(src: Path, windows_cad_ip: str = "") -> dict:
+def convert_file_in_place(src: Path) -> dict:
     """Конвертирует файл и кладёт PDF в ту же папку: doc.docx → doc.pdf."""
     src = src.resolve()
     suffix = src.suffix.lower()
@@ -1086,10 +1123,16 @@ def convert_file_in_place(src: Path, windows_cad_ip: str = "") -> dict:
         if _is_smb_path(src) and _smb_mounted():
             with _smb_local_file(src) as local_src:
                 tmp_pdf = local_src.with_suffix(".pdf")
-                cad_meta = _convert_local_file_to_pdf(local_src, tmp_pdf, windows_cad_ip=windows_cad_ip)
+                if CONVERT_ISOLATE:
+                    convert_file_to_pdf_isolated(local_src, tmp_pdf)
+                else:
+                    convert_file_to_pdf(local_src, tmp_pdf)
                 saved = _smb_put_file(tmp_pdf, dest)
         else:
-            cad_meta = _convert_local_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip)
+            if CONVERT_ISOLATE:
+                convert_file_to_pdf_isolated(src, dest)
+            else:
+                convert_file_to_pdf(src, dest)
             saved = dest
         msg = "Сконвертировано"
         if cad_meta and cad_meta.get("engine") == "ezdxf" and cad_meta.get("fallback"):
@@ -1111,6 +1154,11 @@ def convert_file_in_place(src: Path, windows_cad_ip: str = "") -> dict:
             **({"cad": cad_meta} if cad_meta else {}),
         }
     except Exception as e:
+        import traceback
+        with open("/tmp/trace.txt", "a") as f:
+            f.write(f"Exception in _convert_local_file_to_pdf:\n")
+            f.write(traceback.format_exc())
+            f.write("\n")
         return {
             "source": str(src),
             "pdf": None,
@@ -1238,7 +1286,6 @@ def convert_folder(
     *,
     merge: bool = False,
     output_name: str = "сборка.pdf",
-    windows_cad_ip: str = "",
     number_pages: bool = False,
     numbering_from_page: int = 1,
     numbering_start: int = 1,
@@ -1254,7 +1301,6 @@ def convert_folder(
             inputs,
             output_name,
             recursive,
-            windows_cad_ip=windows_cad_ip,
             numbering_from_page=from_page,
             numbering_start=start_num,
         )
@@ -1262,11 +1308,29 @@ def convert_folder(
     results = []
     stats = {"ok": 0, "skipped": 0, "error": 0}
 
-    for f in inputs:
-        check_cancelled()
-        item = convert_file_in_place(f, windows_cad_ip=windows_cad_ip)
-        results.append(item)
-        stats[item["status"]] = stats.get(item["status"], 0) + 1
+    import multiprocessing
+    
+    workers = min(4, len(inputs)) if len(inputs) > 1 else 1
+    if workers <= 1:
+        for f in inputs:
+            check_cancelled()
+            item = convert_file_in_place(f)
+            results.append(item)
+            stats[item["status"]] = stats.get(item["status"], 0) + 1
+    else:
+        with multiprocessing.Pool(workers) as pool:
+            res = pool.map_async(convert_file_in_place, inputs)
+            while not res.ready():
+                check_cancelled()
+                res.wait(timeout=1.0)
+            try:
+                items = res.get()
+                for item in items:
+                    results.append(item)
+                    stats[item["status"]] = stats.get(item["status"], 0) + 1
+            except Exception as e:
+                # If a worker crashes, we still want to continue and record the error
+                raise RuntimeError(f"Ошибка при параллельной конвертации: {e}")
 
     return {
         "folder": str(folder),
@@ -1278,22 +1342,70 @@ def convert_folder(
     }
 
 
-def _convert_merge_part(idx: int, src: Path, tmp: Path, windows_cad_ip: str = "") -> tuple[int, Path | None, dict]:
+def _convert_merge_part(idx: int, src: Path, tmp: Path) -> tuple[int, Path | None, dict]:
     part = tmp / f"{idx:04d}.pdf"
+
+    # 1. Проверяем, есть ли готовый PDF с таким же именем прямо рядом с исходным редактируемым файлом
+    if src.suffix.lower() != ".pdf":
+        sibling_pdf = src.with_suffix(".pdf")
+        if sibling_pdf.exists() and sibling_pdf.stat().st_mtime >= src.stat().st_mtime:
+            try:
+                shutil.copy2(sibling_pdf, part)
+                return idx, part, {
+                    "source": str(src),
+                    "pdf": str(part),
+                    "status": "ok",
+                    "message": "Включён в сборку (использован готовый PDF)",
+                    "hash": get_file_content_hash(sibling_pdf),
+                }
+            except Exception:
+                pass
+
+    h = get_file_content_hash(src)
+    cache_dir = get_local_cache_dir(src)
+    cached_pdf = cache_dir / f"{h}.pdf"
+
+    # Пытаемся взять готовый PDF из локального кэша
+    if cached_pdf.exists():
+        try:
+            shutil.copy2(cached_pdf, part)
+            return idx, part, {
+                "source": str(src),
+                "pdf": str(part),
+                "status": "ok",
+                "message": "Включён в сборку (из кэша)",
+                "hash": h,
+            }
+        except Exception:
+            pass
+
+    # Стандартная конвертация
     try:
-        _convert_source_to_temp_pdf(src, part, windows_cad_ip=windows_cad_ip)
+        _convert_source_to_temp_pdf(src, part)
+        # Сохраняем результат в кэш для последующих сборок
+        try:
+            shutil.copy2(part, cached_pdf)
+        except Exception:
+            pass
         return idx, part, {
             "source": str(src),
             "pdf": str(part),
             "status": "ok",
             "message": "Включён в сборку",
+            "hash": h,
         }
     except Exception as e:
+        import traceback
+        with open("/tmp/trace.txt", "a") as f:
+            f.write(f"Exception in _convert_merge_part for {src}:\n")
+            f.write(traceback.format_exc())
+            f.write("\n")
         return idx, None, {
             "source": str(src),
             "pdf": None,
             "status": "error",
             "message": str(e),
+            "hash": h,
         }
 
 
@@ -1303,13 +1415,22 @@ def _convert_folder_merged(
     output_name: str,
     recursive: bool,
     *,
-    windows_cad_ip: str = "",
     numbering_from_page: int | None = None,
     numbering_start: int = 1,
     download_to: Path | None = None,
 ) -> dict:
     if not inputs:
         raise ValueError("В папке нет поддерживаемых файлов для сборки")
+
+    # Исключаем дублирование: если для редактируемого чертежа/документа в списке уже есть готовый PDF,
+    # убираем исходный редактируемый файл из списка сборки, чтобы страницы не дублировались.
+    pdf_names = {str(p.with_suffix("")).lower() for p in inputs if p.suffix.lower() == ".pdf"}
+    filtered_inputs = []
+    for p in inputs:
+        if p.suffix.lower() != ".pdf" and str(p.with_suffix("")).lower() in pdf_names:
+            continue
+        filtered_inputs.append(p)
+    inputs = filtered_inputs
 
     safe_name = Path(output_name).name or "сборка.pdf"
     if not safe_name.lower().endswith(".pdf"):
@@ -1323,7 +1444,7 @@ def _convert_folder_merged(
     stats = {"ok": 0, "skipped": 0, "error": 0}
 
     try:
-        part_results = _run_merge_parts(inputs, tmp, windows_cad_ip=windows_cad_ip)
+        part_results = _run_merge_parts(inputs, tmp)
 
         part_results.sort(key=lambda x: x[0])
         for _, part, item in part_results:
@@ -1356,10 +1477,26 @@ def _convert_folder_merged(
             saved_path = download_to
         else:
             saved_path = _save_merged_pdf(local_merged, merged_path)
+            # Сохраняем манифест сборки (.cache.json) рядом с итоговым PDF
+            try:
+                manifest_path = saved_path.with_suffix(".pdf.cache.json")
+                manifest_sources = {}
+                for r in results:
+                    if r.get("status") == "ok" and "hash" in r:
+                        src_p = Path(r["source"])
+                        manifest_sources[str(src_p)] = {
+                            "hash": r["hash"],
+                            "mtime": src_p.stat().st_mtime if src_p.exists() else 0.0
+                        }
+                with open(manifest_path, "w", encoding="utf-8") as mf:
+                    json.dump({
+                        "output_file": saved_path.name,
+                        "sources": manifest_sources
+                    }, mf, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-        pdf_parts.clear()
-        results.clear()
         release_memory()
 
     return {
@@ -1386,7 +1523,6 @@ def convert_paths_merged_download(
     recursive: bool = True,
     numbering_from_page: int | None = None,
     numbering_start: int = 1,
-    windows_cad_ip: str = "",
 ) -> tuple[Path, Path, dict]:
     """Собрать PDF во временный файл для скачивания (без записи на SMB)."""
     inputs = resolve_ordered_inputs(paths, recursive=recursive)
@@ -1402,7 +1538,6 @@ def convert_paths_merged_download(
         inputs,
         safe_name,
         False,
-        windows_cad_ip=windows_cad_ip,
         numbering_from_page=numbering_from_page,
         numbering_start=numbering_start,
         download_to=dest,
@@ -1416,7 +1551,6 @@ def convert_uploads_to_merged_pdf(
     *,
     numbering_from_page: int | None = None,
     numbering_start: int = 1,
-    windows_cad_ip: str = "",
 ) -> dict:
     """Сконвертировать загруженные файлы и собрать в один PDF."""
     if not sources:
@@ -1428,7 +1562,7 @@ def convert_uploads_to_merged_pdf(
     stats = {"ok": 0, "error": 0}
 
     try:
-        part_results = _run_merge_parts(sources, tmp, windows_cad_ip=windows_cad_ip)
+        part_results = _run_merge_parts(sources, tmp)
 
         part_results.sort(key=lambda x: x[0])
         for _, part, item in part_results:
@@ -1459,6 +1593,7 @@ def convert_uploads_to_merged_pdf(
         "numbering_from_page": numbering_from_page,
         "numbering_start": numbering_start,
     }
+
 
 def number_pdf_file(
     file_path: str,
