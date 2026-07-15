@@ -200,20 +200,22 @@ async def check_update():
 
 @app.get("/", response_class=HTMLResponse)
 @app.get("/convert", response_class=HTMLResponse)
-async def convert_page() -> str:
+async def convert_page():
     template_path = Path(__file__).parent / "convert_page.html"
     html = template_path.read_text(encoding="utf-8")
-    return (
+    content = (
         html.replace("{{MAX_MERGE}}", str(MAX_MERGE_FILES))
         .replace("{{ROOTS}}", ", ".join(str(r) for r in allowed_roots()))
         .replace("{{VERSION}}", _version())
     )
+    return HTMLResponse(content, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
 
 
 @app.get("/convert/view", response_class=HTMLResponse)
-async def viewer_page() -> str:
+async def viewer_page():
     template_path = Path(__file__).parent / "viewer_page.html"
-    return template_path.read_text(encoding="utf-8")
+    content = template_path.read_text(encoding="utf-8")
+    return HTMLResponse(content, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
 
 
 @app.get("/api/browse")
