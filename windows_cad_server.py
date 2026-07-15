@@ -77,10 +77,11 @@ async def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.
     start_time = time.time()
     try:
         # Добавили таймаут как в новой версии
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, errors="ignore", timeout=180)
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, errors="ignore", timeout=300)
     except subprocess.TimeoutExpired:
+        print(f"ТАЙМАУТ ПЕЧАТИ (300 сек)! Убиваем зависший процесс AutoCAD для файла: {safe_filename}")
         subprocess.run('taskkill /F /IM accoreconsole.exe', shell=True)
-        return JSONResponse(status_code=504, content={"error": "AutoCAD timeout 180s. Process killed.", "log": ""})
+        return JSONResponse(status_code=504, content={"error": "AutoCAD timeout 300s. Process killed.", "log": ""})
     
     # Копируем PDF обратно
     if os.path.exists(safe_pdf_path):
