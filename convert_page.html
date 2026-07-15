@@ -224,6 +224,7 @@ window.addEventListener('unhandledrejection', function(e) {
           <input type="file" id="file-upload" style="display:none" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.rtf,.dwg,.dxf" />
         <p class="sel-count" id="sel-count">На сервере: ничего не выбрано</p>
         <p class="sel-detail" id="sel-detail"></p>
+        <p class="hint" id="frames-hint" style="display:none; margin-top: 4px;"></p>
         <p class="sel-count" id="upload-count" style="color:#94a3b8">С компьютера: 0</p>
         <div class="chk"><input type="checkbox" id="recursive" checked /><label for="recursive" style="margin:0">Включая вложенные подпапки (для выбранных папок)</label></div>
         <div class="chk"><input type="checkbox" id="merge" /><label for="merge" style="margin:0">Собрать в один PDF</label></div>
@@ -276,6 +277,7 @@ window.addEventListener('unhandledrejection', function(e) {
     const treePathEl = document.getElementById('tree-path');
     const selCountEl = document.getElementById('sel-count');
     const selDetailEl = document.getElementById('sel-detail');
+    const framesHintEl = document.getElementById('frames-hint');
     const uploadCountEl = document.getElementById('upload-count');
     const logWork = document.getElementById('log-work');
     const dropUpload = document.getElementById('drop-upload');
