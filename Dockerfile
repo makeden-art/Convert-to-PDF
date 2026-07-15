@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates smbclient ghostscript \
     && rm -rf /var/lib/apt/lists/*
 
-COPY app.py converter.py cad_converter.py frame_detect.py format_detect.py file_preview.py cad_preview_worker.py convert_page.html viewer_page.html convert_worker.py convert_jobs.py job_control.py VERSION windows_cad_server.py setup_cad_server.ps1 ./
+COPY app.py converter.py cad_converter.py frame_detect.py format_detect.py file_preview.py cad_preview_worker.py convert_page.html viewer_page.html convert_worker.py convert_jobs.py job_control.py VERSION windows_cad_server.py setup_cad_server.ps1 uninstall_cad_server.ps1 ./
 
 ENV PYTHONUNBUFFERED=1
 

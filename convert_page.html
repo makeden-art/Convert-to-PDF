@@ -204,6 +204,11 @@ window.addEventListener('unhandledrejection', function(e) {
             document.getElementById('setup-cmd-box').textContent = 'Stop-Process -Name accoreconsole -Force -ErrorAction SilentlyContinue ; Stop-Service -Name CadServer -Force -ErrorAction SilentlyContinue ; Invoke-WebRequest -Uri "' + window.location.origin + '/api/setup-cad-server" -OutFile "$env:TEMP\\setup_cad_server.ps1" ; & "$env:TEMP\\setup_cad_server.ps1" "' + window.location.host + '"';
           </script>
         <p class="hint" style="margin-top:10px;">Для обновления скрипта просто запустите эти же команды повторно.</p>
+        <p class="hint" style="margin-top:20px;">Для <b>полного удаления</b> CAD-сервера выполните эти команды:</p>
+        <pre id="uninstall-cmd-box" style="background: #3b1e1e; color: #f87171; padding: 10px; border-radius: 6px; margin-top: 8px; user-select: all; white-space: pre-wrap; font-family: monospace; font-size: 13px;">Загрузка скрипта...</pre>
+        <script>
+            document.getElementById('uninstall-cmd-box').textContent = 'Invoke-WebRequest -Uri "' + window.location.origin + '/api/uninstall-cad-server" -OutFile "$env:TEMP\\uninstall_cad_server.ps1" ; & "$env:TEMP\\uninstall_cad_server.ps1"';
+        </script>
       </div>
     </div>
 

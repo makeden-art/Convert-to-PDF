@@ -630,6 +630,10 @@ async def download_cad_server():
 async def download_setup_cad_server():
     return FileResponse("setup_cad_server.ps1", media_type="application/octet-stream", filename="setup_cad_server.ps1")
 
+@app.get("/api/uninstall-cad-server")
+async def download_uninstall_cad_server():
+    return FileResponse("uninstall_cad_server.ps1", media_type="application/octet-stream", filename="uninstall_cad_server.ps1")
+
 @app.get("/api/install-cad-service")
 async def download_install_cad_service():
     return FileResponse("install_cad_service.ps1", media_type="application/octet-stream", filename="install_cad_service.ps1")
