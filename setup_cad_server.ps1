@@ -53,6 +53,11 @@ if (-not (Test-Path $PythonPath)) {
     }
 } else { Write-Info "Python found: $PythonPath" }
 
+Write-Info "Installing Python dependencies (fastapi, uvicorn, python-multipart, pywin32)..."
+$pipProcess = Start-Process -FilePath $PythonPath -ArgumentList "-m pip install fastapi uvicorn python-multipart pywin32" -Wait -NoNewWindow -PassThru
+if ($pipProcess.ExitCode -ne 0) { Write-Warn "Failed to install some dependencies. Server might not start." }
+
+
 Write-Info "Checking for old NSSM service..."
 $service = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($service) {
@@ -65,7 +70,7 @@ if ($service) {
 
 Write-Info "Creating startup script..."
 $BatPath = "$WorkDir\start_cad_server.bat"
-Set-Content -Path $BatPath -Value "@echo off`r`nstart /min `"$PythonPath`" `"$WorkDir\windows_cad_server.py`""
+Set-Content -Path $BatPath -Value "@echo off`r`nstart `"CadServer`" /min `"$PythonPath`" `"$WorkDir\windows_cad_server.py`""
 
 Write-Info "Creating shortcut in Startup folder..."
 $WshShell = New-Object -ComObject WScript.Shell

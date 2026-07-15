@@ -54,6 +54,11 @@ if (-not (Test-Path $PythonPath)) {
     }
 } else { Write-Info "Python found: $PythonPath" }
 
+Write-Info "Installing Python dependencies (fastapi, uvicorn, python-multipart, pywin32)..."
+$pipProcess = Start-Process -FilePath $PythonPath -ArgumentList "-m pip install fastapi uvicorn python-multipart pywin32" -Wait -NoNewWindow -PassThru
+if ($pipProcess.ExitCode -ne 0) { Write-Warn "Failed to install some dependencies. Server might not start." }
+
+
 Write-Info "Creating Desktop folders for MS Office (Session 0 hack)..."
 $desktop1 = "C:\Windows\System32\config\systemprofile\Desktop"
 $desktop2 = "C:\Windows\SysWOW64\config\systemprofile\Desktop"
