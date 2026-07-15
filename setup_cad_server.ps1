@@ -6,8 +6,11 @@
 
 $PortalIp = $args[0]
 if (-not $PortalIp) {
-    Write-Host "Please provide the portal IP and port (e.g., 192.168.88.10:8080) as an argument."
-    exit 1
+    $PortalIp = Read-Host "Please enter the Portal IP (e.g. 192.168.4.57)"
+    if (-not $PortalIp) {
+        Write-Host "No IP provided. Exiting."
+        exit 1
+    }
 }
 
 $CadScriptUrl  = "http://$PortalIp/api/cad-server-script"
@@ -21,7 +24,17 @@ function Write-Warn ($msg) { Write-Host "[WARN] $msg" -ForegroundColor Yellow }
 function Write-ErrorExit ($msg) { Write-Host "[ERROR] $msg" -ForegroundColor Red; exit 1 }
 
 if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-ErrorExit "Script requires administrator privileges. Open PowerShell as Administrator."
+    Write-Warn "Script requires administrator privileges. Prompting for elevation..."
+    $procInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $procInfo.FileName = "powershell.exe"
+    $procInfo.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" `"$PortalIp`""
+    $procInfo.Verb = "runas"
+    try {
+        [System.Diagnostics.Process]::Start($procInfo) | Out-Null
+    } catch {
+        Write-ErrorExit "Elevation failed or cancelled by user."
+    }
+    exit
 }
 
 Write-Info "Creating working directory $WorkDir"
@@ -80,6 +93,25 @@ $Shortcut.TargetPath = $BatPath
 $Shortcut.WorkingDirectory = $WorkDir
 $Shortcut.WindowStyle = 7 # Minimized
 $Shortcut.Save()
+
+Write-Host "`nDo you want to enable Windows Auto-Logon?" -ForegroundColor Cyan
+Write-Host "This allows the CAD server to start automatically without typing your password after a reboot." -ForegroundColor Gray
+$ans = Read-Host "(Y/N)"
+if ($ans -match "^[Yy]") {
+    $AutoUser = Read-Host "Enter your Windows Username (e.g. Administrator or user)"
+    $AutoDomain = Read-Host "Enter your Domain (or computer name, e.g. $env:COMPUTERNAME)"
+    $AutoPass = Read-Host "Enter your Password" -AsSecureString
+    $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($AutoPass)
+    $ClearPass = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+
+    $RegPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
+    Set-ItemProperty -Path $RegPath -Name "AutoAdminLogon" -Value "1"
+    Set-ItemProperty -Path $RegPath -Name "DefaultUserName" -Value $AutoUser
+    Set-ItemProperty -Path $RegPath -Name "DefaultDomainName" -Value $AutoDomain
+    Set-ItemProperty -Path $RegPath -Name "DefaultPassword" -Value $ClearPass
+    Write-Info "Auto-Logon configured for $AutoDomain\$AutoUser"
+}
+
 
 Write-Info "Starting CAD Server as current user..."
 Stop-Process -Name python -Force -ErrorAction SilentlyContinue
