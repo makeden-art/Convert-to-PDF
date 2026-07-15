@@ -640,8 +640,10 @@ window.addEventListener('unhandledrejection', function(e) {
     }
 
     async function loadTree(path) {
+      const isRefresh = (path === undefined || path === currentPath);
+      const savedScroll = isRefresh ? treeList.scrollTop : 0;
       treeList.innerHTML = '<div class="tree-item">Загрузка…</div>';
-      const q = path ? ('?path=' + encodeURIComponent(path)) : '';
+      const q = path !== undefined ? ('?path=' + encodeURIComponent(path)) : (currentPath ? '?path=' + encodeURIComponent(currentPath) : '');
       const r = await fetch('/api/browse' + q);
       const j = await r.json();
       if (!r.ok) {
@@ -706,6 +708,9 @@ window.addEventListener('unhandledrejection', function(e) {
           }
         }
         treeList.appendChild(row);
+      }
+      if (isRefresh) {
+        treeList.scrollTop = savedScroll;
       }
     }
 
