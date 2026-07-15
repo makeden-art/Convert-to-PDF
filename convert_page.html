@@ -710,7 +710,9 @@ window.addEventListener('unhandledrejection', function(e) {
         treeList.appendChild(row);
       }
       if (isRefresh) {
-        treeList.scrollTop = savedScroll;
+        requestAnimationFrame(() => {
+            treeList.scrollTop = savedScroll;
+        });
       }
     }
 
