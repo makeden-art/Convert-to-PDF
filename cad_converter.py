@@ -42,6 +42,8 @@ def convert_cad_to_pdf(
         try:
             if not windows_cad_ip.startswith("http"):
                 windows_cad_ip = "http://" + windows_cad_ip
+            if windows_cad_ip.count(':') == 1:
+                windows_cad_ip += ":8000"
             url = windows_cad_ip.rstrip('/') + '/convert'
             logger.info('Sending CAD file to Windows Server: %s', url)
             
