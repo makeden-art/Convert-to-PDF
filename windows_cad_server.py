@@ -37,7 +37,7 @@ WORK_DIR = os.path.abspath("cad_server_workdir")
 os.makedirs(WORK_DIR, exist_ok=True)
 
 @app.post("/convert")
-async def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.ctb")):
+def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.ctb")):
     # 1. Сохраняем входящий чертеж
     safe_filename = file.filename.replace(" ", "_")
     dwg_path = os.path.join(WORK_DIR, safe_filename)
@@ -106,7 +106,7 @@ async def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.
         return JSONResponse(status_code=500, content={"error": "Не удалось создать PDF. Проверьте консоль сервера.", "log": result.stdout})
 
 @app.post("/convert-office")
-async def convert_office(file: UploadFile = File(...)):
+def convert_office(file: UploadFile = File(...)):
     safe_filename = file.filename.replace(" ", "_")
     ext = os.path.splitext(safe_filename)[1].lower()
     in_path = os.path.join(WORK_DIR, safe_filename)
