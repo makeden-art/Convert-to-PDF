@@ -1113,6 +1113,7 @@ window.addEventListener('unhandledrejection', function(e) {
             }
           }
           showLog(logMsg);
+        } else if (orderedSelections.length > 0) {
           const j = await apiPost('/api/convert-paths', {
             paths: orderedSelections.map(s => s.path),
             merge: false,
