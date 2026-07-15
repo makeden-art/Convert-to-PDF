@@ -53,6 +53,9 @@ try {
     Write-Warn "Failed to update registry. Error: $_"
 }
 
+Write-Info "Removing Windows Firewall rule for port 8000..."
+Remove-NetFirewallRule -DisplayName "CAD Server Port 8000" -ErrorAction SilentlyContinue | Out-Null
+
 Write-Host "`nDONE! The CAD Server has been fully uninstalled and Auto-Logon disabled." -ForegroundColor Green
 Write-Host "Press any key to exit..."
 $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown") | Out-Null

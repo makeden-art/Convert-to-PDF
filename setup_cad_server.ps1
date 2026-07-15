@@ -118,5 +118,8 @@ Stop-Process -Name python -Force -ErrorAction SilentlyContinue
 Stop-Process -Name accoreconsole -Force -ErrorAction SilentlyContinue
 Start-Process -FilePath $BatPath -WindowStyle Hidden
 
+Write-Info "Adding Windows Firewall rule for port 8000..."
+New-NetFirewallRule -DisplayName "CAD Server Port 8000" -Direction Inbound -LocalPort 8000 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue | Out-Null
+
 Write-Host "`nDONE! Server is running in the background as the current user." -ForegroundColor Green
 Write-Host "It will automatically start when you log in to Windows."
