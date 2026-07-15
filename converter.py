@@ -1084,6 +1084,33 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
             finally:
                 shutil.rmtree(pdf_tmp.parent, ignore_errors=True)
             return cad_meta
+            
+        if windows_cad_ip and suffix in {".doc", ".docx", ".xls", ".xlsx", ".rtf"}:
+            try:
+                ip = windows_cad_ip
+                if not ip.startswith("http"):
+                    ip = "http://" + ip
+                url = f"{ip}:8000/convert-office"
+                print(f"Отправляем {src.name} на Windows Server MS Office ({url})...")
+                
+                cmd = [
+                    'curl', '-s', '-o', str(dest),
+                    '-F', f'file=@{str(src)}',
+                    '-w', '%{http_code}',
+                    url
+                ]
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                http_code = res.stdout.strip()
+                
+                if http_code == '200' and dest.exists() and dest.stat().st_size > 0:
+                    return None
+                else:
+                    print(f"Windows server Office error: HTTP {http_code}")
+                    if dest.exists():
+                        dest.unlink()
+            except Exception as e:
+                print(f"Windows server Office fallback: {e}")
+                
         pdf_tmp = _convert_with_libreoffice(src, tmp)
         shutil.move(str(pdf_tmp), str(dest))
         return None

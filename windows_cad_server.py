@@ -6,6 +6,14 @@ from fastapi.responses import FileResponse, JSONResponse
 import uvicorn
 import shutil
 import glob
+import sys
+
+try:
+    import win32com.client
+except ImportError:
+    print("Устанавливаем pywin32 для поддержки MS Office...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pywin32"])
+    import win32com.client
 
 app = FastAPI(title="AutoCAD Print Server")
 
@@ -95,6 +103,64 @@ async def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.
         print("ОШИБКА ПЕЧАТИ:")
         print(result.stdout)
         return JSONResponse(status_code=500, content={"error": "Не удалось создать PDF. Проверьте консоль сервера.", "log": result.stdout})
+
+@app.post("/convert-office")
+async def convert_office(file: UploadFile = File(...)):
+    safe_filename = file.filename.replace(" ", "_")
+    ext = os.path.splitext(safe_filename)[1].lower()
+    in_path = os.path.join(WORK_DIR, safe_filename)
+    pdf_path = in_path.replace(ext, ".pdf")
+    
+    if os.path.exists(pdf_path):
+        os.remove(pdf_path)
+        
+    with open(in_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+        
+    start_time = time.time()
+    try:
+        if ext in [".doc", ".docx", ".rtf"]:
+            print(f"Конвертация Word: {safe_filename}")
+            word = win32com.client.DispatchEx("Word.Application")
+            word.Visible = False
+            word.DisplayAlerts = False
+            doc = word.Documents.Open(in_path, ReadOnly=True)
+            doc.SaveAs(pdf_path, FileFormat=17) # wdFormatPDF
+            doc.Close(SaveChanges=False)
+            word.Quit()
+            
+        elif ext in [".xls", ".xlsx"]:
+            print(f"Конвертация Excel: {safe_filename}")
+            excel = win32com.client.DispatchEx("Excel.Application")
+            excel.Visible = False
+            excel.DisplayAlerts = False
+            wb = excel.Workbooks.Open(in_path, ReadOnly=True)
+            wb.ExportAsFixedFormat(0, pdf_path) # xlTypePDF
+            wb.Close(SaveChanges=False)
+            excel.Quit()
+            
+        else:
+            return JSONResponse(status_code=400, content={"error": f"Формат {ext} не поддерживается"})
+            
+    except Exception as e:
+        import traceback
+        err = traceback.format_exc()
+        print(f"ОШИБКА OFFICE:\n{err}")
+        subprocess.run('taskkill /F /IM WINWORD.EXE', shell=True)
+        subprocess.run('taskkill /F /IM EXCEL.EXE', shell=True)
+        return JSONResponse(status_code=500, content={"error": "Ошибка MS Office", "log": err})
+    finally:
+        try:
+            os.remove(in_path)
+        except:
+            pass
+            
+    print(f"Время выполнения: {time.time() - start_time:.1f} сек")
+    
+    if os.path.exists(pdf_path):
+        return FileResponse(path=pdf_path, filename=safe_filename.replace(ext, ".pdf"), media_type='application/pdf')
+    else:
+        return JSONResponse(status_code=500, content={"error": "PDF не создан.", "log": ""})
 
 if __name__ == "__main__":
     print("--------------------------------------------------")
