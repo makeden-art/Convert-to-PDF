@@ -83,7 +83,7 @@ if ($service) {
 
 Write-Info "Creating startup script..."
 $BatPath = "$WorkDir\start_cad_server.bat"
-Set-Content -Path $BatPath -Value "@echo off`r`nstart `"CadServer`" /min `"$PythonPath`" `"$WorkDir\windows_cad_server.py`""
+Set-Content -Path $BatPath -Value "@echo off`r`nstart `"CadServer`" /min cmd /c `"`"$PythonPath`" `"$WorkDir\windows_cad_server.py`" > `"$WorkDir\server.log`" 2>&1`""
 
 Write-Info "Creating shortcut in Startup folder..."
 $WshShell = New-Object -ComObject WScript.Shell
