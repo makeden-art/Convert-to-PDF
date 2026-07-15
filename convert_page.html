@@ -1259,14 +1259,21 @@
       winToggle.setAttribute('aria-expanded', c ? 'false' : 'true');
     };
 
-    let savedWinIp = localStorage.getItem('win_cad_ip') || '';
+    let savedWinIp = '';
+    try {
+        savedWinIp = localStorage.getItem('win_cad_ip') || '';
+    } catch (e) {
+        console.warn('localStorage disabled', e);
+    }
     if (savedWinIp) {
         winIpInput.value = savedWinIp;
         setTimeout(() => btnWinCheck.click(), 100);
     }
 
     winIpInput.addEventListener('change', () => {
-        localStorage.setItem('win_cad_ip', winIpInput.value.trim());
+        try {
+            localStorage.setItem('win_cad_ip', winIpInput.value.trim());
+        } catch (e) {}
     });
 
     btnWinCheck.onclick = async () => {
@@ -1275,7 +1282,9 @@
             winStatus.textContent = 'Статус: введите IP-адрес';
             return;
         }
-        localStorage.setItem('win_cad_ip', ip);
+        try {
+            localStorage.setItem('win_cad_ip', ip);
+        } catch (e) {}
         btnWinCheck.disabled = true;
         winStatus.textContent = 'Статус: проверка...';
         try {
