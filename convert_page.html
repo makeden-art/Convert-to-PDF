@@ -24,9 +24,10 @@
     .collapse-toggle .chevron { color: #64748b; font-size: 12px; transition: transform .2s ease; }
     .collapse-toggle[aria-expanded="false"] .chevron { transform: rotate(-90deg); }
     .collapse-body.is-collapsed { display: none; }
-    .work-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .work-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; min-width: 0; }
+    .work-grid > * { min-width: 0; }
     @media (max-width: 800px) { .work-grid { grid-template-columns: 1fr; } }
-    .tree-panel { border: 1px solid rgba(148,163,184,.25); border-radius: 12px; background: #0f172a; min-height: 320px; display: flex; flex-direction: column; }
+    .tree-panel { border: 1px solid rgba(148,163,184,.25); border-radius: 12px; background: #0f172a; min-height: 320px; display: flex; flex-direction: column; min-width: 0; }
     .tree-toolbar { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid rgba(148,163,184,.2); flex-wrap: wrap; }
     .tree-path { font-size: 12px; color: #64748b; word-break: break-all; flex: 1; }
     .tree-list { overflow: auto; flex: 1; padding: 8px 0; min-height: 400px; max-height: 65vh; }
@@ -36,8 +37,8 @@
     .tree-item.file { color: #e5e7eb; padding-left: 28px; }
     .tree-item.file.disabled { opacity: .45; cursor: default; }
     .tree-item .icon { width: 18px; text-align: center; flex-shrink: 0; }
-    .tree-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .action-panel { display: flex; flex-direction: column; gap: 10px; }
+    .tree-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .action-panel { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
     .drop { border: 2px dashed rgba(148,163,184,.4); border-radius: 12px; padding: 16px; text-align: center; cursor: pointer; font-size: 13px; color: #9ca3af; }
     .drop:hover { border-color: #38bdf8; color: #7dd3fc; }
     .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
