@@ -30,7 +30,23 @@
     .work-grid > .action-panel { flex: 1; min-width: 300px; }
     @media (max-width: 800px) { .work-grid { flex-direction: column; } .work-grid > .tree-panel { width: 100%; resize: vertical; } }
     .tree-panel { border: 1px solid rgba(148,163,184,.25); border-radius: 12px; background: #0f172a; min-height: 320px; display: flex; flex-direction: column; min-width: 0; }
-    .tree-toolbar { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid rgba(148,163,184,.2); flex-wrap: wrap; }
+    .tree-toolbar { display:flex; align-items:center; gap:6px; padding:12px; background:#1e293b; border-bottom:1px solid #334155; position:sticky; top:0; z-index:10; }
+    .tree-toolbar button { display:flex; align-items:center; gap:6px; font-weight:500; font-size:13px; }
+    
+    .selection-toolbar { 
+      display:none; align-items:center; justify-content:space-between; 
+      padding:10px 16px; background:#312e81; border-bottom:1px solid #4338ca; 
+      position:sticky; top:54px; z-index:9; 
+      animation: slideDown 0.2s ease-out;
+    }
+    .selection-toolbar.active { display:flex; }
+    .selection-toolbar .sel-text { font-weight:600; font-size:14px; color:#e0e7ff; }
+    .selection-toolbar .sel-actions { display:flex; gap:8px; }
+
+    @keyframes slideDown {
+      from { transform: translateY(-10px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
     .tree-path { font-size: 12px; color: #64748b; word-break: break-all; flex: 1; }
     .tree-list { overflow: auto; flex: 1; padding: 8px 0; min-height: 400px; max-height: 65vh; }
     .tree-item { display: flex; align-items: center; gap: 8px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
@@ -221,17 +237,21 @@ window.addEventListener('unhandledrejection', function(e) {
       <div class="work-grid">
         <div class="tree-panel">
           <div class="tree-toolbar">
-            <button type="button" id="tree-up" class="secondary" style="padding:6px 10px" title="Вверх">↑</button>
-            <button type="button" id="tree-refresh" class="secondary" style="padding:6px 10px" title="Обновить">↻</button>
-            <button type="button" id="btn-create-folder" style="padding:6px 10px; background: #059669; color: #fff;" title="Создать папку">📂</button>
-            <button type="button" id="btn-upload-files" style="padding:6px 10px; background: #2563eb; color: #fff;" title="Загрузить файлы">📎</button>
-            <button type="button" id="btn-upload-folder" style="padding:6px 10px; background: #6366f1; color: #fff;" title="Загрузить папку">📁</button>
-            <button type="button" id="btn-delete" style="padding:6px 10px; background: #e11d48; color: #fff;" title="Удалить выбранное">🗑️</button>
-            <button type="button" id="btn-clear-sel" class="secondary" style="padding:6px 10px;" title="Очистить выделение">❌</button>
-            <label style="margin-left: 8px; font-size: 13px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
-              <input type="checkbox" id="chk-select-all" /> Выбрать всё
+            <button type="button" id="tree-up" class="secondary" title="Вверх"><span>↑</span> Наверх</button>
+            <button type="button" id="tree-refresh" class="secondary" title="Обновить"><span>↻</span></button>
+            <span class="tree-path" id="tree-path" style="margin-left: 8px; flex-grow:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">/</span>
+            <button type="button" id="btn-create-folder" style="background: #059669; color: #fff;" title="Создать папку">📂 Создать папку</button>
+            <button type="button" id="btn-upload-files" style="background: #2563eb; color: #fff;" title="Загрузить файлы">📎 Загрузить файлы</button>
+            <label style="margin-left: 8px; font-size: 13px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer; color:#cbd5e1;">
+              <input type="checkbox" id="chk-select-all" /> Все
             </label>
-            <span class="tree-path" id="tree-path" style="margin-left: 8px;">/</span>
+          </div>
+          <div class="selection-toolbar" id="selection-toolbar">
+            <div class="sel-text" id="sel-toolbar-text">Выбрано: 0</div>
+            <div class="sel-actions">
+              <button type="button" id="btn-clear-sel" class="secondary" style="padding:6px 10px; font-size:13px;" title="Очистить выделение">❌ Снять выделение</button>
+              <button type="button" id="btn-delete" style="padding:6px 10px; background: #e11d48; color: #fff; font-size:13px;" title="Удалить выбранное">🗑️ Удалить</button>
+            </div>
           </div>
           <!-- Скрытые поля для загрузки -->
           <input type="file" id="upload-files-input" style="display:none" multiple />
@@ -241,7 +261,7 @@ window.addEventListener('unhandledrejection', function(e) {
         <div class="action-panel">
           <div class="drop" id="drop-upload">📎 Загрузить с компьютера (один или несколько файлов)</div>
           <input type="file" id="file-upload" style="display:none" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.rtf,.dwg,.dxf" />
-        <p class="sel-count" id="sel-count">На сервере: ничего не выбрано</p>
+        <p class="sel-count" id="sel-count" style="display:none;">На сервере: ничего не выбрано</p>
         <p class="sel-detail" id="sel-detail"></p>
         <p class="hint" id="frames-hint" style="display:none; margin-top: 4px;"></p>
         <p class="sel-count" id="upload-count" style="color:#94a3b8">С компьютера: 0</p>
@@ -345,16 +365,20 @@ window.addEventListener('unhandledrejection', function(e) {
       const files = orderedSelections.filter(s => s.type === 'file');
       if (!orderedSelections.length) {
         selCountEl.textContent = 'На сервере: ничего не выбрано';
+        document.getElementById('selection-toolbar').classList.remove('active');
         selDetailEl.textContent = '';
         framesHintEl.style.display = 'none';
         framesHintEl.textContent = '';
         resolvedFileCount = 0;
         return;
       }
+      document.getElementById('selection-toolbar').classList.add('active');
       const parts = [];
       if (dirs.length) parts.push(dirs.length + ' ' + plural(dirs.length, 'папка', 'папки', 'папок'));
       if (files.length) parts.push(files.length + ' ' + plural(files.length, 'файл', 'файла', 'файлов'));
-      selCountEl.textContent = 'На сервере выбрано: ' + parts.join(', ');
+      const text = 'Выбрано: ' + parts.join(', ');
+      selCountEl.textContent = text;
+      document.getElementById('sel-toolbar-text').textContent = text;
       scheduleResolveCount();
     }
 
