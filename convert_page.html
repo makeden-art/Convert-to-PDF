@@ -676,6 +676,8 @@ window.addEventListener('unhandledrejection', function(e) {
       currentPath = j.path || '';
       treePathEl.textContent = currentPath || '/';
       treeList.innerHTML = '';
+      window.currentEntries = j.entries;
+      document.getElementById('chk-select-all').checked = false;
       if (!j.entries.length && j.message) {
         treeList.innerHTML = '<div class="tree-item">' + j.message + '</div>';
         return;
@@ -821,32 +823,32 @@ window.addEventListener('unhandledrejection', function(e) {
     });
 
     document.getElementById('btn-clear-sel').onclick = () => {
-      selectedFiles = [];
-      updateSelectionUI();
-      renderTree(currentItems);
+      orderedSelections = [];
+      updateSelCount();
+      loadTree(currentPath);
       document.getElementById('chk-select-all').checked = false;
     };
 
     document.getElementById('chk-select-all').onchange = (e) => {
       const checked = e.target.checked;
-      if (!currentItems) return;
+      if (!window.currentEntries) return;
       if (checked) {
-        currentItems.forEach(item => toggleSelection(item.path, item.name, item.type, true));
+        window.currentEntries.forEach(item => toggleSelection(item.path, item.name, item.type, true));
       } else {
-        currentItems.forEach(item => toggleSelection(item.path, item.name, item.type, false));
+        window.currentEntries.forEach(item => toggleSelection(item.path, item.name, item.type, false));
       }
-      renderTree(currentItems);
+      loadTree(currentPath);
     };
 
     document.getElementById('btn-delete').onclick = async () => {
-      if (selectedFiles.length === 0) {
+      if (orderedSelections.length === 0) {
         alert('Сначала выберите файлы или папки для удаления!');
         return;
       }
-      if (!confirm(`Вы уверены, что хотите удалить выбранные элементы (${selectedFiles.length} шт.)? Это действие необратимо!`)) return;
+      if (!confirm(`Вы уверены, что хотите удалить выбранные элементы (${orderedSelections.length} шт.)? Это действие необратимо!`)) return;
 
       const fd = new FormData();
-      selectedFiles.forEach(sf => {
+      orderedSelections.forEach(sf => {
         fd.append('paths', sf.path);
         fd.append('is_dirs', sf.type === 'dir' ? 'true' : 'false');
       });
@@ -860,12 +862,11 @@ window.addEventListener('unhandledrejection', function(e) {
           const err = await res.json();
           alert('Ошибка удаления: ' + (err.detail || res.statusText));
         } else {
-          // Успешно удалено. Очищаем из выделенных всё, что удалось удалить.
           const jsonRes = await res.json();
           if (jsonRes.deleted) {
-            selectedFiles = selectedFiles.filter(sf => !jsonRes.deleted.includes(sf.path));
+            orderedSelections = orderedSelections.filter(sf => !jsonRes.deleted.includes(sf.path));
           }
-          updateSelectionUI();
+          updateSelCount();
           loadTree(currentPath);
         }
       } catch (err) {
