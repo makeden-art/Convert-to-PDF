@@ -124,6 +124,8 @@ def convert_office(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, buffer)
         
     start_time = time.time()
+    import pythoncom
+    pythoncom.CoInitialize()
     try:
         if ext in [".doc", ".docx", ".rtf"]:
             print(f"Конвертация Word: {safe_filename}")
@@ -160,6 +162,7 @@ def convert_office(file: UploadFile = File(...)):
             os.remove(in_path)
         except:
             pass
+        pythoncom.CoUninitialize()
             
     print(f"Время выполнения: {time.time() - start_time:.1f} сек")
     
