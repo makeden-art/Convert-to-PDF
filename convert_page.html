@@ -133,10 +133,19 @@
     .num-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
     .num-row input[type=number] { width: 72px; margin: 0; padding: 6px 8px; }
     .num-preview { font-size: 12px; color: #94a3b8; margin: 4px 0 0; }
-    .tree-item .format-badge { font-size: 10px; color: #94a3b8; margin-left: auto; flex-shrink: 0; white-space: nowrap; }
+    .tree-item .format-badge { font-size: 11px; color: #94a3b8; margin-left: auto; flex-shrink: 0; white-space: nowrap; }
     .tree-item.format-warn .format-badge { color: #fbbf24; }
     .tree-item.format-bad { opacity: .55; }
-    .merge-item .format-badge { font-size: 10px; color: #94a3b8; flex-shrink: 0; }
+    
+    /* Увеличенные чекбоксы с акцентным стилем */
+    input[type=checkbox] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+      accent-color: #38bdf8;
+    }
+    
+    .merge-item .format-badge { font-size: 11px; color: #94a3b8; flex-shrink: 0; }
     .merge-item.format-warn .format-badge { color: #fbbf24; }
     .merge-item.format-bad .fname { color: #f87171; }
     .tree-item .name.previewable,
@@ -495,7 +504,12 @@ window.addEventListener('unhandledrejection', function(e) {
 
     async function refreshMergePanel() {
       const mergeOn = document.getElementById('merge').checked;
-      numRow.style.display = mergeOn ? 'flex' : 'none';
+      const btnConvert = document.getElementById('btn-server');
+      mergeOn ? btnConvert.classList.add('visible') : btnConvert.classList.remove('visible');
+
+      // Блок нумерации показываем всегда (и при сборке, и для одиночных)
+      numRow.style.display = 'flex';
+
       if (!mergeOn) {
         mergePanel.classList.remove('visible');
         mergeOrder = [];
@@ -712,10 +726,7 @@ window.addEventListener('unhandledrejection', function(e) {
         const sel = isSelected(e.path);
         row.className = 'tree-item ' + e.type + (e.type === 'file' && !e.convertible ? ' disabled' : '') + (e.type === 'file' ? formatRowClass(e) : '');
         const checked = sel ? 'checked' : '';
-        const canSelect = e.type === 'dir' || (e.convertible && e.format_valid !== false);
-        const cb = canSelect
-          ? '<input type="checkbox" class="chk-box" ' + checked + ' />'
-          : '<span class="chk-box" style="width:16px"></span>';
+        const cb = '<input type="checkbox" class="chk-box" ' + checked + ' />';
 
         if (e.type === 'dir') {
           row.innerHTML = cb + '<span class="icon">📁</span><span class="name">' + e.name + '</span>';
@@ -902,13 +913,32 @@ window.addEventListener('unhandledrejection', function(e) {
     };
 
 
+    function handleUploadSelect(files) {
+      const allowed = ['.pdf','.doc','.docx','.xls','.xlsx','.odt','.ods','.rtf','.dwg','.dxf','.jpg','.jpeg','.png','.tiff','.tif'];
+      const filtered = [];
+      const rejected = [];
+      for (const f of files) {
+        const name = f.name.toLowerCase();
+        const ext = name.includes('.') ? '.' + name.split('.').pop() : '';
+        if (allowed.includes(ext)) {
+          filtered.push(f);
+        } else {
+          rejected.push(f.name);
+        }
+      }
+      if (rejected.length > 0) {
+        alert("Следующие файлы не поддерживаются и не будут загружены:\n" + rejected.join(", ") + "\n\nПоддерживаются: " + allowed.join(", "));
+      }
+      uploadFiles = filtered;
+      updateUploadCount();
+    }
+
     dropUpload.onclick = () => fileUpload.click();
-    fileUpload.onchange = () => { uploadFiles = Array.from(fileUpload.files || []); updateUploadCount(); };
+    fileUpload.onchange = () => handleUploadSelect(Array.from(fileUpload.files || []));
     dropUpload.ondragover = e => e.preventDefault();
     dropUpload.ondrop = e => {
       e.preventDefault();
-      uploadFiles = Array.from(e.dataTransfer.files || []);
-      updateUploadCount();
+      handleUploadSelect(Array.from(e.dataTransfer.files || []));
     };
 
     function showLog(text) { logWork.style.display = 'block'; logWork.textContent = text; }
@@ -1445,6 +1475,10 @@ window.addEventListener('unhandledrejection', function(e) {
 
     
     /* Windows Server setup */
+    const btnDl = document.getElementById('btn-download');
+    const mergeCheck = document.getElementById('merge');
+    const numRow = document.getElementById('num-row');
+    const numPagesCheck = document.getElementById('number-pages');
     const winToggle = document.getElementById('win-toggle');
     const winBody = document.getElementById('win-body');
     const winIpInput = document.getElementById('win-ip');

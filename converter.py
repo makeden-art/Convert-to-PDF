@@ -862,7 +862,13 @@ def convert_paths(
     stats = {"ok": 0, "skipped": 0, "error": 0}
     for src in inputs:
         check_cancelled()
-        item = convert_file_in_place(src, windows_cad_ip=windows_cad_ip)
+        item = convert_file_in_place(
+            src, 
+            windows_cad_ip=windows_cad_ip,
+            number_pages=number_pages,
+            numbering_from_page=numbering_from_page,
+            numbering_start=numbering_start
+        )
         results.append(item)
         stats[item["status"]] = stats.get(item["status"], 0) + 1
 
@@ -1165,19 +1171,48 @@ def _save_merged_pdf(local_pdf: Path, dest: Path) -> Path:
     return dest
 
 
-def convert_file_in_place(src: Path, windows_cad_ip: str = "") -> dict:
+def convert_file_in_place(
+    src: Path,
+    windows_cad_ip: str = "",
+    number_pages: bool = False,
+    numbering_from_page: int | None = None,
+    numbering_start: int = 1,
+) -> dict:
     """Конвертирует файл и кладёт PDF в ту же папку: doc.docx → doc.pdf."""
     src = src.resolve()
     suffix = src.suffix.lower()
     dest = src.with_suffix(".pdf")
 
     if suffix == ".pdf":
-        return {
-            "source": str(src),
-            "pdf": str(src),
-            "status": "skipped",
-            "message": "Уже PDF",
-        }
+        if number_pages:
+            try:
+                if _is_smb_path(src) and _smb_mounted():
+                    with _smb_local_file(src) as local_src:
+                        _apply_pdf_numbering(local_src, from_page=numbering_from_page or 1, start=numbering_start)
+                        saved = _smb_put_file(local_src, src)
+                else:
+                    _apply_pdf_numbering(src, from_page=numbering_from_page or 1, start=numbering_start)
+                    saved = src
+                return {
+                    "source": str(src),
+                    "pdf": str(saved),
+                    "status": "ok",
+                    "message": "Пронумеровано",
+                }
+            except Exception as e:
+                return {
+                    "source": str(src),
+                    "pdf": None,
+                    "status": "error",
+                    "message": str(e),
+                }
+        else:
+            return {
+                "source": str(src),
+                "pdf": str(src),
+                "status": "skipped",
+                "message": "Уже PDF",
+            }
 
     if suffix not in SUPPORTED_OFFICE and suffix not in SUPPORTED_CAD:
         return {
@@ -1193,9 +1228,13 @@ def convert_file_in_place(src: Path, windows_cad_ip: str = "") -> dict:
             with _smb_local_file(src) as local_src:
                 tmp_pdf = local_src.with_suffix(".pdf")
                 cad_meta = _convert_local_file_to_pdf(local_src, tmp_pdf, windows_cad_ip=windows_cad_ip)
+                if number_pages and tmp_pdf.exists():
+                    _apply_pdf_numbering(tmp_pdf, from_page=numbering_from_page or 1, start=numbering_start)
                 saved = _smb_put_file(tmp_pdf, dest)
         else:
             cad_meta = _convert_local_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip)
+            if number_pages and dest.exists():
+                _apply_pdf_numbering(dest, from_page=numbering_from_page or 1, start=numbering_start)
             saved = dest
         msg = "Сконвертировано"
         if cad_meta and cad_meta.get("engine") == "ezdxf" and cad_meta.get("fallback"):
