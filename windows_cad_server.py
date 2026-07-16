@@ -33,7 +33,8 @@ def find_accoreconsole():
     return r"C:\Program Files\Autodesk\AutoCAD 2022\accoreconsole.exe"
 
 ACAD_PATH = find_accoreconsole()
-WORK_DIR = os.path.abspath("cad_server_workdir")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+WORK_DIR = os.path.join(SCRIPT_DIR, "cad_server_workdir")
 os.makedirs(WORK_DIR, exist_ok=True)
 
 @app.post("/convert")
