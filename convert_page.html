@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body { font-family: system-ui, sans-serif; background: #0f172a; color: #e5e7eb; margin: 0; min-height: 100vh; padding: 24px; }
-    .wrap { max-width: 960px; margin: 0 auto; }
+    .wrap { max-width: 1400px; margin: 0 auto; }
     .box { padding: 24px; background: #111827; border: 1px solid rgba(148,163,184,.3); border-radius: 16px; margin-bottom: 20px; }
     h1 { margin: 0 0 8px; color: #38bdf8; font-size: 22px; }
     h2 { margin: 0 0 12px; color: #7dd3fc; font-size: 16px; }
@@ -23,10 +23,12 @@
     .collapse-toggle { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; background: transparent; color: #7dd3fc; border: none; padding: 0; margin: 0 0 12px; font-size: 16px; font-weight: 600; cursor: pointer; text-align: left; }
     .collapse-toggle .chevron { color: #64748b; font-size: 12px; transition: transform .2s ease; }
     .collapse-toggle[aria-expanded="false"] .chevron { transform: rotate(-90deg); }
-    .collapse-body.is-collapsed { display: none; }
-    .work-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; min-width: 0; }
-    .work-grid > * { min-width: 0; }
-    @media (max-width: 800px) { .work-grid { grid-template-columns: 1fr; } }
+    .collapse-body { overflow: hidden; transition: max-height .3s ease; max-height: 1000px; }
+    .collapse-body.is-collapsed { max-height: 0; }
+    .work-grid { display: flex; gap: 16px; min-width: 0; }
+    .work-grid > .tree-panel { width: 50%; min-width: 300px; resize: horizontal; overflow: hidden; }
+    .work-grid > .action-panel { flex: 1; min-width: 300px; }
+    @media (max-width: 800px) { .work-grid { flex-direction: column; } .work-grid > .tree-panel { width: 100%; resize: vertical; } }
     .tree-panel { border: 1px solid rgba(148,163,184,.25); border-radius: 12px; background: #0f172a; min-height: 320px; display: flex; flex-direction: column; min-width: 0; }
     .tree-toolbar { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid rgba(148,163,184,.2); flex-wrap: wrap; }
     .tree-path { font-size: 12px; color: #64748b; word-break: break-all; flex: 1; }
