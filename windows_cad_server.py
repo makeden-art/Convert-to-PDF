@@ -62,9 +62,8 @@ def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.ctb"))
     shutil.copy2(dwg_path, safe_dwg_path)
 
     scr_path = os.path.join(temp_dir, f"print_{safe_uid}.scr")
-    # Тот самый старый стабильный скрипт с EXPORT PDF, но с добавлением EXPERT 5
-    # и проверкой TILEMODE (Model Space vs Paper Space) для правильных аргументов
-    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setq dict (dictsearch (namedobjdict) "ACAD_LAYOUT")) (while (setq item (assoc 350 dict)) (setq ent (cdr item)) (setq edata (entget ent)) (if (assoc 7 edata) (setq edata (subst (cons 7 "{ctb}") (assoc 7 edata) edata)) (setq edata (append edata (list (cons 7 "{ctb}"))))) (setq flags (cdr (assoc 70 edata))) (if flags (setq edata (subst (cons 70 (logior flags 32)) (assoc 70 edata) edata))) (entmod edata) (setq dict (cdr (member item dict)))) (if (= (getvar "TILEMODE") 1) (command "_.-EXPORT" "_PDF" "_Extents" "_No" "{safe_pdf_path.replace("\\", "/")}") (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}")) (command "_.QUIT" "_Y")"""
+    # Скрипт печатает ТОЛЬКО Листы (Paper Space). Если листов нет, выдает ошибку.
+    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setq dict (dictsearch (namedobjdict) "ACAD_LAYOUT")) (while (setq item (assoc 350 dict)) (setq ent (cdr item)) (setq edata (entget ent)) (if (assoc 7 edata) (setq edata (subst (cons 7 "{ctb}") (assoc 7 edata) edata)) (setq edata (append edata (list (cons 7 "{ctb}"))))) (setq flags (cdr (assoc 70 edata))) (if flags (setq edata (subst (cons 70 (logior flags 32)) (assoc 70 edata) edata))) (entmod edata) (setq dict (cdr (member item dict)))) (if (not (layoutlist)) (prompt "\\nERROR_NO_LAYOUTS\\n") (progn (setvar "TILEMODE" 0) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}"))) (command "_.QUIT" "_Y")"""
     
     # Записываем скрипт в одну строку в кодировке ANSI для стабильности
     with open(scr_path, "w", encoding="cp1251") as f:
@@ -82,6 +81,12 @@ def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.ctb"))
         print(f"ТАЙМАУТ ПЕЧАТИ (300 сек)! Убиваем зависший процесс AutoCAD для файла: {safe_filename}")
         subprocess.run('taskkill /F /IM accoreconsole.exe', shell=True)
         return JSONResponse(status_code=504, content={"error": "AutoCAD timeout 300s. Process killed.", "log": ""})
+    
+    # Проверяем, не выдал ли AutoCAD ошибку об отсутствии листов
+    if "ERROR_NO_LAYOUTS" in result.stdout:
+        print(f"ОШИБКА: В чертеже {safe_filename} нет настроенных листов!")
+        return JSONResponse(status_code=400, content={"error": "В чертеже нет ни одного листа (Layout).", "log": result.stdout})
+
     
     # Копируем PDF обратно
     if os.path.exists(safe_pdf_path):
