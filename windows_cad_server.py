@@ -62,8 +62,8 @@ def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.ctb"))
     shutil.copy2(dwg_path, safe_dwg_path)
 
     scr_path = os.path.join(temp_dir, f"print_{safe_uid}.scr")
-    # Скрипт печатает ТОЛЬКО Листы (Paper Space). Если листов нет, выдает ошибку.
-    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setq dict (dictsearch (namedobjdict) "ACAD_LAYOUT")) (while (setq item (assoc 350 dict)) (setq ent (cdr item)) (setq edata (entget ent)) (if (assoc 7 edata) (setq edata (subst (cons 7 "{ctb}") (assoc 7 edata) edata)) (setq edata (append edata (list (cons 7 "{ctb}"))))) (setq flags (cdr (assoc 70 edata))) (if flags (setq edata (subst (cons 70 (logior flags 32)) (assoc 70 edata) edata))) (entmod edata) (setq dict (cdr (member item dict)))) (if (not (layoutlist)) (prompt "\\nERROR_NO_LAYOUTS\\n") (progn (setvar "TILEMODE" 0) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}"))) (command "_.QUIT" "_Y")"""
+    # Скрипт печатает ТОЛЬКО Листы (Paper Space). Функции layoutlist в accoreconsole нет.
+    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setq dict (dictsearch (namedobjdict) "ACAD_LAYOUT")) (while (setq item (assoc 350 dict)) (setq ent (cdr item)) (setq edata (entget ent)) (if (assoc 7 edata) (setq edata (subst (cons 7 "{ctb}") (assoc 7 edata) edata)) (setq edata (append edata (list (cons 7 "{ctb}"))))) (setq flags (cdr (assoc 70 edata))) (if flags (setq edata (subst (cons 70 (logior flags 32)) (assoc 70 edata) edata))) (entmod edata) (setq dict (cdr (member item dict)))) (setvar "TILEMODE" 0) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}") (command "_.QUIT" "_Y")"""
     
     # Записываем скрипт в одну строку в кодировке ANSI для стабильности
     with open(scr_path, "w", encoding="cp1251") as f:
