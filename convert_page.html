@@ -226,6 +226,11 @@ window.addEventListener('unhandledrejection', function(e) {
             <button type="button" id="btn-create-folder" style="padding:6px 10px; background: #059669; color: #fff;" title="Создать папку">📂</button>
             <button type="button" id="btn-upload-files" style="padding:6px 10px; background: #2563eb; color: #fff;" title="Загрузить файлы">📎</button>
             <button type="button" id="btn-upload-folder" style="padding:6px 10px; background: #6366f1; color: #fff;" title="Загрузить папку">📁</button>
+            <button type="button" id="btn-delete" style="padding:6px 10px; background: #e11d48; color: #fff;" title="Удалить выбранное">🗑️</button>
+            <button type="button" id="btn-clear-sel" class="secondary" style="padding:6px 10px;" title="Очистить выделение">❌</button>
+            <label style="margin-left: 8px; font-size: 13px; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;">
+              <input type="checkbox" id="chk-select-all" /> Выбрать всё
+            </label>
             <span class="tree-path" id="tree-path" style="margin-left: 8px;">/</span>
           </div>
           <!-- Скрытые поля для загрузки -->
@@ -814,6 +819,61 @@ window.addEventListener('unhandledrejection', function(e) {
         btnObj.innerText = originalText;
       }
     });
+
+    document.getElementById('btn-clear-sel').onclick = () => {
+      selectedFiles = [];
+      updateSelectionUI();
+      renderTree(currentItems);
+      document.getElementById('chk-select-all').checked = false;
+    };
+
+    document.getElementById('chk-select-all').onchange = (e) => {
+      const checked = e.target.checked;
+      if (!currentItems) return;
+      if (checked) {
+        currentItems.forEach(item => toggleSelection(item.path, item.name, item.type, true));
+      } else {
+        currentItems.forEach(item => toggleSelection(item.path, item.name, item.type, false));
+      }
+      renderTree(currentItems);
+    };
+
+    document.getElementById('btn-delete').onclick = async () => {
+      if (selectedFiles.length === 0) {
+        alert('Сначала выберите файлы или папки для удаления!');
+        return;
+      }
+      if (!confirm(`Вы уверены, что хотите удалить выбранные элементы (${selectedFiles.length} шт.)? Это действие необратимо!`)) return;
+
+      const fd = new FormData();
+      selectedFiles.forEach(sf => {
+        fd.append('paths', sf.path);
+        fd.append('is_dirs', sf.type === 'dir' ? 'true' : 'false');
+      });
+
+      const btnObj = document.getElementById('btn-delete');
+      const originalText = btnObj.innerText;
+      btnObj.innerText = '⏳';
+      try {
+        const res = await fetch('/api/delete-smb', { method: 'POST', body: fd });
+        if (!res.ok) {
+          const err = await res.json();
+          alert('Ошибка удаления: ' + (err.detail || res.statusText));
+        } else {
+          // Успешно удалено. Очищаем из выделенных всё, что удалось удалить.
+          const jsonRes = await res.json();
+          if (jsonRes.deleted) {
+            selectedFiles = selectedFiles.filter(sf => !jsonRes.deleted.includes(sf.path));
+          }
+          updateSelectionUI();
+          loadTree(currentPath);
+        }
+      } catch (err) {
+        alert('Ошибка сети: ' + err.message);
+      } finally {
+        btnObj.innerText = originalText;
+      }
+    };
 
 
     dropUpload.onclick = () => fileUpload.click();

@@ -629,6 +629,21 @@ def _smb_mkdir(virtual_path: Path):
         if "NT_STATUS_OBJECT_NAME_COLLISION" not in str(e):
             raise
 
+def _smb_delete(virtual_path: Path, is_dir: bool):
+    """Удалить файл или папку на SMB."""
+    remote_dir, remote_name = _virtual_smb_remote(virtual_path)
+    if not remote_name:
+        remote_name = virtual_path.name
+        remote_dir, _ = _virtual_smb_remote(virtual_path.parent)
+    quoted_remote = remote_name.replace('"', '\\"')
+    
+    cmd = f'deltree "{quoted_remote}"' if is_dir else f'rm "{quoted_remote}"'
+    try:
+        _run_smbclient(remote_dir, cmd, timeout=30)
+    except ValueError as e:
+        if "NT_STATUS_NO_SUCH_FILE" not in str(e) and "NT_STATUS_OBJECT_NAME_NOT_FOUND" not in str(e):
+            raise
+
 def _smb_put_file(local_path: Path, virtual_path: Path) -> Path:
     """Загрузить файл на SMB. Возвращает фактический путь (может отличаться при блокировке)."""
     remote_dir, remote_name = _virtual_smb_remote(virtual_path)

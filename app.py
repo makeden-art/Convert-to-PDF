@@ -43,6 +43,7 @@ from converter import (
     _convert_with_libreoffice,
     _smb_put_file,
     _smb_mkdir,
+    _smb_delete,
     _is_smb_path,
     _smb_mounted,
 )
@@ -433,19 +434,41 @@ async def api_convert_paths(body: PathsRequest):
 
 @app.post("/api/create-folder-smb")
 async def api_create_folder_smb(target_dir: str = Form(...), folder_name: str = Form(...)):
-    if not target_dir or not folder_name:
-        raise HTTPException(status_code=400, detail="Missing parameters")
+    """Создает новую папку на SMB."""
+    if not _is_smb_path(target_dir):
+        raise HTTPException(status_code=400, detail="Только для SMB-шар")
+    if not _smb_mounted():
+        raise HTTPException(status_code=500, detail="SMB шара не примонтирована")
     
     target_path = Path(target_dir)
-    if not _is_smb_path(target_path) or not _smb_mounted():
-        raise HTTPException(status_code=400, detail="Target is not a mounted SMB share")
-        
+    new_folder = target_path / folder_name
     try:
-        new_dir = target_path / folder_name
-        await asyncio.to_thread(_smb_mkdir, new_dir)
-        return {"status": "ok", "path": str(new_dir)}
+        await asyncio.to_thread(_smb_mkdir, new_folder)
+        return {"status": "ok", "path": str(new_folder)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/delete-smb")
+async def api_delete_smb(paths: list[str] = Form(...), is_dirs: list[bool] = Form(...)):
+    """Удаляет файлы или папки на SMB."""
+    if not _smb_mounted():
+        raise HTTPException(status_code=500, detail="SMB шара не примонтирована")
+    
+    deleted = []
+    errors = []
+    for path_str, is_dir in zip(paths, is_dirs):
+        if not _is_smb_path(path_str):
+            errors.append({"path": path_str, "error": "Не SMB путь"})
+            continue
+        try:
+            await asyncio.to_thread(_smb_delete, Path(path_str), is_dir)
+            deleted.append(path_str)
+        except Exception as e:
+            errors.append({"path": path_str, "error": str(e)})
+            
+    if errors and not deleted:
+        raise HTTPException(status_code=500, detail=f"Ошибки при удалении: {errors}")
+    return {"status": "ok", "deleted": deleted, "errors": errors}
 
 @app.post("/api/upload-to-smb")
 async def api_upload_to_smb(
