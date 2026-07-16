@@ -1090,7 +1090,9 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
                 ip = windows_cad_ip
                 if not ip.startswith("http"):
                     ip = "http://" + ip
-                url = f"{ip}:8000/convert-office"
+                if ip.count(':') == 1:
+                    ip += ":8000"
+                url = f"{ip.rstrip('/')}/convert-office"
                 print(f"Отправляем {src.name} на Windows Server MS Office ({url})...")
                 
                 cmd = [
