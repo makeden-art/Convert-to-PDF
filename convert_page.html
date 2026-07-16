@@ -885,7 +885,7 @@ window.addEventListener('unhandledrejection', function(e) {
         const res = await fetch('/api/delete-smb', { method: 'POST', body: fd });
         if (!res.ok) {
           const err = await res.json();
-          alert('Ошибка удаления: ' + (err.detail || res.statusText));
+          alert('Ошибка удаления (raw): ' + JSON.stringify(err));
         } else {
           const jsonRes = await res.json();
           if (jsonRes.deleted) {
