@@ -448,27 +448,38 @@ async def api_create_folder_smb(target_dir: str = Form(...), folder_name: str = 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+from fastapi.responses import JSONResponse
+import traceback
+
 @app.post("/api/delete-smb")
-async def api_delete_smb(paths: list[str] = Form(...), is_dirs: list[bool] = Form(...)):
+async def api_delete_smb(request: Request):
     """Удаляет файлы или папки на SMB."""
-    if not _smb_mounted():
-        raise HTTPException(status_code=500, detail="SMB шара не примонтирована")
-    
-    deleted = []
-    errors = []
-    for path_str, is_dir in zip(paths, is_dirs):
-        if not _is_smb_path(path_str):
-            errors.append({"path": path_str, "error": "Не SMB путь"})
-            continue
-        try:
-            await asyncio.to_thread(_smb_delete, Path(path_str), is_dir)
-            deleted.append(path_str)
-        except Exception as e:
-            errors.append({"path": path_str, "error": str(e)})
-            
-    if errors and not deleted:
-        raise HTTPException(status_code=500, detail=f"Ошибки при удалении: {errors}")
-    return {"status": "ok", "deleted": deleted, "errors": errors}
+    try:
+        form = await request.form()
+        paths = form.getlist('paths')
+        is_dirs_str = form.getlist('is_dirs')
+        is_dirs = [s.lower() == 'true' for s in is_dirs_str]
+        
+        if not _smb_mounted():
+            return JSONResponse(status_code=500, content={"detail": "SMB шара не примонтирована"})
+        
+        deleted = []
+        errors = []
+        for path_str, is_dir in zip(paths, is_dirs):
+            if not _is_smb_path(path_str):
+                errors.append({"path": path_str, "error": "Не SMB путь"})
+                continue
+            try:
+                await asyncio.to_thread(_smb_delete, Path(path_str), is_dir)
+                deleted.append(path_str)
+            except Exception as e:
+                errors.append({"path": path_str, "error": str(e)})
+                
+        if errors and not deleted:
+            return JSONResponse(status_code=500, content={"detail": f"Ошибки при удалении: {errors}"})
+        return {"status": "ok", "deleted": deleted, "errors": errors}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"detail": traceback.format_exc()})
 
 @app.post("/api/upload-to-smb")
 async def api_upload_to_smb(
