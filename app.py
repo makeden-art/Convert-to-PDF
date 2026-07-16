@@ -435,7 +435,7 @@ async def api_convert_paths(body: PathsRequest):
 @app.post("/api/create-folder-smb")
 async def api_create_folder_smb(target_dir: str = Form(...), folder_name: str = Form(...)):
     """Создает новую папку на SMB."""
-    if not _is_smb_path(target_dir):
+    if not _is_smb_path(Path(target_dir)):
         raise HTTPException(status_code=400, detail="Только для SMB-шар")
     if not _smb_mounted():
         raise HTTPException(status_code=500, detail="SMB шара не примонтирована")
@@ -466,7 +466,7 @@ async def api_delete_smb(request: Request):
         deleted = []
         errors = []
         for path_str, is_dir in zip(paths, is_dirs):
-            if not _is_smb_path(path_str):
+            if not _is_smb_path(Path(path_str)):
                 errors.append({"path": path_str, "error": "Не SMB путь"})
                 continue
             try:
