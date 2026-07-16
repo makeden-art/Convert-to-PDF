@@ -221,10 +221,16 @@ window.addEventListener('unhandledrejection', function(e) {
       <div class="work-grid">
         <div class="tree-panel">
           <div class="tree-toolbar">
-            <button type="button" id="tree-up" class="secondary" style="padding:6px 10px">↑</button>
-            <button type="button" id="tree-refresh" class="secondary" style="padding:6px 10px">↻</button>
-            <span class="tree-path" id="tree-path">/</span>
+            <button type="button" id="tree-up" class="secondary" style="padding:6px 10px" title="Вверх">↑</button>
+            <button type="button" id="tree-refresh" class="secondary" style="padding:6px 10px" title="Обновить">↻</button>
+            <button type="button" id="btn-create-folder" style="padding:6px 10px; background: #059669; color: #fff;" title="Создать папку">📂</button>
+            <button type="button" id="btn-upload-files" style="padding:6px 10px; background: #2563eb; color: #fff;" title="Загрузить файлы">📎</button>
+            <button type="button" id="btn-upload-folder" style="padding:6px 10px; background: #6366f1; color: #fff;" title="Загрузить папку">📁</button>
+            <span class="tree-path" id="tree-path" style="margin-left: 8px;">/</span>
           </div>
+          <!-- Скрытые поля для загрузки -->
+          <input type="file" id="upload-files-input" style="display:none" multiple />
+          <input type="file" id="upload-folder-input" style="display:none" webkitdirectory directory multiple />
           <div class="tree-list" id="tree-list"></div>
         </div>
         <div class="action-panel">
@@ -731,6 +737,84 @@ window.addEventListener('unhandledrejection', function(e) {
       if (j.parent !== null && j.parent !== undefined) await loadTree(j.parent);
     };
     document.getElementById('tree-refresh').onclick = () => loadTree(currentPath);
+
+    // Загрузка на SMB
+    const upFilesInput = document.getElementById('upload-files-input');
+    const upFolderInput = document.getElementById('upload-folder-input');
+    
+    document.getElementById('btn-upload-files').addEventListener('click', () => upFilesInput.click());
+    document.getElementById('btn-upload-folder').addEventListener('click', () => upFolderInput.click());
+    
+    async function handleSmbUpload(e) {
+      if (!currentPath) {
+        alert('Сначала выберите папку на сервере куда загружать файлы!');
+        e.target.value = '';
+        return;
+      }
+      const files = e.target.files;
+      if (files.length === 0) return;
+      
+      const fd = new FormData();
+      fd.append('target_dir', currentPath);
+      for (let i = 0; i < files.length; i++) {
+        fd.append('files', files[i]);
+        const relativePath = files[i].webkitRelativePath || files[i].name;
+        fd.append('paths', relativePath);
+      }
+      
+      const btnObj = e.target === upFolderInput ? document.getElementById('btn-upload-folder') : document.getElementById('btn-upload-files');
+      const originalText = btnObj.innerText;
+      btnObj.innerText = '⏳';
+      try {
+        const res = await fetch('/api/upload-to-smb', { method: 'POST', body: fd });
+        if (!res.ok) {
+          const err = await res.json();
+          alert('Ошибка загрузки: ' + (err.detail || res.statusText));
+        } else {
+          loadTree(currentPath);
+        }
+      } catch (err) {
+        alert('Ошибка сети: ' + err.message);
+      } finally {
+        btnObj.innerText = originalText;
+        e.target.value = '';
+      }
+    }
+    
+    upFilesInput.addEventListener('change', handleSmbUpload);
+    upFolderInput.addEventListener('change', handleSmbUpload);
+
+    // Создание папки
+    document.getElementById('btn-create-folder').addEventListener('click', async () => {
+      if (!currentPath) {
+        alert('Сначала выберите папку на сервере где создать новую!');
+        return;
+      }
+      const folderName = prompt('Введите имя новой папки:');
+      if (!folderName) return;
+      
+      const fd = new FormData();
+      fd.append('target_dir', currentPath);
+      fd.append('folder_name', folderName);
+      
+      const btnObj = document.getElementById('btn-create-folder');
+      const originalText = btnObj.innerText;
+      btnObj.innerText = '⏳';
+      try {
+        const res = await fetch('/api/create-folder-smb', { method: 'POST', body: fd });
+        if (!res.ok) {
+          const err = await res.json();
+          alert('Ошибка создания папки: ' + (err.detail || res.statusText));
+        } else {
+          loadTree(currentPath);
+        }
+      } catch (err) {
+        alert('Ошибка сети: ' + err.message);
+      } finally {
+        btnObj.innerText = originalText;
+      }
+    });
+
 
     dropUpload.onclick = () => fileUpload.click();
     fileUpload.onchange = () => { uploadFiles = Array.from(fileUpload.files || []); updateUploadCount(); };

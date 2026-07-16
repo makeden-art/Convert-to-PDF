@@ -616,6 +616,19 @@ def _smb_local_file(virtual_path: Path):
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+def _smb_mkdir(virtual_path: Path):
+    """Создать папку на SMB."""
+    remote_dir, remote_name = _virtual_smb_remote(virtual_path)
+    if not remote_name:
+        remote_name = virtual_path.name
+        remote_dir, _ = _virtual_smb_remote(virtual_path.parent)
+    quoted_remote = remote_name.replace('"', '\\"')
+    try:
+        _run_smbclient(remote_dir, f'mkdir "{quoted_remote}"', timeout=30)
+    except ValueError as e:
+        if "NT_STATUS_OBJECT_NAME_COLLISION" not in str(e):
+            raise
+
 def _smb_put_file(local_path: Path, virtual_path: Path) -> Path:
     """Загрузить файл на SMB. Возвращает фактический путь (может отличаться при блокировке)."""
     remote_dir, remote_name = _virtual_smb_remote(virtual_path)

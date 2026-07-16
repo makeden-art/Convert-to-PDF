@@ -41,6 +41,10 @@ from converter import (
     validate_file,
     _validate_file_format_or_raise,
     _convert_with_libreoffice,
+    _smb_put_file,
+    _smb_mkdir,
+    _is_smb_path,
+    _smb_mounted,
 )
 
 MAX_MERGE_FILES = int(os.getenv("CONVERT_MAX_MERGE_FILES", "50"))
@@ -426,6 +430,76 @@ async def api_convert_paths(body: PathsRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
+
+@app.post("/api/create-folder-smb")
+async def api_create_folder_smb(target_dir: str = Form(...), folder_name: str = Form(...)):
+    if not target_dir or not folder_name:
+        raise HTTPException(status_code=400, detail="Missing parameters")
+    
+    target_path = Path(target_dir)
+    if not _is_smb_path(target_path) or not _smb_mounted():
+        raise HTTPException(status_code=400, detail="Target is not a mounted SMB share")
+        
+    try:
+        new_dir = target_path / folder_name
+        await asyncio.to_thread(_smb_mkdir, new_dir)
+        return {"status": "ok", "path": str(new_dir)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/upload-to-smb")
+async def api_upload_to_smb(
+    target_dir: str = Form(...),
+    files: list[UploadFile] = File(...),
+    paths: list[str] = Form(...)
+):
+    if not files or not paths or len(files) != len(paths):
+        raise HTTPException(status_code=400, detail="Invalid files or paths")
+        
+    target_path = Path(target_dir)
+    is_smb = _is_smb_path(target_path) and _smb_mounted()
+    
+    tmp = Path(tempfile.mkdtemp(prefix="upload_smb_"))
+    try:
+        created_dirs = set()
+        for i, uf in enumerate(files):
+            rel_path = paths[i]
+            # Защита от выхода за пределы папки
+            rel_path = rel_path.lstrip("/\\")
+            if ".." in rel_path:
+                continue
+                
+            local_dest = tmp / rel_path
+            local_dest.parent.mkdir(parents=True, exist_ok=True)
+            local_dest.write_bytes(await uf.read())
+            
+            final_target = target_path / rel_path
+            if is_smb:
+                # Если папка новая, нужно создать ее на SMB
+                parent_dir = final_target.parent
+                if str(parent_dir) not in created_dirs and parent_dir != target_path:
+                    # Создаем все родительские папки
+                    parts = rel_path.split("/")[:-1]
+                    cur = target_path
+                    for p in parts:
+                        cur = cur / p
+                        if str(cur) not in created_dirs:
+                            try:
+                                await asyncio.to_thread(_smb_mkdir, cur)
+                            except Exception:
+                                pass
+                            created_dirs.add(str(cur))
+                
+                await asyncio.to_thread(_smb_put_file, local_dest, final_target)
+            else:
+                final_target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(local_dest, final_target)
+                
+        return {"status": "ok", "count": len(files)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 @app.post("/api/convert-merge-download")
 async def api_convert_merge_download(body: PathsRequest):
