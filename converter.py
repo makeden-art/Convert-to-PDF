@@ -984,12 +984,10 @@ def _apply_pdf_numbering(path: Path, *, from_page: int, start: int) -> None:
                 continue
             num = str(first_num + (page_num - page_from))
             rect = page.rect
-            mask = fitz.Rect(rect.width - 56, 8, rect.width - 4, 28)
-            page.draw_rect(mask, color=(1, 1, 1), fill=(1, 1, 1))
             page.insert_text(
-                (rect.width - 40, 20),
+                (rect.width - 40, 12),
                 num,
-                fontsize=10,
+                fontsize=11,
                 fontname="helv",
                 color=(0, 0, 0),
             )
