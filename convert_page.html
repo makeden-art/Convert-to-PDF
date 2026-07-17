@@ -293,8 +293,8 @@ window.addEventListener('unhandledrejection', function(e) {
           <label for="output-name">Имя итогового PDF (при сборке)</label>
           <input type="text" id="output-name" value="сборка.pdf" />
           <div class="btn-row">
-            <button type="button" id="btn-server">Конвертировать на сервере</button>
-            <button type="button" id="btn-download">Скачать PDF</button>
+            <button type="button" id="btn-server" style="display:none;">Конвертировать на сервере</button>
+            <button type="button" id="btn-download" style="display:none;">Скачать PDF</button>
           </div>
           <pre id="log-work" style="display:none"></pre>
           <button type="button" id="btn-cancel-active">Отменить задание</button>
@@ -506,9 +506,16 @@ window.addEventListener('unhandledrejection', function(e) {
       const mergeOn = document.getElementById('merge').checked;
       const numberPages = document.getElementById('number-pages').checked;
       const btnConvert = document.getElementById('btn-server');
+      const btnDownload = document.getElementById('btn-download');
       
       const hasFiles = orderedSelections.length > 0 || uploadFiles.length > 0;
-      hasFiles ? btnConvert.classList.add('visible') : btnConvert.classList.remove('visible');
+      if (hasFiles) {
+        btnConvert.style.display = 'inline-block';
+        btnDownload.style.display = 'inline-block';
+      } else {
+        btnConvert.style.display = 'none';
+        btnDownload.style.display = 'none';
+      }
       
       if (mergeOn) {
         btnConvert.textContent = 'Собрать и конвертировать';
