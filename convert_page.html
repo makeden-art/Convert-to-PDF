@@ -1371,7 +1371,10 @@ window.addEventListener('unhandledrejection', function(e) {
             paths: orderedSelections.map(s => s.path),
             merge: false,
             recursive: document.getElementById('recursive').checked,
-            windows_cad_ip: winIpInput.value.trim()
+            windows_cad_ip: winIpInput.value.trim(),
+            number_pages,
+            numbering_from_page,
+            numbering_start
           });
           showLog('Готово: ' + j.stats.ok + ' OK, ошибок ' + j.stats.error + '\n' +
             j.files.map(f => f.status + ' | ' + f.source).join('\n'));

@@ -46,6 +46,7 @@ from converter import (
     _smb_delete,
     _is_smb_path,
     _smb_mounted,
+    _apply_pdf_numbering,
 )
 
 MAX_MERGE_FILES = int(os.getenv("CONVERT_MAX_MERGE_FILES", "50"))
@@ -679,6 +680,9 @@ async def api_convert_merge(
 async def api_convert(
     file: UploadFile = File(...),
     windows_cad_ip: str = Form(""),
+    number_pages: bool = Form(False),
+    numbering_from_page: int = Form(1),
+    numbering_start: int = Form(1),
 ):
     suffix = Path(file.filename or "upload").suffix.lower()
     if suffix not in SUPPORTED_ALL:
@@ -702,6 +706,9 @@ async def api_convert(
             shutil.move(str(pdf_tmp), str(out))
         else:
             out = _convert_with_libreoffice(src, tmp)
+
+        if number_pages and out.exists():
+            _apply_pdf_numbering(out, from_page=numbering_from_page or 1, start=numbering_start)
 
         return FileResponse(
             path=str(out),

@@ -989,7 +989,7 @@ def _apply_pdf_numbering(path: Path, *, from_page: int, start: int) -> None:
             scale = min(rect.width, rect.height) / 595.0
             fs = max(10, int(14 * scale))
             x_off = 45 * scale
-            y_off = 35 * scale
+            y_off = 12 * scale
 
             p = fitz.Point(rect.x1 - x_off, rect.y0 + y_off)
             p = p * page.derotation_matrix
