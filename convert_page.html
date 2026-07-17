@@ -504,8 +504,19 @@ window.addEventListener('unhandledrejection', function(e) {
 
     async function refreshMergePanel() {
       const mergeOn = document.getElementById('merge').checked;
+      const numberPages = document.getElementById('number-pages').checked;
       const btnConvert = document.getElementById('btn-server');
-      mergeOn ? btnConvert.classList.add('visible') : btnConvert.classList.remove('visible');
+      
+      const hasFiles = orderedSelections.length > 0 || uploadFiles.length > 0;
+      hasFiles ? btnConvert.classList.add('visible') : btnConvert.classList.remove('visible');
+      
+      if (mergeOn) {
+        btnConvert.textContent = 'Собрать и конвертировать';
+      } else if (numberPages) {
+        btnConvert.textContent = 'Пронумеровать / Конвертировать';
+      } else {
+        btnConvert.textContent = 'Конвертировать на сервере';
+      }
 
       // Блок нумерации показываем всегда (и при сборке, и для одиночных)
       numRow.style.display = 'flex';
@@ -940,6 +951,17 @@ window.addEventListener('unhandledrejection', function(e) {
       e.preventDefault();
       handleUploadSelect(Array.from(e.dataTransfer.files || []));
     };
+
+    const treePanel = document.querySelector('.tree-panel');
+    if (treePanel) {
+      treePanel.ondragover = e => { e.preventDefault(); treePanel.style.borderColor = '#38bdf8'; };
+      treePanel.ondragleave = e => { e.preventDefault(); treePanel.style.borderColor = ''; };
+      treePanel.ondrop = e => {
+        e.preventDefault();
+        treePanel.style.borderColor = '';
+        handleUploadSelect(Array.from(e.dataTransfer.files || []));
+      };
+    }
 
     function showLog(text) { logWork.style.display = 'block'; logWork.textContent = text; }
 
@@ -1385,9 +1407,10 @@ window.addEventListener('unhandledrejection', function(e) {
       const output_name = document.getElementById('output-name').value.trim() || 'сборка.pdf';
       const serverMerge = merge && hasServerMergeQueue();
       const hasUpload = uploadFiles.length > 0;
+      const hasServer = orderedSelections.length > 0;
 
-      if (!serverMerge && !hasUpload) {
-        alert('Выберите файлы на сервере (сборка) или загрузите с компьютера');
+      if (!hasServer && !hasUpload) {
+        alert('Выберите файлы на сервере или загрузите с компьютера');
         return;
       }
       if (serverMerge && !mergeOrder.length) {
@@ -1398,7 +1421,7 @@ window.addEventListener('unhandledrejection', function(e) {
       const btn = document.getElementById('btn-download');
       btn.disabled = true;
       btn.textContent = 'Обработка…';
-      const fileCount = merge && mergeOrder.length ? mergeOrder.length : uploadFiles.length;
+      const fileCount = merge && mergeOrder.length ? mergeOrder.length : (hasUpload ? uploadFiles.length : orderedSelections.length);
       startProgress(progressMessage(merge, fileCount));
       try {
         if (serverMerge) {
@@ -1432,21 +1455,8 @@ window.addEventListener('unhandledrejection', function(e) {
             numbering_from_page: number_pages ? numbering_from_page : null,
             numbering_start: number_pages ? numbering_start : null
           }));
-        } else if (uploadFiles.length === 1 && !merge) {
-          const fd = new FormData();
-          fd.append('file', uploadFiles[0]);
-          const r = await fetch('/api/convert', { method: 'POST', body: fd });
-          if (!r.ok) { showLog(await r.text()); return; }
-          const blob = await r.blob();
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = (uploadFiles[0].name.replace(/\.[^.]+$/, '') || 'document') + '.pdf';
-          a.click();
-          showLog('PDF скачан');
-        } else {
-          const filesToSend = merge && mergeOrder.length
-            ? mergeOrder.map(item => item.file || uploadFiles.find(f => f.name === item.name)).filter(Boolean)
-            : uploadFiles;
+        } else if (merge && hasUpload) {
+          const filesToSend = uploadFiles;
           if (filesToSend.length > maxMerge) { alert('Максимум ' + maxMerge + ' файлов'); return; }
           const fd = new FormData();
           filesToSend.forEach(f => fd.append('files', f));
@@ -1461,10 +1471,83 @@ window.addEventListener('unhandledrejection', function(e) {
           const blob = await r.blob();
           const a = document.createElement('a');
           a.href = URL.createObjectURL(blob);
-          a.download = document.getElementById('output-name').value.trim() || 'сборка.pdf';
+          a.download = output_name.endsWith('.pdf') ? output_name : output_name + '.pdf';
           a.click();
-          showLog('Сборка PDF скачана' + (number_pages
-            ? (' (с ' + numbering_from_page + '-й стр., числа с ' + numbering_start + ')') : ''));
+          showLog('Сборка PDF скачана' + numberingLog({
+            numbering_from_page: number_pages ? numbering_from_page : null,
+            numbering_start: number_pages ? numbering_start : null
+          }));
+        } else {
+          // БЕЗ СБОРКИ (одиночные файлы)
+          
+          // 1. Серверные файлы
+          if (hasServer) {
+            const r = await fetch('/api/resolve-paths', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                paths: orderedSelections.map(s => s.path),
+                recursive: document.getElementById('recursive').checked
+              })
+            });
+            const j = await r.json();
+            if (r.ok && j.files) {
+               for (const f of j.files) {
+                 const res = await fetch('/api/convert-merge-download', {
+                   method: 'POST',
+                   headers: { 'Content-Type': 'application/json' },
+                   body: JSON.stringify({
+                     paths: [f.path],
+                     merge: false,
+                     output_name: f.name.replace(/\.[^/.]+$/, "") + ".pdf",
+                     recursive: false,
+                     number_pages,
+                     numbering_from_page,
+                     numbering_start,
+                     windows_cad_ip: winIpInput.value.trim()
+                   })
+                 });
+                 if (res.ok) {
+                   const blob = await res.blob();
+                   const a = document.createElement('a');
+                   a.href = URL.createObjectURL(blob);
+                   a.download = f.name.replace(/\.[^/.]+$/, "") + ".pdf";
+                   a.click();
+                   URL.revokeObjectURL(a.href);
+                   await new Promise(resolve => setTimeout(resolve, 800)); // пауза чтобы не спамить
+                 } else {
+                   showLog(`Ошибка скачивания ${f.name}`);
+                 }
+               }
+            }
+          }
+          
+          // 2. Локальные файлы
+          if (hasUpload) {
+            for (const f of uploadFiles) {
+              const fd = new FormData();
+              fd.append('file', f);
+              if (number_pages) {
+                fd.append('number_pages', 'true');
+                fd.append('numbering_from_page', numbering_from_page);
+                fd.append('numbering_start', numbering_start);
+              }
+              fd.append('windows_cad_ip', winIpInput.value.trim());
+              const res = await fetch('/api/convert', { method: 'POST', body: fd });
+              if (res.ok) {
+                const blob = await res.blob();
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = (f.name.replace(/\.[^.]+$/, '') || 'document') + '.pdf';
+                a.click();
+                URL.revokeObjectURL(a.href);
+                await new Promise(resolve => setTimeout(resolve, 800));
+              } else {
+                showLog(`Ошибка скачивания ${f.name}`);
+              }
+            }
+          }
+          showLog('Скачивание завершено');
         }
       } finally {
         stopProgress();
