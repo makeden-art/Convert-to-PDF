@@ -528,19 +528,20 @@ window.addEventListener('unhandledrejection', function(e) {
       // Блок нумерации показываем всегда (и при сборке, и для одиночных)
       numRow.style.display = 'flex';
 
-      if (!mergeOn) {
+      const hasServer = orderedSelections.length > 0;
+      const hasUpload = uploadFiles.length > 0;
+
+      if (!mergeOn && !hasUpload) {
         mergePanel.classList.remove('visible');
         mergeOrder = [];
         document.getElementById('num-preview').textContent = '';
         return;
       }
+      
       mergePanel.classList.add('visible');
       updateNumberingPreview();
 
-      const hasServer = orderedSelections.length > 0;
-      const hasUpload = uploadFiles.length > 0;
-
-      if (hasServer) {
+      if (mergeOn && hasServer) {
         if (mergeOrder.length && resolvedFileCount > 0 &&
             mergeOrder.length === resolvedFileCount &&
             mergeOrder[0] && mergeOrder[0].path && !mergeOrder[0].upload) {
