@@ -985,9 +985,9 @@ def _apply_pdf_numbering(path: Path, *, from_page: int, start: int) -> None:
             num = str(first_num + (page_num - page_from))
             rect = page.rect
             page.insert_text(
-                (rect.width - 40, 12),
+                (rect.x1 - 35, rect.y0 + 16),
                 num,
-                fontsize=11,
+                fontsize=12,
                 fontname="helv",
                 color=(0, 0, 0),
             )
