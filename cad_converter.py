@@ -47,16 +47,23 @@ def convert_cad_to_pdf(
             url = windows_cad_ip.rstrip('/') + '/convert'
             logger.info('Sending CAD file to Windows Server: %s', url)
             
-            # Use 300s timeout for large files
+            import os
+            safe_input_path = tmp / f"input{input_path.suffix}"
+            if not safe_input_path.exists():
+                os.symlink(input_path, safe_input_path)
+            
             cmd = [
                 'curl', '-s', '-m', '300', '-X', 'POST', url,
-                '-F', f'file=@{input_path}',
+                '-F', f'file=@{safe_input_path}',
                 '-F', 'ctb=monochrome.ctb',
                 '-o', str(pdf_path),
                 '-w', '%{http_code}'
             ]
             if dsd_path and Path(dsd_path).exists():
-                cmd.extend(['-F', f'dsd_file=@{dsd_path}'])
+                safe_dsd_path = tmp / "input.dsd"
+                if not safe_dsd_path.exists():
+                    os.symlink(dsd_path, safe_dsd_path)
+                cmd.extend(['-F', f'dsd_file=@{safe_dsd_path}'])
                 
             res = subprocess.run(cmd, capture_output=True, text=True)
             http_code = res.stdout.strip()
