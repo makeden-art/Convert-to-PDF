@@ -807,26 +807,23 @@ window.addEventListener('unhandledrejection', function(e) {
     document.getElementById('btn-upload-files').addEventListener('click', () => upFilesInput.click());
     document.getElementById('btn-upload-folder').addEventListener('click', () => upFolderInput.click());
     
-    async function handleSmbUpload(e) {
+    async function uploadFilesToSmb(filesList, btnObj) {
       if (!currentPath) {
         alert('Сначала выберите папку на сервере куда загружать файлы!');
-        e.target.value = '';
         return;
       }
-      const files = e.target.files;
-      if (files.length === 0) return;
+      if (filesList.length === 0) return;
       
       const fd = new FormData();
       fd.append('target_dir', currentPath);
-      for (let i = 0; i < files.length; i++) {
-        fd.append('files', files[i]);
-        const relativePath = files[i].webkitRelativePath || files[i].name;
+      for (let i = 0; i < filesList.length; i++) {
+        fd.append('files', filesList[i]);
+        const relativePath = filesList[i].webkitRelativePath || filesList[i].name;
         fd.append('paths', relativePath);
       }
       
-      const btnObj = e.target === upFolderInput ? document.getElementById('btn-upload-folder') : document.getElementById('btn-upload-files');
-      const originalText = btnObj.innerText;
-      btnObj.innerText = '⏳';
+      const originalText = btnObj ? btnObj.innerText : '';
+      if (btnObj) btnObj.innerText = '⏳';
       try {
         const res = await fetch('/api/upload-to-smb', { method: 'POST', body: fd });
         if (!res.ok) {
@@ -838,9 +835,15 @@ window.addEventListener('unhandledrejection', function(e) {
       } catch (err) {
         alert('Ошибка сети: ' + err.message);
       } finally {
-        btnObj.innerText = originalText;
-        e.target.value = '';
+        if (btnObj) btnObj.innerText = originalText;
       }
+    }
+
+    async function handleSmbUpload(e) {
+      const files = e.target.files;
+      const btnObj = e.target === upFolderInput ? document.getElementById('btn-upload-folder') : document.getElementById('btn-upload-files');
+      await uploadFilesToSmb(files, btnObj);
+      e.target.value = '';
     }
     
     upFilesInput.addEventListener('change', handleSmbUpload);
@@ -967,7 +970,10 @@ window.addEventListener('unhandledrejection', function(e) {
       treePanel.ondrop = e => {
         e.preventDefault();
         treePanel.style.borderColor = '';
-        handleUploadSelect(Array.from(e.dataTransfer.files || []));
+        const files = e.dataTransfer.files;
+        if (files && files.length > 0) {
+          uploadFilesToSmb(files, document.getElementById('btn-upload-files'));
+        }
       };
     }
 
