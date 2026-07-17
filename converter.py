@@ -972,10 +972,12 @@ def _merge_pdfs_fitz(sources: list[Path], dest: Path) -> None:
 def _apply_pdf_numbering(path: Path, *, from_page: int, start: int) -> None:
     import fitz
 
+    print(f"[DEBUG] _apply_pdf_numbering called for {path}, from_page={from_page}, start={start}")
     tmp = path.with_suffix(".numbered.pdf")
     doc = fitz.open(str(path))
     try:
         total = doc.page_count
+        print(f"[DEBUG] Total pages: {total}")
         page_from = max(1, min(int(from_page), total))
         first_num = max(1, int(start))
         for i, page in enumerate(doc):
@@ -984,12 +986,21 @@ def _apply_pdf_numbering(path: Path, *, from_page: int, start: int) -> None:
                 continue
             num = str(first_num + (page_num - page_from))
             rect = page.rect
+            scale = min(rect.width, rect.height) / 595.0
+            fs = max(10, int(14 * scale))
+            x_off = 45 * scale
+            y_off = 35 * scale
+
+            p = fitz.Point(rect.x1 - x_off, rect.y0 + y_off)
+            p = p * page.derotation_matrix
+
             page.insert_text(
-                (rect.x1 - 35, rect.y0 + 16),
+                p,
                 num,
-                fontsize=12,
+                fontsize=fs,
                 fontname="helv",
                 color=(0, 0, 0),
+                rotate=page.rotation,
             )
         doc.save(tmp, garbage=4, deflate=True)
     finally:
