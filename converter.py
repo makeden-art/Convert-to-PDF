@@ -1150,6 +1150,10 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
 
     tmp = Path(tempfile.mkdtemp(prefix="cvt_one_"))
     try:
+        if not windows_cad_ip:
+            from cad_converter import get_saved_cad_ip
+            windows_cad_ip = get_saved_cad_ip()
+
         if suffix in SUPPORTED_CAD:
             if not windows_cad_ip:
                 raise RuntimeError("Не указан Windows CAD IP для конвертации DWG/DXF")
