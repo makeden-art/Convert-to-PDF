@@ -377,17 +377,22 @@ def _join_remote_dir(*parts: str) -> str:
     return "/".join(clean).replace("/", "\\")
 
 
-def _virtual_smb_remote(path: Path) -> tuple[str, str | None]:
+def _virtual_smb_remote(path: Path, is_dir: bool | None = None) -> tuple[str, str | None]:
     """Путь в UI → (каталог на шаре, имя файла или None для каталога)."""
     base = _smb_mount_base()
     share_prefix = _smb_share_path_prefix()
     rel = path.resolve().relative_to(base)
     rel_str = "/".join(rel.parts) if rel.parts else ""
-    if path.suffix and rel.parts:
+
+    if is_dir is True:
+        return _join_remote_dir(share_prefix, rel_str), None
+
+    known_file_exts = SUPPORTED_ALL | {".ctb", ".meta", ".json", ".dsd", ".txt", ".log", ".bak"}
+    is_file = (is_dir is False) or (path.suffix.lower() in known_file_exts)
+
+    if is_file and rel.parts:
         parent_rel = "/".join(rel.parent.parts) if rel.parent.parts else ""
         return _join_remote_dir(share_prefix, parent_rel), rel.name
-    if path.suffix:
-        return _join_remote_dir(share_prefix), rel.name
     return _join_remote_dir(share_prefix, rel_str), None
 
 
@@ -434,7 +439,7 @@ def _friendly_smb_error(err: str) -> str:
     return err
 
 
-_SMB_LS_LINE = re.compile(r"^\s+(.+)\s+([AD])\s+(\d+)\s+\S")
+_SMB_LS_LINE = re.compile(r"^\s+(.+?)\s+([A-Z]+)\s+(\d+)\s+\w{3}\s+\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4}")
 
 
 def _smb_file_size(virtual_path: Path) -> int | None:
@@ -564,7 +569,7 @@ def _parse_smbclient_ls(output: str) -> list[dict]:
         entries.append(
             {
                 "name": name,
-                "type": "dir" if kind == "D" else "file",
+                "type": "dir" if "D" in kind else "file",
                 "size": int(size_s),
             }
         )
@@ -573,7 +578,7 @@ def _parse_smbclient_ls(output: str) -> list[dict]:
 
 
 def _browse_smb_directory(folder: Path) -> dict:
-    remote_dir, _ = _virtual_smb_remote(folder)
+    remote_dir, _ = _virtual_smb_remote(folder, is_dir=True)
     output = _run_smbclient(remote_dir, "ls")
     base = _smb_mount_base()
     entries: list[dict] = []
@@ -840,9 +845,28 @@ def convert_paths(
     number_pages: bool = False,
     numbering_from_page: int = 1,
     numbering_start: int = 1,
+    underlay_paths: list[str] | None = None,
 ) -> dict:
     """Конвертировать выбранные файлы и папки на сервере."""
     inputs = resolve_ordered_inputs(paths, recursive=recursive)
+    
+    if underlay_paths:
+        u_paths = [Path(u).expanduser().resolve() for u in underlay_paths]
+        filtered = []
+        for f in inputs:
+            is_u = False
+            for u in u_paths:
+                try:
+                    f.relative_to(u)
+                    is_u = True
+                    break
+                except ValueError:
+                    if f == u:
+                        is_u = True
+                        break
+            if not is_u:
+                filtered.append(f)
+        inputs = filtered
 
     if merge:
         folder = inputs[0].parent
@@ -986,10 +1010,12 @@ def _apply_pdf_numbering(path: Path, *, from_page: int, start: int) -> None:
                 continue
             num = str(first_num + (page_num - page_from))
             rect = page.rect
-            scale = min(rect.width, rect.height) / 595.0
-            fs = max(10, int(14 * scale))
-            x_off = 45 * scale
-            y_off = 12 * scale
+            # Для чертежей штамп всегда имеет фиксированный физический размер (185x55 мм)
+            # При печати на плоттере 1 к 1 размер шрифта должен быть постоянным (~5-7 мм).
+            # В PDF 1 пункт = 1/72 дюйма. 14pt = ~5мм, 18pt = ~6.3мм.
+            fs = 14
+            x_off = 30
+            y_off = 15
 
             p = fitz.Point(rect.x1 - x_off, rect.y0 + y_off)
             p = p * page.derotation_matrix
@@ -1049,7 +1075,7 @@ def _convert_timeout_for(src: Path) -> int:
     return FILE_CONVERT_TIMEOUT_SEC
 
 
-def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None) -> dict | None:
+def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None, original_src: Path = None) -> dict | None:
     """Конвертация в отдельном процессе — OOM дочернего не роняет uvicorn."""
     import sys
     import json
@@ -1063,8 +1089,15 @@ def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = ""
             pass
 
     try:
+        args = [sys.executable, str(_WORKER_SCRIPT), str(src), str(dest), windows_cad_ip]
+        if dsd_path:
+            args.append(str(dsd_path))
+        else:
+            args.append("")
+        if original_src:
+            args.append(str(original_src))
         proc = run_monitored(
-            [sys.executable, str(_WORKER_SCRIPT), str(src), str(dest), windows_cad_ip],
+            args,
             timeout=timeout_sec,
             preexec_fn=_child_memory_limit,
         )
@@ -1092,14 +1125,14 @@ def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = ""
     return meta
 
 
-def _convert_local_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None) -> dict | None:
+def _convert_local_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None, original_src: Path = None) -> dict | None:
     if CONVERT_ISOLATE:
-        return convert_file_to_pdf_isolated(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path)
+        return convert_file_to_pdf_isolated(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path, original_src=original_src)
     else:
-        return convert_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path)
+        return convert_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path, original_src=original_src)
 
 
-def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None) -> dict | None:
+def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None, original_src: Path = None) -> dict | None:
     """Конвертировать один локальный файл в указанный PDF. Для CAD возвращает meta."""
     src = src.resolve()
     suffix = src.suffix.lower()
@@ -1120,8 +1153,33 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
         if suffix in SUPPORTED_CAD:
             if not windows_cad_ip:
                 raise RuntimeError("Не указан Windows CAD IP для конвертации DWG/DXF")
+            
+            smb_dwg_path = ""
+            try:
+                debug_lines = []
+                check_src = Path(original_src) if original_src else src
+                debug_lines.append(f"DEBUG CAD: check_src={check_src}, check_src.resolve={check_src.resolve()}, SMB_ROOT.resolve={SMB_ROOT.resolve()}")
+                if str(check_src.resolve()).startswith(str(SMB_ROOT.resolve())):
+                    remote_dir, remote_name = _virtual_smb_remote(check_src)
+                    info = _smb_config()
+                    unc = info.get("unc", "")
+                    debug_lines.append(f"DEBUG CAD: unc={unc}, remote_name={remote_name}")
+                    if unc and remote_name:
+                        win_unc = unc.replace('/', '\\')
+                        win_dir = remote_dir.replace('/', '\\')
+                        if win_dir == ".":
+                            smb_dwg_path = f"{win_unc}\\{remote_name}"
+                        else:
+                            smb_dwg_path = f"{win_unc}\\{win_dir}\\{remote_name}"
+                        debug_lines.append(f"DEBUG CAD: final smb_dwg_path={smb_dwg_path}")
+                with open("/tmp/cad_debug.txt", "w", encoding="utf-8") as f:
+                    f.write("\n".join(debug_lines))
+            except Exception as e:
+                with open("/tmp/cad_debug.txt", "a", encoding="utf-8") as f:
+                    f.write(f"\nDEBUG CAD ERROR: {e}")
+
             with _cad_sem:
-                pdf_tmp, cad_meta = convert_cad_to_pdf(str(src), meta={"windows_cad_ip": windows_cad_ip, "dsd_path": dsd_path})
+                pdf_tmp, cad_meta = convert_cad_to_pdf(str(src), meta={"windows_cad_ip": windows_cad_ip, "dsd_path": dsd_path, "smb_dwg_path": smb_dwg_path})
             try:
                 shutil.move(str(pdf_tmp), str(dest))
             finally:
@@ -1167,7 +1225,7 @@ def _convert_source_to_temp_pdf(src: Path, dest: Path, windows_cad_ip: str = "")
     """Конвертировать файл с сервера (локальный или SMB) во временный PDF."""
     if _is_smb_path(src) and _smb_mounted():
         with _smb_local_file(src) as local_src:
-            return _convert_local_file_to_pdf(local_src, dest, windows_cad_ip=windows_cad_ip)
+            return _convert_local_file_to_pdf(local_src, dest, windows_cad_ip=windows_cad_ip, original_src=src)
     return _convert_local_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip)
 
 
@@ -1236,7 +1294,7 @@ def convert_file_in_place(
         if _is_smb_path(src) and _smb_mounted():
             with _smb_local_file(src) as local_src:
                 tmp_pdf = local_src.with_suffix(".pdf")
-                cad_meta = _convert_local_file_to_pdf(local_src, tmp_pdf, windows_cad_ip=windows_cad_ip)
+                cad_meta = _convert_local_file_to_pdf(local_src, tmp_pdf, windows_cad_ip=windows_cad_ip, original_src=src)
                 if number_pages and tmp_pdf.exists():
                     _apply_pdf_numbering(tmp_pdf, from_page=numbering_from_page or 1, start=numbering_start)
                 saved = _smb_put_file(tmp_pdf, dest)
@@ -1396,9 +1454,28 @@ def convert_folder(
     number_pages: bool = False,
     numbering_from_page: int = 1,
     numbering_start: int = 1,
+    underlay_paths: list[str] | None = None,
 ) -> dict:
     folder = validate_folder(folder_path)
     inputs = _collect_inputs(folder, recursive)
+    
+    if underlay_paths:
+        u_paths = [Path(u).expanduser().resolve() for u in underlay_paths]
+        filtered = []
+        for f in inputs:
+            is_u = False
+            for u in u_paths:
+                try:
+                    f.relative_to(u)
+                    is_u = True
+                    break
+                except ValueError:
+                    if f == u:
+                        is_u = True
+                        break
+            if not is_u:
+                filtered.append(f)
+        inputs = filtered
 
     if merge:
         from_page = numbering_from_page if number_pages else None

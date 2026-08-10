@@ -7,17 +7,20 @@ from pathlib import Path
 
 
 def main() -> int:
-    if len(sys.argv) != 5:
-        print("usage: cad_preview_worker.py <input> <page> <out.png> <out.json>", file=sys.stderr)
+    if len(sys.argv) < 5:
+        print("usage: cad_preview_worker.py <input> <page> <out.png> <out.json> [original_src]", file=sys.stderr)
         return 2
 
-    input_file, page_s, out_png, out_meta = sys.argv[1:5]
-    page = max(1, int(page_s))
+    input_file = sys.argv[1]
+    page = max(1, int(sys.argv[2]))
+    out_png = Path(sys.argv[3])
+    out_meta = Path(sys.argv[4])
+    original_src = sys.argv[5] if len(sys.argv) > 5 else None
 
     from cad_converter import render_cad_preview_png
 
     try:
-        png, total, meta = render_cad_preview_png(input_file, page=page)
+        png, total, meta = render_cad_preview_png(input_file, page=page, original_src=original_src)
         Path(out_png).write_bytes(png)
         meta["pages"] = total
         Path(out_meta).write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")

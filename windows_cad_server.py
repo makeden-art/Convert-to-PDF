@@ -30,7 +30,45 @@ def find_accoreconsole():
         matches = glob.glob(pattern)
         if matches:
             return sorted(matches, reverse=True)[0]
-    return r"C:\Program Files\Autodesk\AutoCAD 2022\accoreconsole.exe"
+    default_p = r"C:\Program Files\Autodesk\AutoCAD 2022\accoreconsole.exe"
+    return default_p if os.path.exists(default_p) else None
+
+def check_word_installed() -> bool:
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "Word.Application"):
+            return True
+    except Exception:
+        return False
+
+def check_excel_installed() -> bool:
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, "Excel.Application"):
+            return True
+    except Exception:
+        return False
+
+@app.get("/")
+@app.get("/status")
+def server_status():
+    acad_p = find_accoreconsole()
+    acad_ok = bool(acad_p and os.path.exists(acad_p))
+    word_ok = check_word_installed()
+    excel_ok = check_excel_installed()
+    return {
+        "status": "ok",
+        "autocad": {
+            "available": acad_ok,
+            "path": acad_p if acad_ok else None
+        },
+        "word": {
+            "available": word_ok
+        },
+        "excel": {
+            "available": excel_ok
+        }
+    }
 
 ACAD_PATH = find_accoreconsole()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -38,29 +76,36 @@ WORK_DIR = os.path.join(SCRIPT_DIR, "cad_server_workdir")
 os.makedirs(WORK_DIR, exist_ok=True)
 
 @app.post("/convert")
-def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.ctb")):
-    # 1. Сохраняем входящий чертеж
-    safe_filename = file.filename.replace(" ", "_")
-    dwg_path = os.path.join(WORK_DIR, safe_filename)
-    pdf_path = dwg_path.replace(".dwg", ".pdf")
-    
-    # Удаляем старый PDF, если есть
-    if os.path.exists(pdf_path):
-        os.remove(pdf_path)
-        
-    with open(dwg_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-        
-    # 2. Формируем SCRIPT для надежной печати (одной строкой для обхода защиты AutoCAD)
+def convert_cad(file: UploadFile = File(None), ctb: str = Form("monochrome.ctb"), smb_dwg_path: str = Form(None)):
+    if not ACAD_PATH or not os.path.exists(ACAD_PATH):
+        return JSONResponse(status_code=400, content={"error": "AutoCAD (accoreconsole.exe) не найден на этом компьютере. Скрипт CAD-сервера должен запускаться на компьютере с установленным AutoCAD."})
     import tempfile
     import uuid
     safe_uid = uuid.uuid4().hex
     temp_dir = tempfile.gettempdir()
     
-    # Копируем DWG во временную папку с безопасным ASCII именем
-    safe_dwg_path = os.path.join(temp_dir, f"temp_{safe_uid}.dwg")
+    dwg_path = None
+    if smb_dwg_path:
+        if not os.path.exists(smb_dwg_path):
+            return JSONResponse(status_code=400, content={"error": f"Сетевой путь недоступен для CAD сервера: {smb_dwg_path}. Возможно, служба запущена от имени System, а не вашего пользователя."})
+        print(f"Используем прямой путь к SMB: {smb_dwg_path}")
+        safe_dwg_path = smb_dwg_path
+        safe_filename = os.path.basename(smb_dwg_path)
+        pdf_path = os.path.join(temp_dir, f"result_{safe_uid}.pdf")
+    elif file:
+        safe_filename = file.filename.replace(" ", "_")
+        dwg_path = os.path.join(WORK_DIR, safe_filename)
+        pdf_path = dwg_path.replace(".dwg", ".pdf")
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+        with open(dwg_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        safe_dwg_path = os.path.join(temp_dir, f"temp_{safe_uid}.dwg")
+        shutil.copy2(dwg_path, safe_dwg_path)
+    else:
+        return JSONResponse(status_code=400, content={"error": "Нет файла и нет пути"})
+        
     safe_pdf_path = os.path.join(temp_dir, f"temp_{safe_uid}.pdf")
-    shutil.copy2(dwg_path, safe_dwg_path)
 
     scr_path = os.path.join(temp_dir, f"print_{safe_uid}.scr")
     # Скрипт печатает ТОЛЬКО Листы (Paper Space). Функции layoutlist в accoreconsole нет.
@@ -72,12 +117,12 @@ def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.ctb"))
 
     # 3. Запускаем AutoCAD Core Console в фоне
     print(f"Печатаем {safe_filename} с помощью {ACAD_PATH} (безопасный путь: {safe_dwg_path})...")
-    cmd = f'"{ACAD_PATH}" /i "{safe_dwg_path}" /l ru-RU /s "{scr_path}"'
+    cmd = [ACAD_PATH, "/i", safe_dwg_path, "/l", "ru-RU", "/s", scr_path]
     
     start_time = time.time()
     try:
-        # Добавили таймаут как в новой версии
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, errors="ignore", timeout=300)
+        # Убрали shell=True, чтобы процесс не осиротел при таймауте, иначе Python не сможет убить его
+        result = subprocess.run(cmd, shell=False, capture_output=True, text=True, errors="ignore", timeout=300)
     except subprocess.TimeoutExpired:
         print(f"ТАЙМАУТ ПЕЧАТИ (300 сек)! Убиваем зависший процесс AutoCAD для файла: {safe_filename}")
         subprocess.run('taskkill /F /IM accoreconsole.exe', shell=True)
@@ -95,7 +140,8 @@ def convert_cad(file: UploadFile = File(...), ctb: str = Form("monochrome.ctb"))
         
     # Убираем за собой
     try:
-        os.remove(safe_dwg_path)
+        if dwg_path and os.path.exists(safe_dwg_path):
+            os.remove(safe_dwg_path)
         if os.path.exists(safe_pdf_path): os.remove(safe_pdf_path)
         os.remove(scr_path)
     except Exception:

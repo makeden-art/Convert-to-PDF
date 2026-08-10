@@ -40,7 +40,7 @@ _preview_lock = threading.Lock()
 _CAD_PREVIEW_WORKER = Path(__file__).with_name("cad_preview_worker.py")
 
 
-def _render_cad_preview_subprocess(local_path: Path, page: int) -> tuple[bytes, dict[str, Any]]:
+def _render_cad_preview_subprocess(local_path: Path, page: int, original_src: Path | None = None) -> tuple[bytes, dict[str, Any]]:
     """CAD-предпросмотр в отдельном процессе — при таймауте процесс убивается."""
     with tempfile.TemporaryDirectory(prefix="preview_cad_") as tmp_dir:
         tmp = Path(tmp_dir)
@@ -54,6 +54,8 @@ def _render_cad_preview_subprocess(local_path: Path, page: int) -> tuple[bytes, 
             str(out_png),
             str(out_meta),
         ]
+        if original_src:
+            cmd.append(str(original_src))
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -247,7 +249,7 @@ def render_preview_png(
             if variant == "source" and suffix in CAD_EXTENSIONS and target_path != file_path:
                 meta["via_sibling_pdf"] = True
         elif target_suffix in CAD_EXTENSIONS:
-            png, cad_meta = _render_cad_preview_subprocess(local, page)
+            png, cad_meta = _render_cad_preview_subprocess(local, page, original_src=target_path)
             meta.update(cad_meta)
             meta["pages"] = cad_meta.get("pages", 1)
             meta["caption"] = cad_meta.get("caption") or f"Страница {page} из {meta['pages']}"
@@ -316,9 +318,16 @@ def resolve_view_document(path: str, variant: str = "source") -> tuple[Path, Pat
             pdf = _convert_with_libreoffice(local, tmp)
             return pdf, tmp
 
-    raise ValueError(
-        "Просмотр исходника недоступен — откройте «PDF рядом» или выполните конвертацию"
-    )
+    if suffix in CAD_EXTENSIONS:
+        from converter import _convert_source_to_temp_pdf
+        from cad_converter import get_saved_cad_ip
+        tmp = Path(tempfile.mkdtemp(prefix="view_cad_"))
+        dest_pdf = tmp / f"{file_path.stem}.pdf"
+        cad_ip = get_saved_cad_ip()
+        _convert_source_to_temp_pdf(target, dest_pdf, windows_cad_ip=cad_ip)
+        if not dest_pdf.exists():
+            raise RuntimeError("Не удалось сгенерировать PDF предпросмотра через AutoCAD")
+        return dest_pdf, tmp
 
 
 def viewer_mode_for(path: str, variant: str = "source") -> str:

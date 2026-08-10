@@ -226,6 +226,11 @@ window.addEventListener('unhandledrejection', function(e) {
         <label for="win-ip">IP-адрес Windows-сервера с AutoCAD (с портом)</label>
         <input type="text" id="win-ip" placeholder="192.168.88.10:8000" />
         <button id="btn-win-check" type="button">Проверить подключение</button>
+        <div id="win-components-status" style="margin-top: 12px; display: none; background: #0f172a; padding: 12px 14px; border-radius: 8px; border: 1px solid #334155;">
+          <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #94a3b8;">Статус программ на Windows-сервере:</div>
+          <div id="status-acad" style="font-size: 13px; margin-bottom: 6px;">📐 AutoCAD: <span style="color:#94a3b8">проверка...</span></div>
+          <div id="status-office" style="font-size: 13px;">📄 MS Office (Word / Excel): <span style="color:#94a3b8">проверка...</span></div>
+        </div>
         <p class="hint" style="margin-top:10px;">Для настройки сервера пакетной конвертации скопируйте и выполните эти две команды в <b>PowerShell от имени Администратора</b> на вашем Windows-компьютере с AutoCAD:</p>
         <pre id="setup-cmd-box" style="background: #1e293b; color: #e2e8f0; padding: 10px; border-radius: 6px; margin-top: 8px; user-select: all; white-space: pre-wrap; font-family: monospace; font-size: 13px;">Загрузка скрипта...</pre>
           <script>
@@ -294,6 +299,7 @@ window.addEventListener('unhandledrejection', function(e) {
           <input type="text" id="output-name" value="сборка.pdf" />
           <div class="btn-row">
             <button type="button" id="btn-server" style="display:none;">Конвертировать на сервере</button>
+            <button type="button" id="btn-preview-draft" style="display:none; background: #fbbf24; color: #000;">👁️ Предпросмотр и редактор</button>
             <button type="button" id="btn-download" style="display:none;">Скачать PDF</button>
           </div>
           <pre id="log-work" style="display:none"></pre>
@@ -507,14 +513,18 @@ window.addEventListener('unhandledrejection', function(e) {
       const numberPages = document.getElementById('number-pages').checked;
       const btnConvert = document.getElementById('btn-server');
       const btnDownload = document.getElementById('btn-download');
+      const btnPreviewDraft = document.getElementById('btn-preview-draft');
       
       const hasFiles = orderedSelections.length > 0 || uploadFiles.length > 0;
       if (hasFiles) {
         btnConvert.style.display = 'inline-block';
         btnDownload.style.display = 'inline-block';
+        if (mergeOn) btnPreviewDraft.style.display = 'inline-block';
+        else btnPreviewDraft.style.display = 'none';
       } else {
         btnConvert.style.display = 'none';
         btnDownload.style.display = 'none';
+        btnPreviewDraft.style.display = 'none';
       }
       
       if (mergeOn) {
@@ -750,7 +760,7 @@ window.addEventListener('unhandledrejection', function(e) {
         if (e.type === 'dir') {
           row.innerHTML = cb + '<span class="icon">📁</span><span class="name">' + e.name + '</span>';
           row.querySelector('.name').onclick = () => loadTree(e.path);
-          const checkbox = row.querySelector('input[type=checkbox]');
+          const checkbox = row.querySelector('.chk-box');
           if (checkbox) {
             checkbox.onclick = ev => {
               ev.stopPropagation();
@@ -775,11 +785,12 @@ window.addEventListener('unhandledrejection', function(e) {
           row.querySelectorAll('a.previewable, a.btn-preview').forEach(a => {
             a.addEventListener('click', ev => ev.stopPropagation());
           });
-          const checkbox = row.querySelector('input[type=checkbox]');
+          const checkbox = row.querySelector('.chk-box');
           if (checkbox) {
             checkbox.onclick = ev => {
               ev.stopPropagation();
               toggleSelection(e.path, e.name, 'file', checkbox.checked);
+              checkbox.checked = isSelected(e.path);
             };
           }
         }
@@ -1421,8 +1432,10 @@ window.addEventListener('unhandledrejection', function(e) {
           }
           showLog(logMsg);
         } else if (orderedSelections.length > 0) {
+          const underlays = window.smbUnderlays ? Object.keys(window.smbUnderlays).filter(k => window.smbUnderlays[k]) : [];
           const j = await apiPost('/api/convert-paths', {
             paths: orderedSelections.map(s => s.path),
+            underlay_paths: underlays,
             merge: false,
             recursive: document.getElementById('recursive').checked,
             windows_cad_ip: winIpInput.value.trim(),
@@ -1433,8 +1446,10 @@ window.addEventListener('unhandledrejection', function(e) {
           showLog('Готово: ' + j.stats.ok + ' OK, ошибок ' + j.stats.error + '\n' +
             j.files.map(f => f.status + ' | ' + f.source).join('\n'));
         } else if (currentPath) {
+          const underlays = window.smbUnderlays ? Object.keys(window.smbUnderlays).filter(k => window.smbUnderlays[k]) : [];
           const j = await apiPost('/api/convert-folder', {
             path: currentPath,
+            underlay_paths: underlays,
             recursive: document.getElementById('recursive').checked,
             merge,
             output_name,
@@ -1466,6 +1481,52 @@ window.addEventListener('unhandledrejection', function(e) {
         btn.disabled = false;
         btn.textContent = 'Конвертировать на сервере';
         loadTree(currentPath);
+      }
+    };
+
+    document.getElementById('btn-preview-draft').onclick = async () => {
+      const serverMerge = document.getElementById('merge').checked && hasServerMergeQueue();
+      if (!serverMerge) {
+        alert('Предпросмотр доступен только для объединения файлов на сервере.');
+        return;
+      }
+      if (!mergeOrder.length) {
+        alert('Нет файлов в сборке');
+        return;
+      }
+
+      const btn = document.getElementById('btn-preview-draft');
+      btn.disabled = true;
+      btn.textContent = 'Подготовка…';
+      startProgress(progressMessage(true, mergeOrder.length));
+      try {
+        const r = await fetch('/api/convert-draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            paths: mergeOrder.map(f => f.path),
+            merge: true,
+            output_name: 'draft.pdf',
+            recursive: document.getElementById('recursive').checked,
+            windows_cad_ip: document.getElementById('win-ip').value.trim()
+          })
+        });
+        
+        if (!r.ok) {
+            let msg = 'Ошибка подготовки черновика';
+            try { msg = (await r.json()).detail || msg; } catch(e){}
+            throw new Error(msg);
+        }
+        
+        const data = await r.json();
+        window.open('/convert/editor?draft_id=' + encodeURIComponent(data.draft_id) + '&count=' + data.page_count, '_blank');
+        
+      } catch (e) {
+        alert('Ошибка: ' + e.message);
+      } finally {
+        stopProgress();
+        btn.disabled = false;
+        btn.innerHTML = '👁️ Предпросмотр и редактор';
       }
     };
 
@@ -1529,15 +1590,24 @@ window.addEventListener('unhandledrejection', function(e) {
         } else if (merge && hasUpload) {
           const filesToSend = uploadFiles;
           if (filesToSend.length > maxMerge) { alert('Максимум ' + maxMerge + ' файлов'); return; }
+          const underlayCheckboxes = Array.from(document.querySelectorAll('.underlay-cb:checked')).map(cb => cb.value);
           const fd = new FormData();
-          filesToSend.forEach(f => fd.append('files', f));
+          for (const f of filesToSend) {
+              fd.append('files', f);
+              const path = f._relativePath || f.name;
+              fd.append('paths', path);
+              const isU = underlayCheckboxes.some(val => path === val || path.startsWith(val));
+              fd.append('is_underlay', isU ? 'true' : 'false');
+          }
+          fd.append('merge', 'true');
           if (number_pages) {
             fd.append('number_pages', 'true');
             fd.append('numbering_from_page', numbering_from_page);
             fd.append('numbering_start', numbering_start);
           }
           fd.append('windows_cad_ip', winIpInput.value.trim());
-          const r = await fetch('/api/convert-merge', { method: 'POST', body: fd });
+          fd.append('output_name', output_name);
+          const r = await fetch('/api/convert-local-workspace', { method: 'POST', body: fd });
           if (!r.ok) { showLog(await r.text()); return; }
           const blob = await r.blob();
           const a = document.createElement('a');
@@ -1595,27 +1665,37 @@ window.addEventListener('unhandledrejection', function(e) {
           
           // 2. Локальные файлы
           if (hasUpload) {
+            const underlayCheckboxes = Array.from(document.querySelectorAll('.underlay-cb:checked')).map(cb => cb.value);
+            const fd = new FormData();
             for (const f of uploadFiles) {
-              const fd = new FormData();
-              fd.append('file', f);
-              if (number_pages) {
-                fd.append('number_pages', 'true');
-                fd.append('numbering_from_page', numbering_from_page);
-                fd.append('numbering_start', numbering_start);
+                fd.append('files', f);
+                const path = f._relativePath || f.name;
+                fd.append('paths', path);
+                const isU = underlayCheckboxes.some(val => path === val || path.startsWith(val));
+                fd.append('is_underlay', isU ? 'true' : 'false');
+            }
+            if (number_pages) {
+              fd.append('number_pages', 'true');
+              fd.append('numbering_from_page', numbering_from_page);
+              fd.append('numbering_start', numbering_start);
+            }
+            fd.append('windows_cad_ip', winIpInput.value.trim());
+            const res = await fetch('/api/convert-local-workspace', { method: 'POST', body: fd });
+            if (res.ok) {
+              const blob = await res.blob();
+              const a = document.createElement('a');
+              a.href = URL.createObjectURL(blob);
+              let filename = "конвертация.zip";
+              const cd = res.headers.get('content-disposition');
+              if (cd && cd.includes('filename="')) {
+                  filename = decodeURIComponent(cd.split('filename="')[1].split('"')[0]);
               }
-              fd.append('windows_cad_ip', winIpInput.value.trim());
-              const res = await fetch('/api/convert', { method: 'POST', body: fd });
-              if (res.ok) {
-                const blob = await res.blob();
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = (f.name.replace(/\.[^.]+$/, '') || 'document') + '.pdf';
-                a.click();
-                URL.revokeObjectURL(a.href);
-                await new Promise(resolve => setTimeout(resolve, 800));
-              } else {
-                showLog(`Ошибка скачивания ${f.name}`);
-              }
+              a.download = filename;
+              a.click();
+              URL.revokeObjectURL(a.href);
+              await new Promise(resolve => setTimeout(resolve, 800));
+            } else {
+              showLog(`Ошибка конвертации локальных файлов: ` + await res.text());
             }
           }
           showLog('Скачивание завершено');
@@ -1640,21 +1720,42 @@ window.addEventListener('unhandledrejection', function(e) {
       winToggle.setAttribute('aria-expanded', c ? 'false' : 'true');
     };
 
-    let savedWinIp = '';
-    try {
+    async function loadSavedCadIp() {
+      let savedWinIp = '';
+      try {
         savedWinIp = localStorage.getItem('win_cad_ip') || '';
-    } catch (e) {
-        console.warn('localStorage disabled', e);
-    }
-    if (savedWinIp) {
+      } catch (e) {}
+
+      try {
+        const r = await fetch('/api/cad-server-ip');
+        if (r.ok) {
+          const data = await r.json();
+          if (data.ip) {
+            savedWinIp = data.ip;
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load CAD IP from server', e);
+      }
+
+      if (savedWinIp) {
         winIpInput.value = savedWinIp;
+        try { localStorage.setItem('win_cad_ip', savedWinIp); } catch (e) {}
         setTimeout(() => btnWinCheck.click(), 100);
+      }
     }
+    loadSavedCadIp();
 
     winIpInput.addEventListener('change', () => {
+        const ip = winIpInput.value.trim();
         try {
-            localStorage.setItem('win_cad_ip', winIpInput.value.trim());
+            localStorage.setItem('win_cad_ip', ip);
         } catch (e) {}
+        if (ip) {
+            const fd = new FormData();
+            fd.append('ip', ip);
+            fetch('/api/cad-server-ip', { method: 'POST', body: fd }).catch(() => {});
+        }
     });
 
     btnWinCheck.onclick = async () => {
@@ -1666,21 +1767,49 @@ window.addEventListener('unhandledrejection', function(e) {
         try {
             localStorage.setItem('win_cad_ip', ip);
         } catch (e) {}
+        const fd = new FormData();
+        fd.append('ip', ip);
+        fetch('/api/cad-server-ip', { method: 'POST', body: fd }).catch(() => {});
+
         btnWinCheck.disabled = true;
         winStatus.textContent = 'Статус: проверка...';
         try {
             // ping through our backend because browser CORS might block direct access
             const r = await fetch('/api/cad-server-ping?ip=' + encodeURIComponent(ip));
+            const compBox = document.getElementById('win-components-status');
+            const acadEl = document.getElementById('status-acad');
+            const officeEl = document.getElementById('status-office');
+
             if (r.ok) {
-                winStatus.textContent = 'Статус сервера: 🟢 Доступен';
+                const resData = await r.json();
+                winStatus.textContent = 'Статус сервера: 🟢 Сервер запущен и ответил';
                 winStatus.style.color = '#4ade80';
+
+                compBox.style.display = 'block';
+                const details = resData.details || {};
+                const acad = details.autocad || {};
+                const word = details.word || {};
+
+                if (acad.available) {
+                    acadEl.innerHTML = '📐 <b>AutoCAD:</b> <span style="color:#4ade80">🟢 Установлен (AutoCAD Core Console)</span>';
+                } else {
+                    acadEl.innerHTML = '📐 <b>AutoCAD:</b> <span style="color:#f87171">🔴 Не найден на этом ПК (чертежи DWG конвертироваться не будут)</span>';
+                }
+
+                if (word.available) {
+                    officeEl.innerHTML = '📄 <b>MS Office (Word / Excel):</b> <span style="color:#4ade80">🟢 Установлен</span>';
+                } else {
+                    officeEl.innerHTML = '📄 <b>MS Office (Word / Excel):</b> <span style="color:#fbbf24">🟡 Не найден (используется встроенный LibreOffice)</span>';
+                }
             } else {
                 winStatus.textContent = 'Статус сервера: 🔴 Недоступен (' + r.status + ')';
                 winStatus.style.color = '#f87171';
+                compBox.style.display = 'none';
             }
         } catch (e) {
-            winStatus.textContent = 'Статус сервера: 🔴 Ошибка проверки';
+            winStatus.textContent = 'Статус сервера: 🔴 Ошибка проверки подключения';
             winStatus.style.color = '#f87171';
+            document.getElementById('win-components-status').style.display = 'none';
         }
         btnWinCheck.disabled = false;
     };
