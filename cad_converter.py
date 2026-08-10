@@ -32,7 +32,7 @@ def convert_cad_to_pdf(
     meta = meta or {}
     meta.setdefault("engine", None)
     meta.setdefault("fallback", False)
-    windows_cad_ip = meta.get('windows_cad_ip', '').strip()
+    windows_cad_ip = meta.get('windows_cad_ip', '').strip() or get_saved_cad_ip()
     dsd_path = meta.get('dsd_path')
     smb_dwg_path = meta.get('smb_dwg_path')
     
