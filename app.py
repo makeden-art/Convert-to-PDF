@@ -729,9 +729,11 @@ async def ping_cad_server(ip: str):
     if not ip.startswith("http"):
         ip = "http://" + ip
     try:
-        req = urllib.request.Request(ip, method="GET")
+        req = urllib.request.Request(ip + "/status", method="GET")
         with urllib.request.urlopen(req, timeout=3) as response:
-            return {"status": "ok", "code": response.status}
+            import json
+            data = json.loads(response.read().decode())
+            return {"status": "ok", "code": response.status, "details": data}
     except urllib.error.HTTPError as e:
         return {"status": "ok", "code": e.code}
     except Exception as e:
