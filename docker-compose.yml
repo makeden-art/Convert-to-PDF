@@ -11,6 +11,13 @@ services:
       - "8084:8000"
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    volumes:
+      - /opt/road-pdf-platform:/opt/road-pdf-platform:shared
+      - type: bind
+        source: /opt/road-pdf-platform/mnt/smb
+        target: /data/smb
+        bind:
+          propagation: rslave
 
   watchtower:
     image: containrrr/watchtower:latest
