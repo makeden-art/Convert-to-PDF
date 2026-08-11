@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
-from cad_converter import CAD_EXTENSIONS, convert_cad_to_pdf
+from cad_converter import CAD_EXTENSIONS, convert_cad_to_pdf, get_saved_cad_ip, set_saved_cad_ip
 from convert_jobs import cancel_job, create_job, get_job, list_jobs, queue_status
 from file_preview import (
     preview_info,
@@ -222,6 +222,17 @@ async def viewer_page():
     template_path = Path(__file__).parent / "viewer_page.html"
     content = template_path.read_text(encoding="utf-8")
     return HTMLResponse(content, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"})
+
+
+@app.get("/api/cad-server-ip")
+async def api_get_cad_server_ip():
+    return JSONResponse({"ip": get_saved_cad_ip()})
+
+
+@app.post("/api/cad-server-ip")
+async def api_post_cad_server_ip(ip: str = Form(...)):
+    set_saved_cad_ip(ip)
+    return JSONResponse({"status": "ok"})
 
 
 @app.get("/api/browse")

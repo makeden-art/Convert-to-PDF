@@ -94,6 +94,18 @@ def get_saved_cad_ip() -> str:
         return p.read_text(encoding="utf-8").strip()
     return ""
 
+def set_saved_cad_ip(ip: str) -> None:
+    p = Path("/opt/road-pdf-platform/cad_ip.txt")
+    if not Path("/opt/road-pdf-platform").exists():
+        p = Path("/data/cad_ip.txt")
+        if not Path("/data").exists():
+            p = Path(tempfile.gettempdir()) / "cad_ip.txt"
+    try:
+        p.write_text(ip, encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"Could not save cad ip to {p}: {e}")
+
+
 
 def render_cad_preview_png(
     input_file: str,
