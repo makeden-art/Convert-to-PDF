@@ -114,7 +114,7 @@ def convert_cad(file: UploadFile = File(None), ctb: str = Form(""), smb_dwg_path
     else:
         ctb_lisp = ""
         
-    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (print "DEBUG FINDFILE:") (print (findfile "монохром.stb")) {ctb_lisp} (setvar "TILEMODE" 0) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}") (command "_.QUIT" "_Y")"""
+    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (print "DEBUG STYLE PATH:") (print (getenv "PrinterStyleSheetDir")) (print "DEBUG FINDFILE:") (print (findfile "монохром.stb")) {ctb_lisp} (setvar "TILEMODE" 0) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}") (command "_.QUIT" "_Y")"""
     
     # Записываем скрипт в одну строку в кодировке ANSI для стабильности
     with open(scr_path, "w", encoding="cp1251") as f:
