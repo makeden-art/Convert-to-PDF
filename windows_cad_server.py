@@ -114,7 +114,7 @@ def convert_cad(file: UploadFile = File(None), ctb: str = Form(""), smb_dwg_path
     else:
         ctb_lisp = ""
         
-    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (print "DEBUG STYLE PATH:") (print (getenv "PrinterStyleSheetDir")) (print "DEBUG FINDFILE:") (print (findfile "монохром.stb")) {ctb_lisp} (setvar "TILEMODE" 0) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}") (command "_.QUIT" "_Y")"""
+    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) {ctb_lisp} (setvar "TILEMODE" 0) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}") (command "_.QUIT" "_Y")"""
     
     # Записываем скрипт в одну строку в кодировке ANSI для стабильности
     with open(scr_path, "w", encoding="cp1251") as f:
@@ -132,16 +132,6 @@ def convert_cad(file: UploadFile = File(None), ctb: str = Form(""), smb_dwg_path
         print(f"ТАЙМАУТ ПЕЧАТИ (300 сек)! Убиваем зависший процесс AutoCAD для файла: {safe_filename}")
         subprocess.run('taskkill /F /IM accoreconsole.exe', shell=True)
         return JSONResponse(status_code=504, content={"error": "AutoCAD timeout 300s. Process killed.", "log": ""})
-    
-    # ВСЕГДА ЗАПИСЫВАЕМ ЛОГ В ФАЙЛ ДЛЯ ОТЛАДКИ
-    debug_log_path = os.path.join(WORK_DIR, "acad_debug.log")
-    with open(debug_log_path, "w", encoding="utf-8") as debug_file:
-        debug_file.write("=== ACAD STDOUT ===\n")
-        debug_file.write(result.stdout)
-        debug_file.write("\n===================\n")
-    
-    print(f"Лог автокада сохранен в {debug_log_path}")
-    print(result.stdout)
     
     # Проверяем, не выдал ли AutoCAD ошибку об отсутствии листов
     if "ERROR_NO_LAYOUTS" in result.stdout:
