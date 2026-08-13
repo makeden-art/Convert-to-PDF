@@ -76,9 +76,20 @@ def convert_cad_to_pdf(
                 logger.info('Windows CAD Server conversion SUCCESS')
                 return pdf_path, meta
             else:
-                logger.warning(f'Windows CAD Server error: HTTP {http_code} | STDERR: {res.stderr.strip()}')
+                body = ""
+                if pdf_path.exists():
+                    try:
+                        body = pdf_path.read_text(encoding="utf-8", errors="ignore")[:500]
+                    except: pass
+                
+                err_msg = f"Windows CAD Server error: HTTP {http_code} | STDERR: {res.stderr.strip()} | BODY: {body}"
+                logger.warning(err_msg)
+                raise RuntimeError(err_msg)
         except Exception as e:
             logger.warning('Could not connect to Windows CAD Server: %s', e)
+            if not isinstance(e, RuntimeError):
+                raise RuntimeError(f"Could not connect to Windows CAD Server: {e}")
+            raise e
 
     shutil.rmtree(tmp, ignore_errors=True)
     raise RuntimeError("Локальная конвертация отключена. Пожалуйста, укажите Windows CAD Server.")
