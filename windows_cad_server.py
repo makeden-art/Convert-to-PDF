@@ -133,10 +133,15 @@ def convert_cad(file: UploadFile = File(None), ctb: str = Form(""), smb_dwg_path
         subprocess.run('taskkill /F /IM accoreconsole.exe', shell=True)
         return JSONResponse(status_code=504, content={"error": "AutoCAD timeout 300s. Process killed.", "log": ""})
     
-    # ВСЕГДА ВЫВОДИМ ЛОГ ДЛЯ ОТЛАДКИ
-    print("=== ACAD STDOUT ===")
+    # ВСЕГДА ЗАПИСЫВАЕМ ЛОГ В ФАЙЛ ДЛЯ ОТЛАДКИ
+    debug_log_path = os.path.join(WORK_DIR, "acad_debug.log")
+    with open(debug_log_path, "w", encoding="utf-8") as debug_file:
+        debug_file.write("=== ACAD STDOUT ===\n")
+        debug_file.write(result.stdout)
+        debug_file.write("\n===================\n")
+    
+    print(f"Лог автокада сохранен в {debug_log_path}")
     print(result.stdout)
-    print("===================")
     
     # Проверяем, не выдал ли AutoCAD ошибку об отсутствии листов
     if "ERROR_NO_LAYOUTS" in result.stdout:
