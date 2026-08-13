@@ -76,7 +76,7 @@ WORK_DIR = os.path.join(SCRIPT_DIR, "cad_server_workdir")
 os.makedirs(WORK_DIR, exist_ok=True)
 
 @app.post("/convert")
-def convert_cad(file: UploadFile = File(None), ctb: str = Form("monochrome.ctb"), smb_dwg_path: str = Form(None)):
+def convert_cad(file: UploadFile = File(None), ctb: str = Form(""), smb_dwg_path: str = Form(None)):
     if not ACAD_PATH or not os.path.exists(ACAD_PATH):
         return JSONResponse(status_code=400, content={"error": "AutoCAD (accoreconsole.exe) не найден на этом компьютере. Скрипт CAD-сервера должен запускаться на компьютере с установленным AutoCAD."})
     import tempfile
@@ -108,8 +108,9 @@ def convert_cad(file: UploadFile = File(None), ctb: str = Form("monochrome.ctb")
     safe_pdf_path = os.path.join(temp_dir, f"temp_{safe_uid}.pdf")
 
     scr_path = os.path.join(temp_dir, f"print_{safe_uid}.scr")
-    # Скрипт печатает ТОЛЬКО Листы (Paper Space). Функции layoutlist в accoreconsole нет.
-    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setq dict (dictsearch (namedobjdict) "ACAD_LAYOUT")) (while (setq item (assoc 350 dict)) (setq ent (cdr item)) (setq edata (entget ent)) (if (assoc 7 edata) (setq edata (subst (cons 7 "{ctb}") (assoc 7 edata) edata)) (setq edata (append edata (list (cons 7 "{ctb}"))))) (setq flags (cdr (assoc 70 edata))) (if flags (setq edata (subst (cons 70 (logior flags 32)) (assoc 70 edata) edata))) (entmod edata) (setq dict (cdr (member item dict)))) (setvar "TILEMODE" 0) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}") (command "_.QUIT" "_Y")"""
+    # Скрипт печатает ТОЛЬКО Листы (Paper Space). Если ctb не пустой, принудительно ставим его.
+    ctb_lisp = f"""(if (assoc 7 edata) (setq edata (subst (cons 7 "{ctb}") (assoc 7 edata) edata)) (setq edata (append edata (list (cons 7 "{ctb}")))))""" if ctb and ctb.lower() != "none" else ""
+    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setq dict (dictsearch (namedobjdict) "ACAD_LAYOUT")) (while (setq item (assoc 350 dict)) (setq ent (cdr item)) (setq edata (entget ent)) {ctb_lisp} (setq flags (cdr (assoc 70 edata))) (if flags (setq edata (subst (cons 70 (logior flags 32)) (assoc 70 edata) edata))) (entmod edata) (setq dict (cdr (member item dict)))) (setvar "TILEMODE" 0) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}") (command "_.QUIT" "_Y")"""
     
     # Записываем скрипт в одну строку в кодировке ANSI для стабильности
     with open(scr_path, "w", encoding="cp1251") as f:

@@ -51,7 +51,7 @@ def convert_cad_to_pdf(
             cmd = [
                 'curl', '-sS', '-m', '300', '-X', 'POST', url,
                 '-H', 'Expect:',
-                '-F', 'ctb=monochrome.ctb',
+
                 '-o', str(pdf_path),
                 '-w', '%{http_code}'
             ]
