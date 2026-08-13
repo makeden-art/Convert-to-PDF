@@ -117,7 +117,7 @@ def convert_cad(file: UploadFile = File(None), ctb: str = Form("monochrome.ctb")
 
     # 3. Запускаем AutoCAD Core Console в фоне
     print(f"Печатаем {safe_filename} с помощью {ACAD_PATH} (безопасный путь: {safe_dwg_path})...")
-    cmd = [ACAD_PATH, "/i", safe_dwg_path, "/l", "ru-RU", "/s", scr_path]
+    cmd = [ACAD_PATH, "/i", safe_dwg_path, "/l", "ru-RU", "/p", "<<VANILLA>>", "/s", scr_path]
     
     start_time = time.time()
     try:
