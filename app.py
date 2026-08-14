@@ -230,6 +230,10 @@ async def viewer_page():
 async def api_get_cad_server_ip():
     return JSONResponse({"ip": get_saved_cad_ip()})
 
+@app.get("/api/stats")
+async def api_get_stats():
+    from stats import get_stats
+    return JSONResponse(get_stats())
 
 @app.post("/api/cad-server-ip")
 async def api_post_cad_server_ip(ip: str = Form(...)):

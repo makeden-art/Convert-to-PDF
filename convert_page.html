@@ -191,6 +191,16 @@ window.addEventListener('unhandledrejection', function(e) {
     <div class="box">
       <h1>Перевод в PDF</h1>
       <p>Офисные и CAD-форматы → PDF. PDF <b>рядом</b> с оригиналом или сборка до <b>{{MAX_MERGE}}</b> файлов в один PDF.</p>
+      <div id="stats-widget" style="background: rgba(56,189,248,0.1); padding: 16px; border-radius: 8px; margin-top: 12px; display: flex; justify-content: space-between; align-items: center; border: 1px solid rgba(56,189,248,0.3);">
+        <div>
+          <div style="font-size: 13px; color: #7dd3fc; margin-bottom: 4px; font-weight: 600;">Сэкономлено ручного труда:</div>
+          <div id="stats-time" style="font-size: 24px; font-weight: 700; color: #38bdf8; display: flex; align-items: baseline; gap: 4px;">0 <span style="font-size:14px; font-weight:500;">часов</span></div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-size: 12px; color: #94a3b8; margin-bottom: 2px;">Всего файлов (DWG, Word и др.):</div>
+          <div id="stats-files" style="font-size: 20px; font-weight: 600; color: #e5e7eb;">0</div>
+        </div>
+      </div>
       <p class="ver" id="smb-root-hint">Работа с файлами — только через подключённую SMB-папку.</p>
     </div>
 
@@ -1985,10 +1995,26 @@ window.addEventListener('unhandledrejection', function(e) {
       await cancelJob(activeJobId, document.getElementById('btn-cancel-active'));
     };
 
+    async function refreshStats() {
+      try {
+        const r = await fetch('/api/stats');
+        if (r.ok) {
+          const stats = await r.json();
+          document.getElementById('stats-files').textContent = stats.total_files || 0;
+          const hrs = Math.floor((stats.saved_seconds || 0) / 3600);
+          const mins = Math.floor(((stats.saved_seconds || 0) % 3600) / 60);
+          let text = hrs > 0 ? `${hrs} ч ${mins} мин` : `${mins} мин`;
+          document.getElementById('stats-time').innerHTML = `${text}`;
+        }
+      } catch (e) {}
+    }
+
     loadTree('');
     refreshSmb();
     refreshJobsHistory();
+    refreshStats();
     setInterval(refreshJobsHistory, 5000);
+    setInterval(refreshStats, 10000);
   </script>
 </body>
 </html>

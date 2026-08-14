@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from converter import release_memory
+from stats import update_stats_from_result
 from job_control import (
     JobCancelledError,
     begin_job,
@@ -187,6 +188,12 @@ def _run_job(job_id: str) -> None:
         result = fn()
         if is_cancelled(job_id):
             raise JobCancelledError("Отменено пользователем")
+        
+        try:
+            update_stats_from_result(result)
+        except Exception:
+            pass
+            
         _update_job(
             job_id,
             status="done",
