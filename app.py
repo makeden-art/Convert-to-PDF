@@ -70,6 +70,7 @@ class FolderRequest(BaseModel):
     numbering_from_page: int = 1
     numbering_start: int = 1
     windows_cad_ip: str = ""
+    windows_cad_profile: str = ""
 
 
 class PathsRequest(BaseModel):
@@ -83,6 +84,7 @@ class PathsRequest(BaseModel):
     numbering_from_page: int = 1
     numbering_start: int = 1
     windows_cad_ip: str = ""
+    windows_cad_profile: str = ""
 
 
 class ResolveRequest(BaseModel):
@@ -598,6 +600,7 @@ async def api_convert_folder(body: FolderRequest):
                 numbering_from_page=body.numbering_from_page,
                 numbering_start=body.numbering_start,
                 windows_cad_ip=body.windows_cad_ip,
+                windows_cad_profile=body.windows_cad_profile,
             ),
             label=_folder_job_label(body),
             kind="convert_folder",
@@ -639,6 +642,8 @@ async def api_convert_merge(
     numbering_from_page: int = Form(1),
     numbering_start: int = Form(1),
     windows_cad_ip: str = Form(""),
+    windows_cad_profile: str = Form(""),
+    output_name: str = Form("сборка.pdf"),
 ):
     if not files:
         raise HTTPException(status_code=400, detail="Передайте хотя бы один файл")
@@ -673,6 +678,7 @@ async def api_convert_merge(
             numbering_from_page=from_page,
             numbering_start=start_num,
             windows_cad_ip=windows_cad_ip,
+            windows_cad_profile=windows_cad_profile,
         )
         return FileResponse(
             path=str(out),
@@ -692,6 +698,7 @@ async def api_convert_merge(
 async def api_convert(
     file: UploadFile = File(...),
     windows_cad_ip: str = Form(""),
+    windows_cad_profile: str = Form(""),
     number_pages: bool = Form(False),
     numbering_from_page: int = Form(1),
     numbering_start: int = Form(1),
