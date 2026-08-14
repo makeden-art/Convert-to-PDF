@@ -625,22 +625,6 @@ window.addEventListener('unhandledrejection', function(e) {
 
     function renderMergeList() {
       mergeList.innerHTML = '';
-      
-      if (mergeOrder.length > 0) {
-        const maxMtime = Math.max(...mergeOrder.map(f => f.mtime || (f.file && f.file.lastModified ? f.file.lastModified / 1000 : 0)));
-        if (maxMtime > 0) {
-          const d = new Date(maxMtime * 1000);
-          const ds = [
-            String(d.getDate()).padStart(2, '0'),
-            String(d.getMonth() + 1).padStart(2, '0'),
-            d.getFullYear()
-          ].join('.');
-          const inp = document.getElementById('output-name');
-          if (inp && inp.value.startsWith('сборка_') && inp.value.endsWith('.pdf')) {
-            inp.value = `сборка_${ds}.pdf`;
-          }
-        }
-      }
 
       if (!mergeOrder.length) {
         mergeList.innerHTML = '<div class="merge-item">Нет файлов для сборки</div>';
@@ -657,6 +641,15 @@ window.addEventListener('unhandledrejection', function(e) {
         const row = document.createElement('div');
         row.className = 'merge-item draggable-row' + formatRowClass(item);
         row.draggable = true;
+        function formatDate(m) {
+          if (!m) return '';
+          const d = new Date(m * 1000);
+          return [String(d.getDate()).padStart(2, '0'), String(d.getMonth() + 1).padStart(2, '0'), d.getFullYear()].join('.') + ' ' +
+                 [String(d.getHours()).padStart(2, '0'), String(d.getMinutes()).padStart(2, '0')].join(':');
+        }
+        const mtime = item.mtime || (item.file && item.file.lastModified ? item.file.lastModified / 1000 : 0);
+        const dateStr = mtime ? '<span style="margin-left:auto;color:#9ca3af;font-size:12px;padding-right:12px;">' + formatDate(mtime) + '</span>' : '<span style="margin-left:auto;"></span>';
+
         row.innerHTML =
           '<span class="drag-handle" title="Перетащите">⠿</span>' +
           '<button type="button" class="secondary" data-up="' + idx + '">↑</button>' +
@@ -664,7 +657,7 @@ window.addEventListener('unhandledrejection', function(e) {
           '<button type="button" class="secondary btn-remove" data-remove="' + idx + '" title="Исключить из сборки">✕</button>' +
           '<span class="fname">' + (idx + 1) + '. ' + item.name +
           (item.format_valid === false ? ' ⚠' : (item.extension_ok === false ? ' ⚠' : '')) +
-          '</span>' +
+          '</span>' + dateStr +
           formatBadgeHtml(item);
 
         row.addEventListener('dragstart', (e) => {
@@ -788,8 +781,16 @@ window.addEventListener('unhandledrejection', function(e) {
         const checked = sel ? 'checked' : '';
         const cb = '<input type="checkbox" class="chk-box" ' + checked + ' />';
 
+        function formatDate(m) {
+          if (!m) return '';
+          const d = new Date(m * 1000);
+          return [String(d.getDate()).padStart(2, '0'), String(d.getMonth() + 1).padStart(2, '0'), d.getFullYear()].join('.') + ' ' +
+                 [String(d.getHours()).padStart(2, '0'), String(d.getMinutes()).padStart(2, '0')].join(':');
+        }
+        const dateStr = e.mtime ? '<span style="margin-left:auto;color:#9ca3af;font-size:12px;padding-right:12px;">' + formatDate(e.mtime) + '</span>' : '<span style="margin-left:auto;"></span>';
+
         if (e.type === 'dir') {
-          row.innerHTML = cb + '<span class="icon">📁</span><span class="name">' + e.name + '</span>';
+          row.innerHTML = cb + '<span class="icon">📁</span><span class="name">' + e.name + '</span>' + dateStr;
           row.querySelector('.name').onclick = () => loadTree(e.path);
           const checkbox = row.querySelector('.chk-box');
           if (checkbox) {
@@ -812,7 +813,7 @@ window.addEventListener('unhandledrejection', function(e) {
                  '" target="_blank" rel="noopener noreferrer" title="Просмотр в новой вкладке">' +
                  escapeHtml(e.name) + '</a>')
               : ('<span class="name">' + escapeHtml(e.name) + '</span>')) +
-            (e.format_label ? formatBadgeHtml(e) : '') + viewLink;
+            (e.format_label ? formatBadgeHtml(e) : '') + dateStr + viewLink;
           row.querySelectorAll('a.previewable, a.btn-preview').forEach(a => {
             a.addEventListener('click', ev => ev.stopPropagation());
           });

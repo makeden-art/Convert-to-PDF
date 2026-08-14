@@ -809,12 +809,14 @@ def browse_directory(path: str = "") -> dict:
                 )
             elif item.is_file():
                 suffix = item.suffix.lower()
+                st = item.stat()
                 entry = {
                     "name": item.name,
                     "path": str(item.resolve()),
                     "type": "file",
                     "convertible": suffix in SUPPORTED_ALL,
-                    "size": item.stat().st_size,
+                    "size": st.st_size,
+                    "mtime": st.st_mtime,
                 }
                 if suffix in SUPPORTED_ALL:
                     entry.update(_format_entry_fields(item, light=True))
