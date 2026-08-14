@@ -117,8 +117,11 @@ def convert_cad(file: UploadFile = File(None), ctb: str = Form(""), smb_dwg_path
     # Синхронизация всех блоков с атрибутами (ATTSYNC) перед печатью, чтобы атрибуты "не улетали"
     attsync_lisp = """(setq blk (tblnext "BLOCK" T)) (while blk (setq bname (cdr (assoc 2 blk))) (if (= (logand (cdr (assoc 70 blk)) 2) 2) (vl-catch-all-apply 'vl-cmdf (list "_.ATTSYNC" "_N" bname))) (setq blk (tblnext "BLOCK"))) (command "_.REGENALL")"""
 
-    # Подключение общих шрифтов и стилей из папки C:\Common (если используется "чистый" запуск без профиля)
-    common_path_lisp = """(vl-catch-all-apply 'setenv (list "PrinterStyleSheetDir" "C:\\\\Common\\\\Plot_Styles")) (setq curacad (getenv "ACAD")) (if (not (vl-string-search "C:\\\\Common\\\\Fonts" curacad)) (vl-catch-all-apply 'setenv (list "ACAD" (strcat "C:\\\\Common\\\\Fonts;" curacad))))"""
+    # Подключение общих шрифтов и стилей из папки C:\Common (только если НЕ передан профиль)
+    if not profile:
+        common_path_lisp = """(vl-catch-all-apply 'setenv (list "PrinterStyleSheetDir" "C:\\\\Common\\\\Plot_Styles")) (setq curacad (getenv "ACAD")) (if (not (vl-string-search "C:\\\\Common\\\\Fonts" curacad)) (vl-catch-all-apply 'setenv (list "ACAD" (strcat "C:\\\\Common\\\\Fonts;" curacad))))"""
+    else:
+        common_path_lisp = ""
 
     lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (vl-catch-all-apply 'vl-cmdf (list "PDFSHX" "0")) (vl-catch-all-apply 'vl-cmdf (list "EPDFSHX" "0")) {common_path_lisp} {attsync_lisp} {ctb_lisp} (setvar "TILEMODE" 0) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}") (command "_.QUIT" "_Y")"""
     
