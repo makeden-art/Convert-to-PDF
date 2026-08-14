@@ -729,7 +729,7 @@ def _dir_accessible(folder: Path) -> bool:
 def browse_directory(path: str = "") -> dict:
     """Содержимое каталога для дерева выбора (один уровень)."""
     if not path.strip():
-        if not _smb_configured():
+        if not _smb_mounted():
             return {
                 "path": "",
                 "parent": None,
