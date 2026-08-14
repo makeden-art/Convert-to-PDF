@@ -194,17 +194,19 @@ window.addEventListener('unhandledrejection', function(e) {
       <div id="stats-widget" class="box" style="padding: 12px 16px; margin-top: 12px; background: rgba(56,189,248,0.05); border: 1px solid rgba(56,189,248,0.2);">
         <button type="button" class="collapse-toggle" aria-expanded="false" aria-controls="stats-body" onclick="const b=document.getElementById('stats-body'); const e=this.getAttribute('aria-expanded')==='true'; this.setAttribute('aria-expanded', !e); b.classList.toggle('is-collapsed', e);" style="margin: 0; color: #38bdf8; font-size: 15px;">
           <span style="display: flex; align-items: center; gap: 8px;">
-            <span>⏱️ Подробнее о сэкономленном времени</span>
+            <span>Подробнее</span>
           </span>
           <span class="chevron">▼</span>
         </button>
-        <div class="collapse-body is-collapsed" id="stats-body" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(56,189,248,0.1);">
-          <div style="font-size: 13px; color: #94a3b8; display: flex; justify-content: space-between;">
-            <span>Сэкономлено времени: <strong id="stats-time" style="color:#e5e7eb;">0 минут</strong></span>
-            <span>Всего файлов: <strong id="stats-files" style="color:#e5e7eb;">0</strong></span>
-          </div>
-          <div id="stats-breakdown" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; font-size: 12px;">
-            <!-- Format pills will go here -->
+        <div class="collapse-body is-collapsed" id="stats-body">
+          <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(56,189,248,0.1);">
+            <div style="font-size: 13px; color: #94a3b8; display: flex; justify-content: space-between;">
+              <span>⏱️ Сэкономлено ручного труда: <strong id="stats-time" style="color:#7dd3fc;">0 минут</strong></span>
+              <span>Всего файлов: <strong id="stats-files" style="color:#e5e7eb;">0</strong></span>
+            </div>
+            <div id="stats-breakdown" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; font-size: 12px;">
+              <span style="color: #64748b;">Пока нет данных</span>
+            </div>
           </div>
         </div>
       </div>
@@ -2013,15 +2015,21 @@ window.addEventListener('unhandledrejection', function(e) {
           let text = hrs > 0 ? `${hrs} ч ${mins} мин` : `${mins} мин`;
           document.getElementById('stats-time').innerHTML = text;
           
-          if (stats.by_format) {
+          if (stats.by_format && Object.keys(stats.by_format).length > 0) {
             const breakdown = document.getElementById('stats-breakdown');
-            breakdown.innerHTML = '';
-            for (const [fmt, count] of Object.entries(stats.by_format)) {
-              if (count > 0) {
-                const pill = document.createElement('span');
-                pill.style = 'background: rgba(148,163,184,0.15); padding: 4px 8px; border-radius: 6px; color: #e5e7eb;';
-                pill.innerHTML = `<strong>${fmt}</strong>: ${count}`;
-                breakdown.appendChild(pill);
+            let hasData = false;
+            for (const count of Object.values(stats.by_format)) {
+              if (count > 0) hasData = true;
+            }
+            if (hasData) {
+              breakdown.innerHTML = '';
+              for (const [fmt, count] of Object.entries(stats.by_format)) {
+                if (count > 0) {
+                  const pill = document.createElement('span');
+                  pill.style = 'background: rgba(148,163,184,0.15); padding: 4px 8px; border-radius: 6px; color: #e5e7eb;';
+                  pill.innerHTML = `<strong>${fmt}</strong>: ${count}`;
+                  breakdown.appendChild(pill);
+                }
               }
             }
           }

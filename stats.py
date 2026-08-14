@@ -46,23 +46,32 @@ def update_stats_from_result(result: dict[str, Any]) -> None:
     if not isinstance(result, dict):
         return
         
-    stats_increment = result.get("stats", {})
-    if not stats_increment or not isinstance(stats_increment, dict):
+    files = result.get("files", [])
+    if not files or not isinstance(files, list):
         return
 
     with _stats_lock:
         data = _load_stats()
         
-        for fmt, count in stats_increment.items():
-            if not isinstance(count, int):
+        for file_item in files:
+            if not isinstance(file_item, dict):
+                continue
+            if file_item.get("status") != "ok":
                 continue
                 
-            fmt_upper = fmt.upper()
-            data["by_format"][fmt_upper] = data["by_format"].get(fmt_upper, 0) + count
-            data["total_files"] = data.get("total_files", 0) + count
+            src = file_item.get("source", "")
+            if not src:
+                continue
+                
+            ext = Path(src).suffix.lstrip(".").upper()
+            if not ext:
+                ext = "OTHER"
+                
+            data["by_format"][ext] = data["by_format"].get(ext, 0) + 1
+            data["total_files"] = data.get("total_files", 0) + 1
             
             # Подсчет сэкономленного времени
-            norm = TIME_NORMS.get(fmt_upper, TIME_NORMS["OTHER"])
-            data["saved_seconds"] = data.get("saved_seconds", 0) + (norm * count)
+            norm = TIME_NORMS.get(ext, TIME_NORMS["OTHER"])
+            data["saved_seconds"] = data.get("saved_seconds", 0) + norm
             
         _save_stats(data)
