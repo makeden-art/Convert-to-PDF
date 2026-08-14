@@ -114,8 +114,8 @@ def convert_cad(file: UploadFile = File(None), ctb: str = Form(""), smb_dwg_path
     else:
         ctb_lisp = ""
         
-    # Синхронизация всех блоков с атрибутами (ATTSYNC) перед печатью, чтобы атрибуты "не улетали"
-    attsync_lisp = """(setq blk (tblnext "BLOCK" T)) (while blk (setq bname (cdr (assoc 2 blk))) (if (= (logand (cdr (assoc 70 blk)) 2) 2) (vl-catch-all-apply 'vl-cmdf (list "_.ATTSYNC" "_N" bname))) (setq blk (tblnext "BLOCK"))) (command "_.REGENALL")"""
+    # ATTSYNC не поддерживается в accoreconsole (вызывает Unknown command ATTSYNC и ломает скрипт)
+    attsync_lisp = ""
 
     # Подключение общих шрифтов и стилей из папки C:\Common (только если НЕ передан профиль)
     if not profile:
@@ -123,7 +123,7 @@ def convert_cad(file: UploadFile = File(None), ctb: str = Form(""), smb_dwg_path
     else:
         common_path_lisp = ""
 
-    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (vl-catch-all-apply 'vl-cmdf (list "PDFSHX" "0")) (vl-catch-all-apply 'vl-cmdf (list "EPDFSHX" "0")) {common_path_lisp} {attsync_lisp} {ctb_lisp} (setvar "TILEMODE" 0) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}") (command "_.QUIT" "_Y")"""
+    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (vl-catch-all-apply 'setvar (list "PDFSHX" 0)) (vl-catch-all-apply 'setvar (list "EPDFSHX" 0)) {common_path_lisp} {attsync_lisp} {ctb_lisp} (setvar "TILEMODE" 0) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}") (command "_.QUIT" "_Y")"""
     
     # Записываем скрипт в одну строку в кодировке ANSI для стабильности
     with open(scr_path, "w", encoding="cp1251") as f:
