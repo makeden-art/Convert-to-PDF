@@ -15,14 +15,6 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pywin32"])
     import win32com.client
 
-try:
-    import fitz  # PyMuPDF
-except ImportError:
-    print("Устанавливаем PyMuPDF для очистки PDF от комментариев...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "PyMuPDF"])
-    import fitz
-
-
 app = FastAPI(title="AutoCAD Print Server")
 
 def find_accoreconsole():
@@ -125,7 +117,7 @@ def convert_cad(file: UploadFile = File(None), ctb: str = Form(""), smb_dwg_path
     # Синхронизация всех блоков с атрибутами (ATTSYNC) перед печатью, чтобы атрибуты "не улетали"
     attsync_lisp = """(setq blk (tblnext "BLOCK" T)) (while blk (setq bname (cdr (assoc 2 blk))) (if (= (logand (cdr (assoc 70 blk)) 2) 2) (vl-catch-all-apply 'vl-cmdf (list "_.ATTSYNC" "_N" bname))) (setq blk (tblnext "BLOCK"))) (command "_.REGENALL")"""
 
-    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (vl-catch-all-apply 'setvar (list "PDFSHX" 0)) (vl-catch-all-apply 'setvar (list "EPDFSHX" 0)) {attsync_lisp} {ctb_lisp} (setvar "TILEMODE" 0) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}") (command "_.QUIT" "_Y")"""
+    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (vl-catch-all-apply 'vl-cmdf (list "PDFSHX" "0")) (vl-catch-all-apply 'vl-cmdf (list "EPDFSHX" "0")) {attsync_lisp} {ctb_lisp} (setvar "TILEMODE" 0) (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}") (command "_.QUIT" "_Y")"""
     
     # Записываем скрипт в одну строку в кодировке ANSI для стабильности
     with open(scr_path, "w", encoding="cp1251") as f:
@@ -153,18 +145,6 @@ def convert_cad(file: UploadFile = File(None), ctb: str = Form(""), smb_dwg_path
     # Копируем PDF обратно
     if os.path.exists(safe_pdf_path):
         shutil.copy2(safe_pdf_path, pdf_path)
-        
-        # Очищаем PDF от желтых комментариев Автокада (SHX шрифты)
-        try:
-            doc = fitz.open(pdf_path)
-            for page in doc:
-                for annot in page.annots():
-                    page.delete_annot(annot)
-            doc.save(pdf_path, incremental=True, encryption=fitz.PDF_ENCRYPT_KEEP)
-            doc.close()
-            print("Успешно очищены SHX-комментарии из PDF.")
-        except Exception as e:
-            print(f"Ошибка при очистке PDF комментариев: {e}")
         
     # Убираем за собой
     try:

@@ -297,6 +297,20 @@ window.addEventListener('unhandledrejection', function(e) {
           </div>
           <label for="output-name">Имя итогового PDF (при сборке)</label>
           <input type="text" id="output-name" value="сборка.pdf" />
+          <script>
+            document.addEventListener("DOMContentLoaded", () => {
+              const d = new Date();
+              const ds = [
+                String(d.getDate()).padStart(2, '0'),
+                String(d.getMonth() + 1).padStart(2, '0'),
+                d.getFullYear()
+              ].join('.');
+              const inp = document.getElementById('output-name');
+              if (inp && inp.value === 'сборка.pdf') {
+                inp.value = `сборка_${ds}.pdf`;
+              }
+            });
+          </script>
           <div class="btn-row">
             <button type="button" id="btn-server" style="display:none;">Конвертировать на сервере</button>
             <button type="button" id="btn-preview-draft" style="display:none; background: #fbbf24; color: #000;">👁️ Предпросмотр и редактор</button>
