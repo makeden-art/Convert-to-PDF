@@ -439,7 +439,8 @@ def _friendly_smb_error(err: str) -> str:
     return err
 
 
-_SMB_LS_LINE = re.compile(r"^\s+(.+?)\s+([A-Z]+)\s+(\d+)\s+\w{3}\s+\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4}")
+from datetime import datetime
+_SMB_LS_LINE = re.compile(r"^\s+(.+?)\s+([A-Z]+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})")
 
 
 def _smb_file_size(virtual_path: Path) -> int | None:
@@ -563,14 +564,20 @@ def _parse_smbclient_ls(output: str) -> list[dict]:
         m = _SMB_LS_LINE.match(line)
         if not m:
             continue
-        name, kind, size_s = m.group(1).strip(), m.group(2), m.group(3)
+        name, kind, size_s, date_s = m.group(1).strip(), m.group(2), m.group(3), m.group(4)
         if name in (".", ".."):
             continue
+        try:
+            dt = datetime.strptime(date_s, "%a %b %d %H:%M:%S %Y")
+            mtime = dt.timestamp()
+        except Exception:
+            mtime = 0
         entries.append(
             {
                 "name": name,
                 "type": "dir" if "D" in kind else "file",
                 "size": int(size_s),
+                "mtime": mtime,
             }
         )
     entries.sort(key=lambda e: (e["type"] != "dir", e["name"].lower()))
@@ -589,6 +596,7 @@ def _browse_smb_directory(folder: Path) -> dict:
             suffix = Path(item["name"]).suffix.lower()
             entry["convertible"] = suffix in SUPPORTED_ALL
             entry["size"] = item["size"]
+            entry["mtime"] = item.get("mtime", 0)
             if suffix in SUPPORTED_ALL:
                 entry.update(
                     _format_entry_fields(item_path, file_size=int(item["size"]), light=True)
@@ -1435,13 +1443,22 @@ def resolve_ordered_inputs_with_format(
     files = resolve_ordered_inputs(paths, recursive=recursive)
     out: list[dict] = []
     for f in files:
-        size = _smb_file_size(f) if _is_smb_path(f) and _smb_mounted() else None
+        size = None
+        mtime = 0
+        try:
+            st = f.stat()
+            size = st.st_size
+            mtime = st.st_mtime
+        except OSError:
+            if _is_smb_path(f) and not _smb_mounted():
+                size = _smb_file_size(f)
+        
         info = inspect_file_format(f, file_size=size)
         out.append(
-            {
                 "path": str(f),
                 "name": f.name,
                 "parent": f.parent.name,
+                "mtime": mtime,
                 **info.to_dict(),
             }
         )

@@ -625,6 +625,23 @@ window.addEventListener('unhandledrejection', function(e) {
 
     function renderMergeList() {
       mergeList.innerHTML = '';
+      
+      if (mergeOrder.length > 0) {
+        const maxMtime = Math.max(...mergeOrder.map(f => f.mtime || (f.file && f.file.lastModified ? f.file.lastModified / 1000 : 0)));
+        if (maxMtime > 0) {
+          const d = new Date(maxMtime * 1000);
+          const ds = [
+            String(d.getDate()).padStart(2, '0'),
+            String(d.getMonth() + 1).padStart(2, '0'),
+            d.getFullYear()
+          ].join('.');
+          const inp = document.getElementById('output-name');
+          if (inp && inp.value.startsWith('сборка_') && inp.value.endsWith('.pdf')) {
+            inp.value = `сборка_${ds}.pdf`;
+          }
+        }
+      }
+
       if (!mergeOrder.length) {
         mergeList.innerHTML = '<div class="merge-item">Нет файлов для сборки</div>';
         return;
