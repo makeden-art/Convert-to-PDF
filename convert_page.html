@@ -226,6 +226,8 @@ window.addEventListener('unhandledrejection', function(e) {
         <label for="win-ip">IP-адрес Windows-сервера с AutoCAD (с портом)</label>
         <input type="text" id="win-ip" placeholder="192.168.88.10:8000" />
         <button id="btn-win-check" type="button">Проверить подключение</button>
+        <label for="win-acad-profile" style="margin-top:12px;">Профиль AutoCAD (чтобы работали стили и шрифты)</label>
+        <input type="text" id="win-acad-profile" placeholder='Оставьте пустым или впишите, например: Yugdorproekt' />
         <div id="win-components-status" style="margin-top: 12px; display: none; background: #0f172a; padding: 12px 14px; border-radius: 8px; border: 1px solid #334155;">
           <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #94a3b8;">Статус программ на Windows-сервере:</div>
           <div id="status-acad" style="font-size: 13px; margin-bottom: 6px;">📐 AutoCAD: <span style="color:#94a3b8">проверка...</span></div>
@@ -1416,14 +1418,16 @@ window.addEventListener('unhandledrejection', function(e) {
             merge: true,
             output_name,
             recursive: document.getElementById('recursive').checked,
-            windows_cad_ip: winIpInput.value.trim()
+            windows_cad_ip: winIpInput.value.trim(),
+            windows_cad_profile: document.getElementById('win-acad-profile').value.trim()
           };
         } else if (orderedSelections.length > 0) {
           checkPayload = {
             paths: orderedSelections.map(s => s.path),
             merge: false,
             recursive: document.getElementById('recursive').checked,
-            windows_cad_ip: winIpInput.value.trim()
+            windows_cad_ip: winIpInput.value.trim(),
+            windows_cad_profile: document.getElementById('win-acad-profile').value.trim()
           };
         } else if (currentPath) {
           checkPayload = {
@@ -1431,7 +1435,8 @@ window.addEventListener('unhandledrejection', function(e) {
             merge,
             output_name,
             recursive: document.getElementById('recursive').checked,
-            windows_cad_ip: winIpInput.value.trim()
+            windows_cad_ip: winIpInput.value.trim(),
+            windows_cad_profile: document.getElementById('win-acad-profile').value.trim()
           };
         }
         if (checkPayload) {
@@ -1452,7 +1457,8 @@ window.addEventListener('unhandledrejection', function(e) {
             number_pages,
             numbering_from_page,
             numbering_start,
-            windows_cad_ip: winIpInput.value.trim()
+            windows_cad_ip: winIpInput.value.trim(),
+            windows_cad_profile: document.getElementById('win-acad-profile').value.trim()
           });
           let logMsg = 'Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) +
             mergeSaveLog(j) + ', ошибок: ' + (j.stats ? j.stats.error : 0);
@@ -1471,6 +1477,7 @@ window.addEventListener('unhandledrejection', function(e) {
             merge: false,
             recursive: document.getElementById('recursive').checked,
             windows_cad_ip: winIpInput.value.trim(),
+            windows_cad_profile: document.getElementById('win-acad-profile').value.trim(),
             number_pages,
             numbering_from_page,
             numbering_start
@@ -1488,7 +1495,8 @@ window.addEventListener('unhandledrejection', function(e) {
             number_pages,
             numbering_from_page,
             numbering_start,
-            windows_cad_ip: winIpInput.value.trim()
+            windows_cad_ip: winIpInput.value.trim(),
+            windows_cad_profile: document.getElementById('win-acad-profile').value.trim()
           });
           if (j.merge) {
             let logMsg = 'Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) + mergeSaveLog(j);
@@ -1540,7 +1548,8 @@ window.addEventListener('unhandledrejection', function(e) {
             merge: true,
             output_name: 'draft.pdf',
             recursive: document.getElementById('recursive').checked,
-            windows_cad_ip: document.getElementById('win-ip').value.trim()
+            windows_cad_ip: document.getElementById('win-ip').value.trim(),
+            windows_cad_profile: document.getElementById('win-acad-profile').value.trim()
           })
         });
         
@@ -1600,7 +1609,8 @@ window.addEventListener('unhandledrejection', function(e) {
               number_pages,
               numbering_from_page,
               numbering_start,
-              windows_cad_ip: winIpInput.value.trim()
+              windows_cad_ip: winIpInput.value.trim(),
+              windows_cad_profile: document.getElementById('win-acad-profile').value.trim()
             })
           });
           if (!r.ok) {
@@ -1638,6 +1648,7 @@ window.addEventListener('unhandledrejection', function(e) {
             fd.append('numbering_start', numbering_start);
           }
           fd.append('windows_cad_ip', winIpInput.value.trim());
+          fd.append('windows_cad_profile', document.getElementById('win-acad-profile').value.trim());
           fd.append('output_name', output_name);
           const r = await fetch('/api/convert-local-workspace', { method: 'POST', body: fd });
           if (!r.ok) { showLog(await r.text()); return; }
@@ -1677,7 +1688,8 @@ window.addEventListener('unhandledrejection', function(e) {
                      number_pages,
                      numbering_from_page,
                      numbering_start,
-                     windows_cad_ip: winIpInput.value.trim()
+                     windows_cad_ip: winIpInput.value.trim(),
+                     windows_cad_profile: document.getElementById('win-acad-profile').value.trim()
                    })
                  });
                  if (res.ok) {
@@ -1712,6 +1724,7 @@ window.addEventListener('unhandledrejection', function(e) {
               fd.append('numbering_start', numbering_start);
             }
             fd.append('windows_cad_ip', winIpInput.value.trim());
+            fd.append('windows_cad_profile', document.getElementById('win-acad-profile').value.trim());
             const res = await fetch('/api/convert-local-workspace', { method: 'POST', body: fd });
             if (res.ok) {
               const blob = await res.blob();
@@ -1744,6 +1757,7 @@ window.addEventListener('unhandledrejection', function(e) {
     const winToggle = document.getElementById('win-toggle');
     const winBody = document.getElementById('win-body');
     const winIpInput = document.getElementById('win-ip');
+    const winProfileInput = document.getElementById('win-acad-profile');
     const btnWinCheck = document.getElementById('btn-win-check');
     const winStatus = document.getElementById('win-status');
 
@@ -1754,8 +1768,10 @@ window.addEventListener('unhandledrejection', function(e) {
 
     async function loadSavedCadIp() {
       let savedWinIp = '';
+      let savedWinProfile = '';
       try {
         savedWinIp = localStorage.getItem('win_cad_ip') || '';
+        savedWinProfile = localStorage.getItem('win_cad_profile') || '';
       } catch (e) {}
 
       try {
@@ -1773,6 +1789,12 @@ window.addEventListener('unhandledrejection', function(e) {
       if (savedWinIp) {
         winIpInput.value = savedWinIp;
         try { localStorage.setItem('win_cad_ip', savedWinIp); } catch (e) {}
+      }
+      if (savedWinProfile) {
+        winProfileInput.value = savedWinProfile;
+      }
+      
+      if (savedWinIp) {
         setTimeout(() => btnWinCheck.click(), 100);
       }
     }
@@ -1790,14 +1812,23 @@ window.addEventListener('unhandledrejection', function(e) {
         }
     });
 
+    winProfileInput.addEventListener('change', () => {
+        const profile = winProfileInput.value.trim();
+        try {
+            localStorage.setItem('win_cad_profile', profile);
+        } catch (e) {}
+    });
+
     btnWinCheck.onclick = async () => {
         const ip = winIpInput.value.trim();
+        const profile = winProfileInput.value.trim();
         if (!ip) {
             winStatus.textContent = 'Статус: введите IP-адрес';
             return;
         }
         try {
             localStorage.setItem('win_cad_ip', ip);
+            localStorage.setItem('win_cad_profile', profile);
         } catch (e) {}
         const fd = new FormData();
         fd.append('ip', ip);

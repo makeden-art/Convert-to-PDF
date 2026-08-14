@@ -76,7 +76,7 @@ WORK_DIR = os.path.join(SCRIPT_DIR, "cad_server_workdir")
 os.makedirs(WORK_DIR, exist_ok=True)
 
 @app.post("/convert")
-def convert_cad(file: UploadFile = File(None), ctb: str = Form(""), smb_dwg_path: str = Form(None)):
+def convert_cad(file: UploadFile = File(None), ctb: str = Form(""), smb_dwg_path: str = Form(None), profile: str = Form("")):
     if not ACAD_PATH or not os.path.exists(ACAD_PATH):
         return JSONResponse(status_code=400, content={"error": "AutoCAD (accoreconsole.exe) не найден на этом компьютере. Скрипт CAD-сервера должен запускаться на компьютере с установленным AutoCAD."})
     import tempfile
@@ -126,6 +126,8 @@ def convert_cad(file: UploadFile = File(None), ctb: str = Form(""), smb_dwg_path
     # 3. Запускаем AutoCAD Core Console в фоне
     print(f"Печатаем {safe_filename} с помощью {ACAD_PATH} (безопасный путь: {safe_dwg_path})...")
     cmd = [ACAD_PATH, "/i", safe_dwg_path, "/l", "ru-RU", "/s", scr_path]
+    if profile:
+        cmd.extend(["/p", profile])
     
     start_time = time.time()
     try:

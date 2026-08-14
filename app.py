@@ -424,6 +424,7 @@ async def api_convert_paths(body: PathsRequest):
                 numbering_from_page=body.numbering_from_page,
                 numbering_start=body.numbering_start,
                 windows_cad_ip=body.windows_cad_ip,
+                windows_cad_profile=body.windows_cad_profile,
             ),
             label=_paths_job_label(body),
             kind="convert_paths",
