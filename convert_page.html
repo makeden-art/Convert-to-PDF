@@ -174,6 +174,9 @@
       border-color: #38bdf8;
       color: #38bdf8;
     }
+    .tree-toggle:hover { color: #38bdf8; }
+    .tree-toggle { width: 22px; display: inline-block; text-align: center; cursor: pointer; color: #94a3b8; font-weight: bold; margin-right: 4px; font-size: 18px; line-height: 1; }
+    .tree-children { display: block; }
   </style>
 </head>
 <body>
@@ -272,7 +275,7 @@ window.addEventListener('unhandledrejection', function(e) {
       <div class="work-grid">
         <div class="tree-panel">
           <div class="tree-toolbar">
-            <button type="button" id="tree-up" class="secondary" title="Вверх"><span>↑</span> Наверх</button>
+            <button type="button" id="tree-up" class="secondary" title="Вверх" style="display:none;"><span>↑</span> Наверх</button>
             <button type="button" id="tree-refresh" class="secondary" title="Обновить"><span>↻</span></button>
             <span class="tree-path" id="tree-path" style="margin-left: 8px; flex-grow:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">/</span>
             <button type="button" id="btn-create-folder" style="background: #059669; color: #fff;" title="Создать папку">📂 Создать папку</button>
@@ -295,13 +298,14 @@ window.addEventListener('unhandledrejection', function(e) {
           <div class="tree-list" id="tree-list"></div>
         </div>
         <div class="action-panel">
-          <div class="drop" id="drop-upload">📎 Загрузить с компьютера (один или несколько файлов)</div>
+          <div class="drop" id="drop-upload" style="display:none">📎 Загрузить с компьютера (один или несколько файлов)</div>
           <input type="file" id="file-upload" style="display:none" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.rtf,.dwg,.dxf" />
         <p class="sel-count" id="sel-count" style="display:none;">На сервере: ничего не выбрано</p>
         <p class="sel-detail" id="sel-detail"></p>
         <p class="hint" id="frames-hint" style="display:none; margin-top: 4px;"></p>
-        <p class="sel-count" id="upload-count" style="color:#94a3b8">С компьютера: 0</p>
-        <div class="chk"><input type="checkbox" id="recursive" checked /><label for="recursive" style="margin:0">Включая вложенные подпапки (для выбранных папок)</label></div>
+        <p class="sel-count" id="upload-count" style="display:none; color:#94a3b8">С компьютера: 0</p>
+        <div class="chk" style="display:none"><input type="checkbox" id="recursive" checked /><label for="recursive" style="margin:0">Включая вложенные подпапки (для выбранных папок)</label></div>
+        <div class="chk"><input type="checkbox" id="smart-search" /><label for="smart-search" style="margin:0">Умный поиск поперечников (печать рамок из Модели)</label></div>
         <div class="chk"><input type="checkbox" id="merge" /><label for="merge" style="margin:0">Собрать в один PDF</label></div>
           <div class="merge-panel" id="merge-panel">
             <p class="hint" style="margin:0 0 6px">Порядок в сборке — перетащите мышью или ↑ ↓:</p>
@@ -316,22 +320,8 @@ window.addEventListener('unhandledrejection', function(e) {
             <span class="hint" style="margin:0">(раньше — без цифр)</span>
             <p class="num-preview" id="num-preview"></p>
           </div>
-          <label for="output-name">Имя итогового PDF (при сборке)</label>
-          <input type="text" id="output-name" value="сборка.pdf" />
-          <script>
-            document.addEventListener("DOMContentLoaded", () => {
-              const d = new Date();
-              const ds = [
-                String(d.getDate()).padStart(2, '0'),
-                String(d.getMonth() + 1).padStart(2, '0'),
-                d.getFullYear()
-              ].join('.');
-              const inp = document.getElementById('output-name');
-              if (inp && inp.value === 'сборка.pdf') {
-                inp.value = `сборка_${ds}.pdf`;
-              }
-            });
-          </script>
+          <label for="output-name" style="display:none;">Имя итогового PDF (при сборке)</label>
+          <input type="text" id="output-name" value="сборка.pdf" style="display:none;" />
           <div class="btn-row">
             <button type="button" id="btn-server" style="display:none;">Конвертировать на сервере</button>
             <button type="button" id="btn-preview-draft" style="display:none; background: #fbbf24; color: #000;">👁️ Предпросмотр и редактор</button>
@@ -549,6 +539,8 @@ window.addEventListener('unhandledrejection', function(e) {
       const btnConvert = document.getElementById('btn-server');
       const btnDownload = document.getElementById('btn-download');
       const btnPreviewDraft = document.getElementById('btn-preview-draft');
+      const outNameLabel = document.querySelector('label[for="output-name"]');
+      const outNameInp = document.getElementById('output-name');
       
       const hasFiles = orderedSelections.length > 0 || uploadFiles.length > 0;
       if (hasFiles) {
@@ -564,10 +556,16 @@ window.addEventListener('unhandledrejection', function(e) {
       
       if (mergeOn) {
         btnConvert.textContent = 'Собрать и конвертировать';
-      } else if (numberPages) {
-        btnConvert.textContent = 'Пронумеровать / Конвертировать';
+        if (outNameLabel) outNameLabel.style.display = 'block';
+        if (outNameInp) outNameInp.style.display = 'block';
       } else {
-        btnConvert.textContent = 'Конвертировать на сервере';
+        if (numberPages) {
+          btnConvert.textContent = 'Пронумеровать / Конвертировать';
+        } else {
+          btnConvert.textContent = 'Конвертировать на сервере';
+        }
+        if (outNameLabel) outNameLabel.style.display = 'none';
+        if (outNameInp) outNameInp.style.display = 'none';
       }
 
       // Блок нумерации показываем всегда (и при сборке, и для одиночных)
@@ -586,38 +584,48 @@ window.addEventListener('unhandledrejection', function(e) {
       mergePanel.classList.add('visible');
       updateNumberingPreview();
 
-      if (mergeOn && hasServer) {
-        if (mergeOrder.length && resolvedFileCount > 0 &&
-            mergeOrder.length === resolvedFileCount &&
-            mergeOrder[0] && mergeOrder[0].path && !mergeOrder[0].upload) {
-          renderMergeList();
-          return;
+      const loadServerMerge = async () => {
+        if (mergeOn && hasServer) {
+          if (mergeOrder.length && resolvedFileCount > 0 &&
+              mergeOrder.length === resolvedFileCount &&
+              mergeOrder[0] && mergeOrder[0].path && !mergeOrder[0].upload) {
+            return;
+          }
+          const r = await fetch('/api/resolve-paths', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              paths: orderedSelections.map(s => s.path),
+              recursive: document.getElementById('recursive').checked
+            })
+          });
+          const j = await r.json();
+          if (!r.ok) {
+            mergeList.innerHTML = '<div class="merge-item">' + (j.detail || 'Ошибка') + '</div>';
+            return;
+          }
+          mergeOrder = j.files || [];
+          resolvedFileCount = mergeOrder.length;
+          selDetailEl.textContent = 'К обработке: ' + resolvedFileCount + ' ' +
+            plural(resolvedFileCount, 'файл', 'файла', 'файлов');
+        } else if (hasUpload) {
+          mergeOrder = uploadFiles.map(f => ({ path: f.name, name: f.name, upload: true, file: f }));
+        } else {
+          mergeList.innerHTML = '<div class="merge-item">Выберите файлы или папки</div>';
+          mergeOrder = [];
         }
-        const r = await fetch('/api/resolve-paths', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            paths: orderedSelections.map(s => s.path),
-            recursive: document.getElementById('recursive').checked
-          })
-        });
-        const j = await r.json();
-        if (!r.ok) {
-          mergeList.innerHTML = '<div class="merge-item">' + (j.detail || 'Ошибка') + '</div>';
-          return;
+      };
+
+      loadServerMerge().then(() => {
+        if (mergeOn && outNameInp) {
+          if (mergeOrder.length === 1 && mergeOrder[0].name) {
+             outNameInp.value = mergeOrder[0].name.replace(/\.[^/.]+$/, "") + ".pdf";
+          } else if (!outNameInp.value || outNameInp.value.startsWith('сборка_')) {
+             outNameInp.value = 'сборка.pdf';
+          }
         }
-        mergeOrder = j.files || [];
-        resolvedFileCount = mergeOrder.length;
-        selDetailEl.textContent = 'К обработке: ' + resolvedFileCount + ' ' +
-          plural(resolvedFileCount, 'файл', 'файла', 'файлов');
-      } else if (hasUpload) {
-        mergeOrder = uploadFiles.map(f => ({ path: f.name, name: f.name, upload: true, file: f }));
-      } else {
-        mergeList.innerHTML = '<div class="merge-item">Выберите файлы или папки</div>';
-        mergeOrder = [];
-        return;
-      }
-      renderMergeList();
+        renderMergeList();
+      });
     }
 
     let mergeDragIdx = null;
@@ -771,34 +779,55 @@ window.addEventListener('unhandledrejection', function(e) {
       refreshMergePanel();
     }
 
+    window.expandedDirs = new Set();
+    
+    async function fetchDir(path) {
+      const q = path !== undefined ? ('?path=' + encodeURIComponent(path)) : '';
+      const r = await fetch('/api/browse' + q);
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.detail || 'Ошибка');
+      if (j.smb_mounted === false) throw new Error('🔌 SMB не подключён — подключите шару выше');
+      return j;
+    }
+
     async function loadTree(path) {
       const isRefresh = (path === undefined || path === currentPath);
       const savedScroll = isRefresh ? treeList.scrollTop : 0;
-      treeList.innerHTML = '<div class="tree-item">Загрузка…</div>';
-      const q = path !== undefined ? ('?path=' + encodeURIComponent(path)) : (currentPath ? '?path=' + encodeURIComponent(currentPath) : '');
-      const r = await fetch('/api/browse' + q);
-      const j = await r.json();
-      if (!r.ok) {
-        treeList.innerHTML = '<div class="tree-item">' + (j.detail || 'Ошибка') + '</div>';
-        return;
+      if (!isRefresh) treeList.innerHTML = '<div class="tree-item">Загрузка…</div>';
+      
+      try {
+        const j = await fetchDir(path || currentPath || '');
+        currentPath = j.path || '';
+        treePathEl.textContent = currentPath || '/';
+        treeList.innerHTML = '';
+        window.currentEntries = j.entries;
+        document.getElementById('chk-select-all').checked = false;
+        
+        if (!j.entries.length && j.message) {
+          treeList.innerHTML = '<div class="tree-item">' + j.message + '</div>';
+          return;
+        }
+        
+        renderNodes(j.entries, treeList, 0, currentPath);
+        
+        if (isRefresh) {
+          requestAnimationFrame(() => { treeList.scrollTop = savedScroll; });
+        }
+      } catch (e) {
+        treeList.innerHTML = '<div class="tree-item">' + escapeHtml(e.message) + '</div>';
       }
-      if (j.smb_mounted === false) {
-        treeList.innerHTML = '<div class="tree-item">🔌 SMB не подключён — подключите шару выше</div>';
-        return;
-      }
-      currentPath = j.path || '';
-      treePathEl.textContent = currentPath || '/';
-      treeList.innerHTML = '';
-      window.currentEntries = j.entries;
-      document.getElementById('chk-select-all').checked = false;
-      if (!j.entries.length && j.message) {
-        treeList.innerHTML = '<div class="tree-item">' + j.message + '</div>';
-        return;
-      }
-      for (const e of j.entries) {
+    }
+
+    function renderNodes(entries, container, level, parentPath) {
+      for (const e of entries) {
+        const rowWrap = document.createElement('div');
+        rowWrap.className = 'tree-row-wrap';
+        
         const row = document.createElement('div');
         const sel = isSelected(e.path);
         row.className = 'tree-item ' + e.type + (e.type === 'file' && !e.convertible ? ' disabled' : '') + (e.type === 'file' ? formatRowClass(e) : '');
+        row.style.paddingLeft = (12 + level * 20) + 'px';
+        
         const checked = sel ? 'checked' : '';
         const cb = '<input type="checkbox" class="chk-box" ' + checked + ' />';
 
@@ -810,9 +839,56 @@ window.addEventListener('unhandledrejection', function(e) {
         }
         const dateStr = e.mtime ? '<span style="margin-left:auto;color:#9ca3af;font-size:12px;padding-right:12px;">' + formatDate(e.mtime) + '</span>' : '<span style="margin-left:auto;"></span>';
 
+        let toggleHtml = '';
         if (e.type === 'dir') {
-          row.innerHTML = cb + '<span class="icon">📁</span><span class="name">' + e.name + '</span>' + dateStr;
-          row.querySelector('.name').onclick = () => loadTree(e.path);
+          const isExp = expandedDirs.has(e.path);
+          toggleHtml = '<span class="tree-toggle" data-path="' + escapeHtml(e.path) + '">' + (isExp ? '−' : '+') + '</span>';
+        } else {
+          toggleHtml = '<span style="width: 22px; display: inline-block; margin-right: 4px;"></span>';
+        }
+
+        if (e.type === 'dir') {
+          row.innerHTML = toggleHtml + cb + '<span class="icon">📁</span><span class="name">' + escapeHtml(e.name) + '</span>' + dateStr;
+          
+          const toggleEl = row.querySelector('.tree-toggle');
+          const childrenContainer = document.createElement('div');
+          childrenContainer.className = 'tree-children';
+          
+          const isExp = expandedDirs.has(e.path);
+          if (!isExp) childrenContainer.style.display = 'none';
+          
+          if (toggleEl) {
+            toggleEl.onclick = async (ev) => {
+              ev.stopPropagation();
+              const currentlyExpanded = expandedDirs.has(e.path);
+              if (currentlyExpanded) {
+                expandedDirs.delete(e.path);
+                toggleEl.textContent = '+';
+                childrenContainer.style.display = 'none';
+              } else {
+                expandedDirs.add(e.path);
+                toggleEl.textContent = '−';
+                childrenContainer.style.display = 'block';
+                if (!childrenContainer.hasChildNodes()) {
+                  childrenContainer.innerHTML = '<div class="tree-item" style="padding-left:' + (12 + (level + 1) * 20) + 'px; color:#64748b; font-size:13px;">Загрузка…</div>';
+                  try {
+                    const subJ = await fetchDir(e.path);
+                    childrenContainer.innerHTML = '';
+                    if (subJ.entries.length === 0) {
+                      childrenContainer.innerHTML = '<div class="tree-item" style="padding-left:' + (12 + (level + 1) * 20) + 'px; color:#64748b; font-size:13px;">Пусто</div>';
+                    } else {
+                      renderNodes(subJ.entries, childrenContainer, level + 1, e.path);
+                    }
+                  } catch (err) {
+                    childrenContainer.innerHTML = '<div class="tree-item" style="padding-left:' + (12 + (level + 1) * 20) + 'px; color:#f87171; font-size:13px;">' + escapeHtml(err.message) + '</div>';
+                  }
+                }
+              }
+            };
+            
+            row.querySelector('.name').onclick = () => toggleEl.click();
+          }
+
           const checkbox = row.querySelector('.chk-box');
           if (checkbox) {
             checkbox.onclick = ev => {
@@ -821,6 +897,16 @@ window.addEventListener('unhandledrejection', function(e) {
               checkbox.checked = isSelected(e.path);
             };
           }
+          
+          rowWrap.appendChild(row);
+          rowWrap.appendChild(childrenContainer);
+          container.appendChild(rowWrap);
+          
+          if (isExp) {
+             toggleEl.click(); 
+             toggleEl.click(); 
+          }
+
         } else {
           const fileIcon = e.format_icon || '📄';
           const viewHref = viewerUrl(e.path, e.name);
@@ -828,7 +914,7 @@ window.addEventListener('unhandledrejection', function(e) {
             ? ('<a class="btn-preview" href="' + viewHref +
                '" target="_blank" rel="noopener noreferrer" title="Просмотр в новой вкладке">👁</a>')
             : '';
-          row.innerHTML = cb + '<span class="icon">' + fileIcon + '</span>' +
+          row.innerHTML = toggleHtml + cb + '<span class="icon">' + fileIcon + '</span>' +
             (e.convertible
               ? ('<a class="name previewable" href="' + viewHref +
                  '" target="_blank" rel="noopener noreferrer" title="Просмотр в новой вкладке">' +
@@ -846,22 +932,13 @@ window.addEventListener('unhandledrejection', function(e) {
               checkbox.checked = isSelected(e.path);
             };
           }
+          rowWrap.appendChild(row);
+          container.appendChild(rowWrap);
         }
-        treeList.appendChild(row);
-      }
-      if (isRefresh) {
-        requestAnimationFrame(() => {
-            treeList.scrollTop = savedScroll;
-        });
       }
     }
 
-    document.getElementById('tree-up').onclick = async () => {
-      const q = currentPath ? ('?path=' + encodeURIComponent(currentPath)) : '';
-      const r = await fetch('/api/browse' + q);
-      const j = await r.json();
-      if (j.parent !== null && j.parent !== undefined) await loadTree(j.parent);
-    };
+    document.getElementById('tree-up').onclick = async () => {};
     document.getElementById('tree-refresh').onclick = () => loadTree(currentPath);
 
     // Загрузка на SMB
@@ -1419,8 +1496,12 @@ window.addEventListener('unhandledrejection', function(e) {
       const numbering_start = parseInt(document.getElementById('num-start').value, 10) || 1;
 
       const btn = document.getElementById('btn-server');
+      const btnDownload = document.getElementById('btn-download');
+      
       btn.disabled = true;
       btn.textContent = 'Обработка…';
+      if (btnDownload) btnDownload.disabled = true;
+      
       const fileCount = merge && mergeOrder.length ? mergeOrder.length : resolvedFileCount;
 
       try {
@@ -1477,7 +1558,8 @@ window.addEventListener('unhandledrejection', function(e) {
             numbering_from_page,
             numbering_start,
             windows_cad_ip: winIpInput.value.trim(),
-            windows_cad_profile: document.getElementById('win-acad-profile').value.trim()
+            windows_cad_profile: document.getElementById('win-acad-profile').value.trim(),
+            smart_search: document.getElementById('smart-search').checked
           });
           let logMsg = 'Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) +
             mergeSaveLog(j) + ', ошибок: ' + (j.stats ? j.stats.error : 0);
@@ -1499,7 +1581,8 @@ window.addEventListener('unhandledrejection', function(e) {
             windows_cad_profile: document.getElementById('win-acad-profile').value.trim(),
             number_pages,
             numbering_from_page,
-            numbering_start
+            numbering_start,
+            smart_search: document.getElementById('smart-search').checked
           });
           showLog('Готово: ' + j.stats.ok + ' OK, ошибок ' + j.stats.error + '\n' +
             j.files.map(f => f.status + ' | ' + f.source).join('\n'));
@@ -1515,7 +1598,8 @@ window.addEventListener('unhandledrejection', function(e) {
             numbering_from_page,
             numbering_start,
             windows_cad_ip: winIpInput.value.trim(),
-            windows_cad_profile: document.getElementById('win-acad-profile').value.trim()
+            windows_cad_profile: document.getElementById('win-acad-profile').value.trim(),
+            smart_search: document.getElementById('smart-search').checked
           });
           if (j.merge) {
             let logMsg = 'Сборка: ' + j.merged_pdf + '\nФайлов: ' + j.pages_from + numberingLog(j) + mergeSaveLog(j);
@@ -1539,6 +1623,7 @@ window.addEventListener('unhandledrejection', function(e) {
         stopProgress();
         btn.disabled = false;
         btn.textContent = 'Конвертировать на сервере';
+        if (btnDownload) btnDownload.disabled = false;
         loadTree(currentPath);
       }
     };
@@ -1611,8 +1696,12 @@ window.addEventListener('unhandledrejection', function(e) {
       }
 
       const btn = document.getElementById('btn-download');
+      const btnServer = document.getElementById('btn-server');
+      
       btn.disabled = true;
       btn.textContent = 'Обработка…';
+      if (btnServer) btnServer.disabled = true;
+      
       const fileCount = merge && mergeOrder.length ? mergeOrder.length : (hasUpload ? uploadFiles.length : orderedSelections.length);
       startProgress(progressMessage(merge, fileCount));
       try {
@@ -1768,11 +1857,10 @@ window.addEventListener('unhandledrejection', function(e) {
         stopProgress();
         btn.disabled = false;
         btn.textContent = 'Скачать PDF';
+        if (btnServer) btnServer.disabled = false;
+        loadTree(currentPath);
       }
-    };
-
-    
-    /* Windows Server setup */
+    };/* Windows Server setup */
     const winToggle = document.getElementById('win-toggle');
     const winBody = document.getElementById('win-body');
     const winIpInput = document.getElementById('win-ip');
