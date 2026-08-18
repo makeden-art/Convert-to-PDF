@@ -1,0 +1,1 @@
+(princ (strcat "\nPMP_DIR=" (getenv "PrinterDescDir")))

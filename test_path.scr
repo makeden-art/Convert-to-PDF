@@ -1,0 +1,1 @@
+(princ (strcat "\nPLOTTERS_DIR=" (getenv "PrinterConfigDir")))

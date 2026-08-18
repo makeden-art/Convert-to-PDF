@@ -1,0 +1,1 @@
+(setvar "PROXYSHOW" 1) (command "_.-EXPORT" "_PDF" "_All" "E:/Temp/test_blank.pdf") (command "_.QUIT" "_Y")

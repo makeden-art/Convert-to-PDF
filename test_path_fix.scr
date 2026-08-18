@@ -1,0 +1,1 @@
+(vl-catch-all-apply 'setenv (list "PrinterConfigDir" "C:\\Users\\makeden\\appdata\\roaming\\autodesk\\autocad 2022\\r24.1\\rus\\plotters")) (vl-catch-all-apply 'setenv (list "PrinterDescDir" "C:\\Users\\makeden\\appdata\\roaming\\autodesk\\autocad 2022\\r24.1\\rus\\plotters\\PMP Files")) (command "_.-EXPORT" "_PDF" "_All" "E:/Temp/test_export3.pdf") (command "_.QUIT" "_Y")

@@ -61,6 +61,13 @@
   const draftId = urlParams.get('draft_id');
   const pageCount = parseInt(urlParams.get('count') || '0');
   
+  if (urlParams.get('num') === '1') {
+    document.getElementById('chk-numbering').checked = true;
+    document.getElementById('num-options').style.display = 'flex';
+  }
+  if (urlParams.has('num_from')) document.getElementById('num-from').value = urlParams.get('num_from');
+  if (urlParams.has('num_start')) document.getElementById('num-start').value = urlParams.get('num_start');
+  
   if (!draftId || !pageCount) {
     alert("Ошибка загрузки черновика");
   }

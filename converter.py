@@ -857,6 +857,7 @@ def convert_paths(
     numbering_from_page: int = 1,
     numbering_start: int = 1,
     underlay_paths: list[str] | None = None,
+    smart_search: bool = False,
 ) -> dict:
     """Конвертировать выбранные файлы и папки на сервере."""
     inputs = resolve_ordered_inputs(paths, recursive=recursive)
@@ -1138,14 +1139,14 @@ def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = ""
     return meta
 
 
-def _convert_local_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None, original_src: Path = None, windows_cad_profile: str = "") -> dict | None:
+def _convert_local_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None, original_src: Path = None, windows_cad_profile: str = "", smart_search: bool = False) -> dict | None:
     if CONVERT_ISOLATE:
-        return convert_file_to_pdf_isolated(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path, original_src=original_src, windows_cad_profile=windows_cad_profile)
+        return convert_file_to_pdf_isolated(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path, original_src=original_src, windows_cad_profile=windows_cad_profile, smart_search=smart_search)
     else:
-        return convert_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path, original_src=original_src, windows_cad_profile=windows_cad_profile)
+        return convert_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path, original_src=original_src, windows_cad_profile=windows_cad_profile, smart_search=smart_search)
 
 
-def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None, original_src: Path = None, windows_cad_profile: str = "") -> dict | None:
+def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None, original_src: Path = None, windows_cad_profile: str = "", smart_search: bool = False) -> dict | None:
     """Конвертировать один локальный файл в указанный PDF. Для CAD возвращает meta."""
     src = src.resolve()
     suffix = src.suffix.lower()
@@ -1196,7 +1197,7 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
                     f.write(f"\nDEBUG CAD ERROR: {e}")
 
             with _cad_sem:
-                pdf_tmp, cad_meta = convert_cad_to_pdf(str(src), meta={"windows_cad_ip": windows_cad_ip, "windows_cad_profile": windows_cad_profile, "dsd_path": dsd_path, "smb_dwg_path": smb_dwg_path})
+                pdf_tmp, cad_meta = convert_cad_to_pdf(str(src), meta={"windows_cad_ip": windows_cad_ip, "windows_cad_profile": windows_cad_profile, "dsd_path": dsd_path, "smb_dwg_path": smb_dwg_path, "smart_search": smart_search})
             try:
                 shutil.move(str(pdf_tmp), str(dest))
             finally:
@@ -1485,6 +1486,7 @@ def convert_folder(
     numbering_from_page: int = 1,
     numbering_start: int = 1,
     underlay_paths: list[str] | None = None,
+    smart_search: bool = False,
 ) -> dict:
     folder = validate_folder(folder_path)
     inputs = _collect_inputs(folder, recursive)

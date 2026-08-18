@@ -35,6 +35,7 @@ def convert_cad_to_pdf(
     windows_cad_ip = meta.get('windows_cad_ip', '').strip() or get_saved_cad_ip()
     dsd_path = meta.get('dsd_path')
     smb_dwg_path = meta.get('smb_dwg_path')
+    smart_search = meta.get('smart_search', False)
     
     tmp = Path(tempfile.mkdtemp(prefix="cad_pdf_"))
     pdf_path = tmp / f"{input_path.stem}.pdf"
@@ -60,6 +61,9 @@ def convert_cad_to_pdf(
                 cmd.extend(['-F', f'smb_dwg_path={smb_dwg_path}'])
             else:
                 cmd.extend(['-F', f'file=@{input_path};filename=input{input_path.suffix}'])
+
+            if smart_search:
+                cmd.extend(['-F', 'smart_search=true'])
 
             if dsd_path and Path(dsd_path).exists():
                 cmd.extend(['-F', f'dsd_file=@{dsd_path};filename=input.dsd'])

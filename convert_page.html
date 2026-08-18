@@ -1664,7 +1664,10 @@ window.addEventListener('unhandledrejection', function(e) {
         }
         
         const data = await r.json();
-        window.open('/convert/editor?draft_id=' + encodeURIComponent(data.draft_id) + '&count=' + data.page_count, '_blank');
+        const qNum = document.getElementById('number-pages').checked ? 1 : 0;
+        const qFrom = parseInt(document.getElementById('page-start').value, 10) || 1;
+        const qStart = parseInt(document.getElementById('num-start').value, 10) || 1;
+        window.open('/convert/editor?draft_id=' + encodeURIComponent(data.draft_id) + '&count=' + data.page_count + '&num=' + qNum + '&num_from=' + qFrom + '&num_start=' + qStart, '_blank');
         
       } catch (e) {
         alert('Ошибка: ' + e.message);

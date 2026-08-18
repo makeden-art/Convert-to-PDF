@@ -1,0 +1,45 @@
+﻿
+content = """# Автономный запуск (без портала)
+#   docker compose up -d --build
+
+services:
+  convert-to-pdf:
+    build: .
+    image: makeden/convert-to-pdf:latest
+    container_name: convert-to-pdf-service
+    restart: unless-stopped
+    ports:
+      - "8084:8000"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    volumes:
+      - /opt/road-pdf-platform:/opt/road-pdf-platform:shared
+      - /opt/road-pdf-platform/convert-jobs:/data/convert-jobs
+      - type: bind
+        source: /opt/road-pdf-platform/mnt/smb
+        target: /data/smb
+        bind:
+          propagation: rslave
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower-convert-pdf
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_HTTP_API_UPDATE=true
+      - WATCHTOWER_HTTP_API_TOKEN=${WATCHTOWER_TOKEN:-platform_watchtower_secret}
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=3600
+      - WATCHTOWER_LABEL_ENABLE=true
+    command: --interval 3600
+
+networks:
+  default:
+    name: road-platform
+    external: true
+"""
+with open("/opt/road-pdf-platform/convert-to-pdf/docker-compose.yml", "w") as f:
+    f.write(content)
+

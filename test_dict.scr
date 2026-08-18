@@ -1,0 +1,1 @@
+(setq layout_names nil) (setq laydict (dictsearch (namedobjdict) "ACAD_LAYOUT")) (foreach item laydict (if (= (car item) 3) (if (not (= (cdr item) "Model")) (setq layout_names (append layout_names (list (cdr item))))))) (princ (strcat "\nLAYOUTS=" (vl-prin1-to-string layout_names) "\n")) (command "_.QUIT" "_Y")

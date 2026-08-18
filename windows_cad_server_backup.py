@@ -129,10 +129,12 @@ def convert(
     else:
         common_path_lisp = ""
 
-    force_smart_val = "T" if smart_search and smart_search.lower() == "true" else "nil"
-    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setvar "PROXYSHOW" 1)
+    if smart_search and smart_search.lower() == "true":
+        # Умный поиск рамок в Модели
+        pdf_prefix = safe_pdf_path.replace("\\", "/").replace(".pdf", "")
+        lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setvar "PROXYSHOW" 1)
 (vl-catch-all-apply 'setvar (list "PDFSHX" 0)) (vl-catch-all-apply 'setvar (list "EPDFSHX" 0)) {common_path_lisp} {attsync_lisp} {ctb_lisp}
-
+(setvar "TILEMODE" 1)
 (defun GetFrames ( / ss i ent edata pts xmin ymin xmax ymax w h frames)
   (setq frames '())
   (setq ss (ssget "X" '((0 . "LWPOLYLINE") (70 . 1) (410 . "Model"))))
@@ -150,62 +152,28 @@ def convert(
         (setq i (1+ i)))))
   frames
 )
-
-(defun ExportModelFrames ()
-  (setvar "TILEMODE" 1)
-  (setq frames (GetFrames))
-  (setq rowTol 150.0)
-  (setq frames (vl-sort frames (function (lambda (a b) (if (> (abs (- (cadr a) (cadr b))) rowTol) (> (cadr a) (cadr b)) (< (car a) (car b)))))))
-  (setq idx 1)
-  (foreach frm frames
-    (setq w (nth 4 frm) h (nth 5 frm))
-    (if (> w h)
-      (cond ((and (< w 450) (< h 320)) (setq paper "ISO_full_bleed_A3_(420.00_x_297.00_MM)"))
-            ((and (< w 620) (< h 450)) (setq paper "ISO_full_bleed_A2_(594.00_x_420.00_MM)"))
-            ((and (< w 870) (< h 620)) (setq paper "ISO_full_bleed_A1_(841.00_x_594.00_MM)"))
-            (t (setq paper "ISO_full_bleed_A0_(1189.00_x_841.00_MM)")))
-      (cond ((and (< w 320) (< h 450)) (setq paper "ISO_full_bleed_A3_(297.00_x_420.00_MM)"))
-            ((and (< w 450) (< h 620)) (setq paper "ISO_full_bleed_A2_(420.00_x_594.00_MM)"))
-            ((and (< w 620) (< h 870)) (setq paper "ISO_full_bleed_A1_(594.00_x_841.00_MM)"))
-            (t (setq paper "ISO_full_bleed_A0_(841.00_x_1189.00_MM)"))))
-    (setq outpath (strcat "{pdf_prefix}_" (itoa idx) ".pdf"))
-    (command "_.-PLOT" "_Y" "Model" "DWG To PDF.pc3" paper "_M" "_L" "_N" "_W" (list (car frm) (cadr frm)) (list (caddr frm) (cadddr frm)) "_F" "_C" "_Y" "monochrome.ctb" "_Y" "_W" outpath "_N" "_Y")
-    (setq idx (1+ idx))
-  )
-)
-
-(defun ExportPaperSpace ()
-  (setvar "TILEMODE" 0)
-  (vl-load-com)
-  (vl-catch-all-apply
-    (function
-      (lambda ()
-        (vlax-for layout (vla-get-Layouts (vla-get-ActiveDocument (vlax-get-acad-object)))
-          (if (= (vla-get-ModelType layout) :vlax-false)
-            (progn
-              (vla-put-ConfigName layout "DWG To PDF.pc3")
-              (vla-put-StandardScale layout 0) ; acScaleToFit
-              ; (vla-put-PlotType layout 1) ; acExtents - sometimes cuts off if elements are far
-              ; By default we keep the PlotType as is (usually acLayout), but force the PDF printer
-            )
-          )
-        )
-      )
-    )
-  )
-  (vl-catch-all-apply (function (lambda () (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}"))))
-)
-
-(setq force-smart {force_smart_val})
-(setq is-empty T)
-(setq ss-paper (ssget "X" '((410 . "~Model") (-4 . "<NOT") (0 . "VIEWPORT") (-4 . "NOT>"))))
-(if ss-paper (setq is-empty nil))
-
-(if (or force-smart is-empty)
-  (ExportModelFrames)
-  (ExportPaperSpace)
+(setq frames (GetFrames))
+(setq rowTol 150.0)
+(setq frames (vl-sort frames (function (lambda (a b) (if (> (abs (- (cadr a) (cadr b))) rowTol) (> (cadr a) (cadr b)) (< (car a) (car b)))))))
+(setq idx 1)
+(foreach frm frames
+  (setq w (nth 4 frm) h (nth 5 frm))
+  (if (> w h)
+    (cond ((and (< w 450) (< h 320)) (setq paper "ISO_full_bleed_A3_(420.00_x_297.00_MM)"))
+          ((and (< w 620) (< h 450)) (setq paper "ISO_full_bleed_A2_(594.00_x_420.00_MM)"))
+          ((and (< w 870) (< h 620)) (setq paper "ISO_full_bleed_A1_(841.00_x_594.00_MM)"))
+          (t (setq paper "ISO_full_bleed_A0_(1189.00_x_841.00_MM)")))
+    (cond ((and (< w 320) (< h 450)) (setq paper "ISO_full_bleed_A3_(297.00_x_420.00_MM)"))
+          ((and (< w 450) (< h 620)) (setq paper "ISO_full_bleed_A2_(420.00_x_594.00_MM)"))
+          ((and (< w 620) (< h 870)) (setq paper "ISO_full_bleed_A1_(594.00_x_841.00_MM)"))
+          (t (setq paper "ISO_full_bleed_A0_(841.00_x_1189.00_MM)"))))
+  (setq outpath (strcat "{pdf_prefix}_" (itoa idx) ".pdf"))
+  (command "_.-PLOT" "_Y" "Model" "DWG To PDF.pc3" paper "_M" "_L" "_N" "_W" (list (car frm) (cadr frm)) (list (caddr frm) (cadddr frm)) "_F" "_C" "_Y" "monochrome.ctb" "_Y" "_W" outpath "_N" "_Y")
+  (setq idx (1+ idx))
 )
 (command "_.QUIT" "_Y")"""
+    else:
+        lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setvar "PROXYSHOW" 1) (vl-catch-all-apply 'setvar (list "PDFSHX" 0)) (vl-catch-all-apply 'setvar (list "EPDFSHX" 0)) {common_path_lisp} {attsync_lisp} {ctb_lisp} (setvar "TILEMODE" 0) (vl-catch-all-apply (function (lambda () (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}")))) (command "_.QUIT" "_Y")"""
     
     # Записываем скрипт в одну строку в кодировке ANSI для стабильности
     with open(scr_path, "w", encoding="cp1251") as f:

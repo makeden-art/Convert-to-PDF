@@ -71,6 +71,7 @@ class FolderRequest(BaseModel):
     numbering_start: int = 1
     windows_cad_ip: str = ""
     windows_cad_profile: str = ""
+    smart_search: bool = False
 
 
 class PathsRequest(BaseModel):
@@ -85,6 +86,7 @@ class PathsRequest(BaseModel):
     numbering_start: int = 1
     windows_cad_ip: str = ""
     windows_cad_profile: str = ""
+    smart_search: bool = False
 
 
 class ResolveRequest(BaseModel):
@@ -431,6 +433,7 @@ async def api_convert_paths(body: PathsRequest):
                 numbering_start=body.numbering_start,
                 windows_cad_ip=body.windows_cad_ip,
                 windows_cad_profile=body.windows_cad_profile,
+                smart_search=body.smart_search,
             ),
             label=_paths_job_label(body),
             kind="convert_paths",
@@ -605,6 +608,7 @@ async def api_convert_folder(body: FolderRequest):
                 numbering_start=body.numbering_start,
                 windows_cad_ip=body.windows_cad_ip,
                 windows_cad_profile=body.windows_cad_profile,
+                smart_search=body.smart_search,
             ),
             label=_folder_job_label(body),
             kind="convert_folder",

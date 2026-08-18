@@ -1,0 +1,1 @@
+(vl-catch-all-apply 'setenv (list "PrinterConfigDir" "E:\\Temp")) (vl-catch-all-apply 'setenv (list "PrinterDescDir" "E:\\Temp")) (command "_.-EXPORT" "_PDF" "_All" "E:/Temp/test_export2.pdf") (command "_.QUIT" "_Y")
