@@ -108,6 +108,30 @@ def convert(
             shutil.copyfileobj(file.file, buffer)
         safe_dwg_path = os.path.join(temp_dir, f"temp_{safe_uid}.dwg")
         shutil.copy2(dwg_path, safe_dwg_path)
+        
+        # МАГИЧЕСКИЙ ПОИСК: Ищем оригинальный файл по размеру и первым байтам на шаре
+        try:
+            target_size = os.path.getsize(safe_dwg_path)
+            found_local = None
+            for root, dirs, files_in_dir in os.walk(r"E:\share_test"):
+                for f in files_in_dir:
+                    if f.lower().endswith('.dwg'):
+                        f_path = os.path.join(root, f)
+                        if os.path.getsize(f_path) == target_size:
+                            # Проверяем первые 4КБ, чтобы избежать коллизий
+                            with open(safe_dwg_path, 'rb') as f1, open(f_path, 'rb') as f2:
+                                if f1.read(4096) == f2.read(4096):
+                                    found_local = f_path
+                                    break
+                if found_local:
+                    break
+            
+            if found_local:
+                print(f"Магический поиск: найден оригинальный файл -> {found_local}")
+                safe_dwg_path = found_local
+                safe_filename = os.path.basename(found_local)
+        except Exception as e:
+            print(f"Ошибка магического поиска: {e}")
     else:
         return JSONResponse(status_code=400, content={"error": "Нет файла и нет пути"})
         
@@ -129,6 +153,7 @@ def convert(
     else:
         common_path_lisp = ""
 
+    pdf_prefix = safe_pdf_path.replace("\\", "/").replace(".pdf", "")
     force_smart_val = "T" if smart_search and smart_search.lower() == "true" else "nil"
     lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setvar "PROXYSHOW" 1)
 (vl-catch-all-apply 'setvar (list "PDFSHX" 0)) (vl-catch-all-apply 'setvar (list "EPDFSHX" 0)) {common_path_lisp} {attsync_lisp} {ctb_lisp}
@@ -197,11 +222,8 @@ def convert(
 )
 
 (setq force-smart {force_smart_val})
-(setq is-empty T)
-(setq ss-paper (ssget "X" '((410 . "~Model") (-4 . "<NOT") (0 . "VIEWPORT") (-4 . "NOT>"))))
-(if ss-paper (setq is-empty nil))
 
-(if (or force-smart is-empty)
+(if force-smart
   (ExportModelFrames)
   (ExportPaperSpace)
 )
@@ -221,7 +243,7 @@ def convert(
     start_time = time.time()
     try:
         # Убрали shell=True, чтобы процесс не осиротел при таймауте, иначе Python не сможет убить его
-        result = subprocess.run(cmd, shell=False, capture_output=True, timeout=300)
+        result = subprocess.run(cmd, shell=False, capture_output=True, timeout=1200)
         
         # accoreconsole.exe outputs in UTF-16 on Windows
         try:
@@ -230,9 +252,9 @@ def convert(
             stdout_text = result.stdout.decode("cp1251", errors="replace")
             
     except subprocess.TimeoutExpired:
-        print(f"ТАЙМАУТ ПЕЧАТИ (300 сек)! Убиваем зависший процесс AutoCAD для файла: {safe_filename}")
+        print(f"ТАЙМАУТ ПЕЧАТИ (1200 сек)! Убиваем зависший процесс AutoCAD для файла: {safe_filename}")
         subprocess.run('taskkill /F /IM accoreconsole.exe', shell=True)
-        return JSONResponse(status_code=504, content={"error": "AutoCAD timeout 300s. Process killed.", "log": ""})
+        return JSONResponse(status_code=504, content={"error": "AutoCAD timeout 1200s. Process killed.", "log": ""})
     
     # Проверяем, не выдал ли AutoCAD ошибку об отсутствии листов
     if "ERROR_NO_LAYOUTS" in stdout_text:
@@ -270,6 +292,39 @@ def convert(
     
     # Копируем PDF обратно
     if os.path.exists(safe_pdf_path):
+        # Удаляем полностью пустые страницы
+        try:
+            import fitz
+            doc = fitz.open(safe_pdf_path)
+            if len(doc) > 1:
+                pages_to_keep = []
+                for pno in range(len(doc)):
+                    page = doc[pno]
+                    text = page.get_text().strip()
+                    images = page.get_images()
+                    drawings = page.get_drawings()
+                    # Если есть хоть какой-то текст, картинки или больше 4 элементов векторной графики (рамка + видовой экран)
+                    if text or images or len(drawings) > 4:
+                        pages_to_keep.append(pno)
+                
+                if len(pages_to_keep) > 0 and len(pages_to_keep) < len(doc):
+                    print(f"Очистка пустых страниц. Оставляем: {pages_to_keep}")
+                    new_doc = fitz.open()
+                    for pno in pages_to_keep:
+                        new_doc.insert_pdf(doc, from_page=pno, to_page=pno)
+                    doc.close()
+                    # Пересохраняем поверх того же файла
+                    tmp_clean = safe_pdf_path + ".clean.pdf"
+                    new_doc.save(tmp_clean)
+                    new_doc.close()
+                    os.replace(tmp_clean, safe_pdf_path)
+                else:
+                    doc.close()
+            else:
+                doc.close()
+        except Exception as e:
+            print(f"Не удалось удалить пустые страницы: {e}")
+
         shutil.copy2(safe_pdf_path, pdf_path)
         
     # Убираем за собой
