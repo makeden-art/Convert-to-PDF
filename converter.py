@@ -1089,7 +1089,7 @@ def _convert_timeout_for(src: Path) -> int:
     return FILE_CONVERT_TIMEOUT_SEC
 
 
-def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None, original_src: Path = None, windows_cad_profile: str = "") -> dict | None:
+def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None, original_src: Path = None, windows_cad_profile: str = "", smart_search: bool = False) -> dict | None:
     """Конвертация в отдельном процессе — OOM дочернего не роняет uvicorn."""
     import sys
     import json
@@ -1104,12 +1104,9 @@ def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = ""
 
     try:
         args = [sys.executable, str(_WORKER_SCRIPT), str(src), str(dest), windows_cad_ip, windows_cad_profile]
-        if dsd_path:
-            args.append(str(dsd_path))
-        else:
-            args.append("")
-        if original_src:
-            args.append(str(original_src))
+        args.append(str(dsd_path) if dsd_path else "")
+        args.append(str(original_src) if original_src else "")
+        args.append(str(smart_search))
         proc = run_monitored(
             args,
             timeout=timeout_sec,

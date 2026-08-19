@@ -7,16 +7,20 @@ from pathlib import Path
 
 def main() -> None:
     if len(sys.argv) < 3:
-        print("usage: convert_worker.py <src> <dest.pdf> [windows_cad_ip] [dsd_path]", file=sys.stderr)
+        print("usage: convert_worker.py <src> <dest.pdf> [windows_cad_ip] [windows_cad_profile] [dsd_path] [original_src] [smart_search]", file=sys.stderr)
         sys.exit(2)
     src = Path(sys.argv[1])
     dest = Path(sys.argv[2])
     windows_cad_ip = sys.argv[3] if len(sys.argv) > 3 else ""
-    dsd_path = sys.argv[4] if len(sys.argv) > 4 else None
-    original_src = sys.argv[5] if len(sys.argv) > 5 else None
+    windows_cad_profile = sys.argv[4] if len(sys.argv) > 4 else ""
+    dsd_path = sys.argv[5] if len(sys.argv) > 5 and sys.argv[5] else None
+    original_src = sys.argv[6] if len(sys.argv) > 6 and sys.argv[6] else None
+    smart_search_str = sys.argv[7] if len(sys.argv) > 7 else "False"
+    smart_search = smart_search_str.lower() == "true"
+    
     from converter import convert_file_to_pdf
 
-    convert_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path, original_src=original_src)
+    convert_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path, original_src=original_src, windows_cad_profile=windows_cad_profile, smart_search=smart_search)
     if not dest.is_file():
         print("PDF не создан", file=sys.stderr)
         sys.exit(1)
