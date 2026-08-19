@@ -50,7 +50,7 @@ def convert_cad_to_pdf(
             logger.info('Sending CAD file to Windows Server: %s', url)
             
             cmd = [
-                'curl', '-sS', '-m', '1200', '-X', 'POST', url,
+                'curl', '-sS', '-m', '3600', '-X', 'POST', url,
                 '-H', 'Expect:',
 
                 '-o', str(pdf_path),

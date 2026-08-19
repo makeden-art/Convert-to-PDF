@@ -155,7 +155,7 @@ def convert(
 
     pdf_prefix = safe_pdf_path.replace("\\", "/").replace(".pdf", "")
     force_smart_val = "T" if smart_search and smart_search.lower() == "true" else "nil"
-    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setvar "PROXYSHOW" 1)
+    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "BACKGROUNDPLOT" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setvar "PROXYSHOW" 1)
 (vl-catch-all-apply 'setvar (list "PDFSHX" 0)) (vl-catch-all-apply 'setvar (list "EPDFSHX" 0)) {common_path_lisp} {attsync_lisp} {ctb_lisp}
 
 (defun GetFrames ( / ss i ent edata pts xmin ymin xmax ymax w h frames)
@@ -194,7 +194,7 @@ def convert(
             ((and (< w 620) (< h 870)) (setq paper "ISO_full_bleed_A1_(594.00_x_841.00_MM)"))
             (t (setq paper "ISO_full_bleed_A0_(841.00_x_1189.00_MM)"))))
     (setq outpath (strcat "{pdf_prefix}_" (itoa idx) ".pdf"))
-    (command "_.-PLOT" "_Y" "Model" "DWG To PDF.pc3" paper "_M" "_L" "_N" "_W" (list (car frm) (cadr frm)) (list (caddr frm) (cadddr frm)) "_F" "_C" "_Y" "monochrome.ctb" "_Y" "_W" outpath "_N" "_Y")
+    (command "_.-PLOT" "_Y" "Model" "AutoCAD PDF (General Documentation).pc3" paper "_M" "_L" "_N" "_W" (list (car frm) (cadr frm)) (list (caddr frm) (cadddr frm)) "_F" "_C" "_Y" "monochrome.ctb" "_Y" "_W" outpath "_N" "_Y")
     (setq idx (1+ idx))
   )
 )
@@ -208,7 +208,7 @@ def convert(
         (vlax-for layout (vla-get-Layouts (vla-get-ActiveDocument (vlax-get-acad-object)))
           (if (= (vla-get-ModelType layout) :vlax-false)
             (progn
-              (vla-put-ConfigName layout "DWG To PDF.pc3")
+              (vla-put-ConfigName layout "AutoCAD PDF (General Documentation).pc3")
               (vla-put-StandardScale layout 0) ; acScaleToFit
               ; (vla-put-PlotType layout 1) ; acExtents - sometimes cuts off if elements are far
               ; By default we keep the PlotType as is (usually acLayout), but force the PDF printer
@@ -243,7 +243,7 @@ def convert(
     start_time = time.time()
     try:
         # Убрали shell=True, чтобы процесс не осиротел при таймауте, иначе Python не сможет убить его
-        result = subprocess.run(cmd, shell=False, capture_output=True, timeout=1200)
+        result = subprocess.run(cmd, shell=False, capture_output=True, timeout=3600)
         
         # accoreconsole.exe outputs in UTF-16 on Windows
         try:
