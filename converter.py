@@ -1171,14 +1171,11 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
             
             smb_dwg_path = ""
             try:
-                debug_lines = []
                 check_src = Path(original_src) if original_src else src
-                debug_lines.append(f"DEBUG CAD: check_src={check_src}, check_src.resolve={check_src.resolve()}, SMB_ROOT.resolve={SMB_ROOT.resolve()}")
                 if str(check_src.resolve()).startswith(str(SMB_ROOT.resolve())):
                     remote_dir, remote_name = _virtual_smb_remote(check_src)
                     info = _smb_config()
                     unc = info.get("unc", "")
-                    debug_lines.append(f"DEBUG CAD: unc={unc}, remote_name={remote_name}")
                     if unc and remote_name:
                         win_unc = unc.replace('/', '\\')
                         win_dir = remote_dir.replace('/', '\\')
@@ -1186,12 +1183,8 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
                             smb_dwg_path = f"{win_unc}\\{remote_name}"
                         else:
                             smb_dwg_path = f"{win_unc}\\{win_dir}\\{remote_name}"
-                        debug_lines.append(f"DEBUG CAD: final smb_dwg_path={smb_dwg_path}")
-                with open("/tmp/cad_debug.txt", "w", encoding="utf-8") as f:
-                    f.write("\n".join(debug_lines))
             except Exception as e:
-                with open("/tmp/cad_debug.txt", "a", encoding="utf-8") as f:
-                    f.write(f"\nDEBUG CAD ERROR: {e}")
+                logger.debug("smb_dwg_path build error: %s", e)
 
             with _cad_sem:
                 pdf_tmp, cad_meta = convert_cad_to_pdf(str(src), meta={"windows_cad_ip": windows_cad_ip, "windows_cad_profile": windows_cad_profile, "dsd_path": dsd_path, "smb_dwg_path": smb_dwg_path, "smart_search": smart_search})

@@ -67,11 +67,6 @@ def convert_cad_to_pdf(
 
             if dsd_path and Path(dsd_path).exists():
                 cmd.extend(['-F', f'dsd_file=@{dsd_path};filename=input.dsd'])
-                
-            import json
-            with open("/tmp/cad_debug.txt", "a", encoding="utf-8") as f:
-                f.write(f"\nCURL CMD: {json.dumps(cmd, ensure_ascii=False)}")
-                
             res = subprocess.run(cmd, capture_output=True, text=True)
             http_code = res.stdout.strip()
             

@@ -70,10 +70,34 @@ def server_status():
         }
     }
 
+import threading
+import tempfile
+import uuid
+
 ACAD_PATH = find_accoreconsole()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WORK_DIR = os.path.join(SCRIPT_DIR, "cad_server_workdir")
 os.makedirs(WORK_DIR, exist_ok=True)
+
+# Путь к расшаренной папке на этом компьютере.
+# Можно переопределить через переменную окружения SHARE_LOCAL_PATH.
+SHARE_LOCAL_PATH = os.environ.get("SHARE_LOCAL_PATH", r"E:\share_test")
+
+# UNC-адрес этого компьютера (та же папка, только сетевой путь).
+SHARE_UNC_PATH = os.environ.get("SHARE_UNC_PATH", r"\\\\192.168.88.14\\share_test")
+
+# Мьютекс для MS Office (Word/Excel не поддерживают параллельную работу через COM)
+_office_lock = threading.Lock()
+
+ACAD_TIMEOUT_SEC = int(os.environ.get("ACAD_TIMEOUT_SEC", "3600"))
+
+def unc_to_local(path: str) -> str:
+    normalized = path.replace("/", "\\")
+    unc_norm = SHARE_UNC_PATH.replace("/", "\\").rstrip("\\")
+    local_norm = SHARE_LOCAL_PATH.rstrip("\\")
+    if normalized.lower().startswith(unc_norm.lower()):
+        return local_norm + normalized[len(unc_norm):]
+    return path
 
 @app.post("/convert")
 def convert(
@@ -91,19 +115,25 @@ def convert(
     temp_dir = tempfile.gettempdir()
     
     dwg_path = None
+    stdout_text = ""  # Fix #13: init before try
     if smb_dwg_path:
+        # Fix #10: Конвертируем UNC -> локальный путь
+        local_path = unc_to_local(smb_dwg_path)
+        if local_path != smb_dwg_path:
+            print(f"UNC -> локальный: {smb_dwg_path} -> {local_path}")
+            smb_dwg_path = local_path
         if not os.path.exists(smb_dwg_path):
-            return JSONResponse(status_code=400, content={"error": f"Сетевой путь недоступен для CAD сервера: {smb_dwg_path}. Возможно, служба запущена от имени System, а не вашего пользователя."})
-        print(f"Используем прямой путь к SMB: {smb_dwg_path}")
+            return JSONResponse(status_code=400, content={"error": f"Путь недоступен: {smb_dwg_path}. Проверьте SHARE_LOCAL_PATH."})
+        print(f"Используем путь: {smb_dwg_path}")
         safe_dwg_path = smb_dwg_path
         safe_filename = os.path.basename(smb_dwg_path)
         pdf_path = os.path.join(temp_dir, f"result_{safe_uid}.pdf")
     elif file:
-        safe_filename = file.filename.replace(" ", "_")
-        dwg_path = os.path.join(WORK_DIR, safe_filename)
-        pdf_path = dwg_path.replace(".dwg", ".pdf")
-        if os.path.exists(pdf_path):
-            os.remove(pdf_path)
+        # Fix #4: safe_uid в имени чтобы избежать race condition
+        orig_name = file.filename.replace(" ", "_")
+        safe_filename = orig_name
+        dwg_path = os.path.join(WORK_DIR, f"{safe_uid}_{orig_name}")
+        pdf_path = os.path.join(WORK_DIR, f"{safe_uid}_{orig_name}").replace(".dwg", ".pdf").replace(".DWG", ".pdf")
         with open(dwg_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         safe_dwg_path = os.path.join(temp_dir, f"temp_{safe_uid}.dwg")
@@ -113,7 +143,7 @@ def convert(
         try:
             target_size = os.path.getsize(safe_dwg_path)
             found_local = None
-            for root, dirs, files_in_dir in os.walk(r"E:\share_test"):
+            for root, dirs, files_in_dir in os.walk(SHARE_LOCAL_PATH):
                 for f in files_in_dir:
                     if f.lower().endswith('.dwg'):
                         f_path = os.path.join(root, f)
@@ -243,18 +273,18 @@ def convert(
     start_time = time.time()
     try:
         # Убрали shell=True, чтобы процесс не осиротел при таймауте, иначе Python не сможет убить его
-        result = subprocess.run(cmd, shell=False, capture_output=True, timeout=3600)
+        result = subprocess.run(cmd, shell=False, capture_output=True, timeout=ACAD_TIMEOUT_SEC)
         
         # accoreconsole.exe outputs in UTF-16 on Windows
         try:
             stdout_text = result.stdout.decode("utf-16", errors="replace")
-        except:
+        except Exception:
             stdout_text = result.stdout.decode("cp1251", errors="replace")
             
     except subprocess.TimeoutExpired:
-        print(f"ТАЙМАУТ ПЕЧАТИ (1200 сек)! Убиваем зависший процесс AutoCAD для файла: {safe_filename}")
+        print(f"ТАЙМАУТ ПЕЧАТИ ({ACAD_TIMEOUT_SEC} сек)! Убиваем зависший процесс AutoCAD для файла: {safe_filename}")
         subprocess.run('taskkill /F /IM accoreconsole.exe', shell=True)
-        return JSONResponse(status_code=504, content={"error": "AutoCAD timeout 1200s. Process killed.", "log": ""})
+        return JSONResponse(status_code=504, content={"error": f"AutoCAD timeout {ACAD_TIMEOUT_SEC}s. Process killed.", "log": ""})
     
     # Проверяем, не выдал ли AutoCAD ошибку об отсутствии листов
     if "ERROR_NO_LAYOUTS" in stdout_text:
@@ -348,6 +378,14 @@ def convert(
 
 @app.post("/convert-office")
 def convert_office(file: UploadFile = File(...)):
+    if not _office_lock.acquire(timeout=600):
+        return JSONResponse(status_code=503, content={"error": "Office конвертер занят, попробуйте позже."})
+    try:
+        return _convert_office_impl(file)
+    finally:
+        _office_lock.release()
+
+def _convert_office_impl(file: UploadFile):
     safe_filename = file.filename.replace(" ", "_")
     ext = os.path.splitext(safe_filename)[1].lower()
     in_path = os.path.join(WORK_DIR, safe_filename)
@@ -401,9 +439,9 @@ def convert_office(file: UploadFile = File(...)):
                         try:
                             excel.ActivePrinter = printer_str
                             break
-                        except:
+                        except Exception:
                             continue
-            except:
+            except Exception:
                 pass
                 
             wb = excel.Workbooks.Open(in_path)
@@ -464,7 +502,7 @@ def convert_office(file: UploadFile = File(...)):
     finally:
         try:
             os.remove(in_path)
-        except:
+        except Exception:
             pass
         pythoncom.CoUninitialize()
             
