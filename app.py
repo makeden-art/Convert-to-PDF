@@ -1,4 +1,4 @@
-"""Convert-to-PDF — конвертация редактируемых форматов в PDF."""
+﻿"""Convert-to-PDF вЂ” РєРѕРЅРІРµСЂС‚Р°С†РёСЏ СЂРµРґР°РєС‚РёСЂСѓРµРјС‹С… С„РѕСЂРјР°С‚РѕРІ РІ PDF."""
 from __future__ import annotations
 
 import asyncio
@@ -51,7 +51,7 @@ from converter import (
 
 MAX_MERGE_FILES = int(os.getenv("CONVERT_MAX_MERGE_FILES", "50"))
 
-app = FastAPI(title="Перевод в PDF", version="0.5.0")
+app = FastAPI(title="РџРµСЂРµРІРѕРґ РІ PDF", version="0.9.37")
 
 
 def _version() -> str:
@@ -65,7 +65,7 @@ class FolderRequest(BaseModel):
     path: str
     recursive: bool = True
     merge: bool = False
-    output_name: str = "сборка.pdf"
+    output_name: str = "СЃР±РѕСЂРєР°.pdf"
     number_pages: bool = False
     numbering_from_page: int = 1
     numbering_start: int = 1
@@ -79,7 +79,7 @@ class PathsRequest(BaseModel):
 
     paths: list[str]
     merge: bool = False
-    output_name: str = "сборка.pdf"
+    output_name: str = "СЃР±РѕСЂРєР°.pdf"
     recursive: bool = True
     number_pages: bool = False
     numbering_from_page: int = 1
@@ -98,7 +98,7 @@ class CheckOutputRequest(BaseModel):
     paths: list[str] | None = None
     folder_path: str | None = None
     merge: bool = False
-    output_name: str = "сборка.pdf"
+    output_name: str = "СЃР±РѕСЂРєР°.pdf"
     recursive: bool = True
 
 
@@ -111,19 +111,19 @@ class NumberPdfRequest(BaseModel):
 def _paths_job_label(body: PathsRequest) -> str:
     n = len(body.paths)
     if body.merge:
-        return f"Сборка «{body.output_name}» ({n} выб.)"
-    return f"Конвертация ({n} " + ("путь" if n == 1 else "путей") + ")"
+        return f"РЎР±РѕСЂРєР° В«{body.output_name}В» ({n} РІС‹Р±.)"
+    return f"РљРѕРЅРІРµСЂС‚Р°С†РёСЏ ({n} " + ("РїСѓС‚СЊ" if n == 1 else "РїСѓС‚РµР№") + ")"
 
 
 def _folder_job_label(body: FolderRequest) -> str:
     name = Path(body.path).name or body.path
     if body.merge:
-        return f"Сборка «{body.output_name}» — {name}"
-    return f"Папка: {name}"
+        return f"РЎР±РѕСЂРєР° В«{body.output_name}В» вЂ” {name}"
+    return f"РџР°РїРєР°: {name}"
 
 
 def _preview_job_files(paths: list[str], *, recursive: bool = True, limit: int = 500) -> dict[str, Any]:
-    """Список файлов задания для UI (до старта конвертации)."""
+    """РЎРїРёСЃРѕРє С„Р°Р№Р»РѕРІ Р·Р°РґР°РЅРёСЏ РґР»СЏ UI (РґРѕ СЃС‚Р°СЂС‚Р° РєРѕРЅРІРµСЂС‚Р°С†РёРё)."""
     files = resolve_ordered_inputs_with_format(paths, recursive=recursive)
     truncated = len(files) > limit
     items = []
@@ -309,7 +309,7 @@ async def api_preview(path: str, page: int = 1, variant: str = "source"):
     except (asyncio.TimeoutError, TimeoutError) as e:
         raise HTTPException(
             status_code=504,
-            detail="Превышено время ожидания предпросмотра. Попробуйте PDF рядом или выполните конвертацию.",
+            detail="РџСЂРµРІС‹С€РµРЅРѕ РІСЂРµРјСЏ РѕР¶РёРґР°РЅРёСЏ РїСЂРµРґРїСЂРѕСЃРјРѕС‚СЂР°. РџРѕРїСЂРѕР±СѓР№С‚Рµ PDF СЂСЏРґРѕРј РёР»Рё РІС‹РїРѕР»РЅРёС‚Рµ РєРѕРЅРІРµСЂС‚Р°С†РёСЋ.",
         ) from e
     except RuntimeError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
@@ -348,7 +348,7 @@ async def api_view_document(path: str, variant: str = "source"):
             shutil.rmtree(tmp_parent, ignore_errors=True)
         raise HTTPException(
             status_code=504,
-            detail="Превышено время ожидания подготовки документа для просмотра.",
+            detail="РџСЂРµРІС‹С€РµРЅРѕ РІСЂРµРјСЏ РѕР¶РёРґР°РЅРёСЏ РїРѕРґРіРѕС‚РѕРІРєРё РґРѕРєСѓРјРµРЅС‚Р° РґР»СЏ РїСЂРѕСЃРјРѕС‚СЂР°.",
         ) from e
     except ValueError as e:
         if tmp_parent:
@@ -374,7 +374,7 @@ async def api_convert_queue():
 async def api_convert_job_cancel(job_id: str):
     result = await asyncio.to_thread(cancel_job, job_id)
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error", "Не удалось отменить"))
+        raise HTTPException(status_code=400, detail=result.get("error", "РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РјРµРЅРёС‚СЊ"))
     return JSONResponse(result)
 
 
@@ -382,7 +382,7 @@ async def api_convert_job_cancel(job_id: str):
 async def api_convert_job(job_id: str):
     job = get_job(job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="Задача не найдена")
+        raise HTTPException(status_code=404, detail="Р—Р°РґР°С‡Р° РЅРµ РЅР°Р№РґРµРЅР°")
     return JSONResponse(job)
 
 
@@ -395,7 +395,7 @@ async def api_number_pdf(body: NumberPdfRequest):
                 numbering_from_page=body.numbering_from_page,
                 numbering_start=body.numbering_start,
             ),
-            label=f"Нумерация: {Path(body.path).name}",
+            label=f"РќСѓРјРµСЂР°С†РёСЏ: {Path(body.path).name}",
             kind="number_pdf",
             meta={
                 "path": body.path,
@@ -456,11 +456,11 @@ async def api_convert_paths(body: PathsRequest):
 
 @app.post("/api/create-folder-smb")
 async def api_create_folder_smb(target_dir: str = Form(...), folder_name: str = Form(...)):
-    """Создает новую папку на SMB."""
+    """РЎРѕР·РґР°РµС‚ РЅРѕРІСѓСЋ РїР°РїРєСѓ РЅР° SMB."""
     if not _is_smb_path(Path(target_dir)):
-        raise HTTPException(status_code=400, detail="Только для SMB-шар")
+        raise HTTPException(status_code=400, detail="РўРѕР»СЊРєРѕ РґР»СЏ SMB-С€Р°СЂ")
     if not _smb_mounted():
-        raise HTTPException(status_code=500, detail="SMB шара не примонтирована")
+        raise HTTPException(status_code=500, detail="SMB С€Р°СЂР° РЅРµ РїСЂРёРјРѕРЅС‚РёСЂРѕРІР°РЅР°")
     
     target_path = Path(target_dir)
     new_folder = target_path / folder_name
@@ -475,7 +475,7 @@ import traceback
 
 @app.post("/api/delete-smb")
 async def api_delete_smb(request: Request):
-    """Удаляет файлы или папки на SMB."""
+    """РЈРґР°Р»СЏРµС‚ С„Р°Р№Р»С‹ РёР»Рё РїР°РїРєРё РЅР° SMB."""
     try:
         form = await request.form()
         paths = form.getlist('paths')
@@ -483,13 +483,13 @@ async def api_delete_smb(request: Request):
         is_dirs = [s.lower() == 'true' for s in is_dirs_str]
         
         if not _smb_mounted():
-            return JSONResponse(status_code=500, content={"detail": "SMB шара не примонтирована"})
+            return JSONResponse(status_code=500, content={"detail": "SMB С€Р°СЂР° РЅРµ РїСЂРёРјРѕРЅС‚РёСЂРѕРІР°РЅР°"})
         
         deleted = []
         errors = []
         for path_str, is_dir in zip(paths, is_dirs):
             if not _is_smb_path(Path(path_str)):
-                errors.append({"path": path_str, "error": "Не SMB путь"})
+                errors.append({"path": path_str, "error": "РќРµ SMB РїСѓС‚СЊ"})
                 continue
             try:
                 await asyncio.to_thread(_smb_delete, Path(path_str), is_dir)
@@ -498,7 +498,7 @@ async def api_delete_smb(request: Request):
                 errors.append({"path": path_str, "error": str(e)})
                 
         if errors and not deleted:
-            return JSONResponse(status_code=500, content={"detail": f"Ошибки при удалении: {errors}"})
+            return JSONResponse(status_code=500, content={"detail": f"РћС€РёР±РєРё РїСЂРё СѓРґР°Р»РµРЅРёРё: {errors}"})
         return {"status": "ok", "deleted": deleted, "errors": errors}
     except Exception as e:
         return JSONResponse(status_code=500, content={"detail": traceback.format_exc()})
@@ -520,7 +520,7 @@ async def api_upload_to_smb(
         created_dirs = set()
         for i, uf in enumerate(files):
             rel_path = paths[i]
-            # Защита от выхода за пределы папки
+            # Р—Р°С‰РёС‚Р° РѕС‚ РІС‹С…РѕРґР° Р·Р° РїСЂРµРґРµР»С‹ РїР°РїРєРё
             rel_path = rel_path.lstrip("/\\")
             if ".." in rel_path:
                 continue
@@ -531,10 +531,10 @@ async def api_upload_to_smb(
             
             final_target = target_path / rel_path
             if is_smb:
-                # Если папка новая, нужно создать ее на SMB
+                # Р•СЃР»Рё РїР°РїРєР° РЅРѕРІР°СЏ, РЅСѓР¶РЅРѕ СЃРѕР·РґР°С‚СЊ РµРµ РЅР° SMB
                 parent_dir = final_target.parent
                 if str(parent_dir) not in created_dirs and parent_dir != target_path:
-                    # Создаем все родительские папки
+                    # РЎРѕР·РґР°РµРј РІСЃРµ СЂРѕРґРёС‚РµР»СЊСЃРєРёРµ РїР°РїРєРё
                     parts = rel_path.split("/")[:-1]
                     cur = target_path
                     for p in parts:
@@ -559,9 +559,9 @@ async def api_upload_to_smb(
 
 @app.post("/api/convert-merge-download")
 async def api_convert_merge_download(body: PathsRequest):
-    """Сборка PDF с сервера (SMB) и отдача файла для скачивания."""
+    """РЎР±РѕСЂРєР° PDF СЃ СЃРµСЂРІРµСЂР° (SMB) Рё РѕС‚РґР°С‡Р° С„Р°Р№Р»Р° РґР»СЏ СЃРєР°С‡РёРІР°РЅРёСЏ."""
     if not body.paths:
-        raise HTTPException(status_code=400, detail="Укажите файлы для сборки")
+        raise HTTPException(status_code=400, detail="РЈРєР°Р¶РёС‚Рµ С„Р°Р№Р»С‹ РґР»СЏ СЃР±РѕСЂРєРё")
     tmp_parent: Path | None = None
     try:
         from_page = body.numbering_from_page if body.number_pages else None
@@ -575,7 +575,7 @@ async def api_convert_merge_download(body: PathsRequest):
             numbering_start=start_num,
             windows_cad_ip=body.windows_cad_ip,
         )
-        filename = Path(body.output_name).name or "сборка.pdf"
+        filename = Path(body.output_name).name or "СЃР±РѕСЂРєР°.pdf"
         if not filename.lower().endswith(".pdf"):
             filename += ".pdf"
         return FileResponse(
@@ -634,9 +634,9 @@ async def api_convert_folder_form(
     path: str = Form(...),
     recursive: bool = Form(True),
     merge: bool = Form(False),
-    output_name: str = Form("сборка.pdf"),
+    output_name: str = Form("СЃР±РѕСЂРєР°.pdf"),
 ):
-    """Для вызова из curl / скриптов без JSON."""
+    """Р”Р»СЏ РІС‹Р·РѕРІР° РёР· curl / СЃРєСЂРёРїС‚РѕРІ Р±РµР· JSON."""
     try:
         return JSONResponse(convert_folder(path, recursive, merge=merge, output_name=output_name))
     except ValueError as e:
@@ -651,14 +651,14 @@ async def api_convert_merge(
     numbering_start: int = Form(1),
     windows_cad_ip: str = Form(""),
     windows_cad_profile: str = Form(""),
-    output_name: str = Form("сборка.pdf"),
+    output_name: str = Form("СЃР±РѕСЂРєР°.pdf"),
 ):
     if not files:
-        raise HTTPException(status_code=400, detail="Передайте хотя бы один файл")
+        raise HTTPException(status_code=400, detail="РџРµСЂРµРґР°Р№С‚Рµ С…РѕС‚СЏ Р±С‹ РѕРґРёРЅ С„Р°Р№Р»")
     if len(files) > MAX_MERGE_FILES:
         raise HTTPException(
             status_code=400,
-            detail=f"Слишком много файлов (макс. {MAX_MERGE_FILES})",
+            detail=f"РЎР»РёС€РєРѕРј РјРЅРѕРіРѕ С„Р°Р№Р»РѕРІ (РјР°РєСЃ. {MAX_MERGE_FILES})",
         )
 
     tmp = Path(tempfile.mkdtemp(prefix="convert_merge_"))
@@ -669,14 +669,14 @@ async def api_convert_merge(
             if suffix not in SUPPORTED_ALL:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Формат {suffix} не поддерживается ({uf.filename})",
+                    detail=f"Р¤РѕСЂРјР°С‚ {suffix} РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ ({uf.filename})",
                 )
             dest = tmp / f"{len(sources):04d}_{Path(uf.filename or 'upload').name}"
             dest.write_bytes(await uf.read())
             _validate_file_format_or_raise(dest)
             sources.append(dest)
 
-        out = tmp / "сборка.pdf"
+        out = tmp / "СЃР±РѕСЂРєР°.pdf"
         from_page = numbering_from_page if number_pages else None
         start_num = numbering_start if number_pages else 1
         await asyncio.to_thread(
@@ -691,7 +691,7 @@ async def api_convert_merge(
         return FileResponse(
             path=str(out),
             media_type="application/pdf",
-            filename="сборка.pdf",
+            filename="СЃР±РѕСЂРєР°.pdf",
             background=BackgroundTask(lambda: shutil.rmtree(tmp, ignore_errors=True)),
         )
     except HTTPException:
@@ -715,7 +715,7 @@ async def api_convert(
     if suffix not in SUPPORTED_ALL:
         raise HTTPException(
             status_code=400,
-            detail=f"Формат {suffix} не поддерживается. Доступно: {', '.join(sorted(SUPPORTED_ALL))}",
+            detail=f"Р¤РѕСЂРјР°С‚ {suffix} РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ. Р”РѕСЃС‚СѓРїРЅРѕ: {', '.join(sorted(SUPPORTED_ALL))}",
         )
 
     tmp = Path(tempfile.mkdtemp(prefix="convert_pdf_"))
@@ -817,7 +817,7 @@ DRAFTS_DIR = Path(os.getenv("CONVERT_JOBS_DIR", "/data/convert-jobs")) / "drafts
 @app.post("/api/convert-draft")
 async def api_convert_draft(body: PathsRequest):
     if not body.paths:
-        raise HTTPException(status_code=400, detail="Укажите файлы для сборки")
+        raise HTTPException(status_code=400, detail="РЈРєР°Р¶РёС‚Рµ С„Р°Р№Р»С‹ РґР»СЏ СЃР±РѕСЂРєРё")
     
     draft_id = str(uuid.uuid4())
     DRAFTS_DIR.mkdir(exist_ok=True, parents=True)
@@ -856,7 +856,7 @@ async def api_convert_draft(body: PathsRequest):
 async def api_draft_pages(draft_id: str):
     draft_pdf = DRAFTS_DIR / draft_id / "draft.pdf"
     if not draft_pdf.exists():
-        raise HTTPException(status_code=404, detail="Черновик не найден")
+        raise HTTPException(status_code=404, detail="Р§РµСЂРЅРѕРІРёРє РЅРµ РЅР°Р№РґРµРЅ")
     import fitz
     doc = fitz.open(str(draft_pdf))
     page_count = len(doc)
@@ -867,7 +867,7 @@ async def api_draft_pages(draft_id: str):
 async def api_draft_preview(draft_id: str, page: int = 1):
     draft_pdf = DRAFTS_DIR / draft_id / "draft.pdf"
     if not draft_pdf.exists():
-        raise HTTPException(status_code=404, detail="Черновик не найден")
+        raise HTTPException(status_code=404, detail="Р§РµСЂРЅРѕРІРёРє РЅРµ РЅР°Р№РґРµРЅ")
     try:
         from file_preview import render_preview_png
         png, meta = await asyncio.wait_for(
@@ -886,7 +886,7 @@ async def api_draft_preview(draft_id: str, page: int = 1):
 async def api_draft_finalize(draft_id: str, body: DraftFinalizeRequest):
     draft_pdf = DRAFTS_DIR / draft_id / "draft.pdf"
     if not draft_pdf.exists():
-        raise HTTPException(status_code=404, detail="Черновик не найден")
+        raise HTTPException(status_code=404, detail="Р§РµСЂРЅРѕРІРёРє РЅРµ РЅР°Р№РґРµРЅ")
         
     final_pdf = DRAFTS_DIR / draft_id / "final.pdf"
     
@@ -915,5 +915,6 @@ async def api_draft_finalize(draft_id: str, body: DraftFinalizeRequest):
     return FileResponse(
         path=str(final_pdf),
         media_type="application/pdf",
-        filename="сборка.pdf",
+        filename="СЃР±РѕСЂРєР°.pdf",
     )
+
