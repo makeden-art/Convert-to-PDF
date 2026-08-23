@@ -1683,57 +1683,6 @@ window.addEventListener('unhandledrejection', function(e) {
       }
     };
 
-    document.getElementById('btn-preview-draft').onclick = async () => {
-      const serverMerge = document.getElementById('merge').checked && hasServerMergeQueue();
-      if (!serverMerge) {
-        alert('Предпросмотр доступен только для объединения файлов на сервере.');
-        return;
-      }
-      if (!mergeOrder.length) {
-        alert('Нет файлов в сборке');
-        return;
-      }
-
-      const btn = document.getElementById('btn-preview-draft');
-      btn.disabled = true;
-      btn.textContent = 'Подготовка…';
-      startProgress(progressMessage(true, mergeOrder.length));
-      try {
-        const r = await fetch('/api/convert-draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            paths: mergeOrder.map(f => f.path),
-            excluded_paths: Array.from(window.excludedSelections || []),
-            merge: true,
-            output_name: 'draft.pdf',
-            recursive: document.getElementById('recursive').checked,
-            windows_cad_ip: document.getElementById('win-ip').value.trim(),
-            windows_cad_profile: document.getElementById('win-acad-profile').value.trim()
-          })
-        });
-        
-        if (!r.ok) {
-            let msg = 'Ошибка подготовки черновика';
-            try { msg = (await r.json()).detail || msg; } catch(e){}
-            throw new Error(msg);
-        }
-        
-        const data = await r.json();
-        const qNum = document.getElementById('number-pages').checked ? 1 : 0;
-        const qFrom = parseInt(document.getElementById('page-start').value, 10) || 1;
-        const qStart = parseInt(document.getElementById('num-start').value, 10) || 1;
-        window.open('/convert/editor?draft_id=' + encodeURIComponent(data.draft_id) + '&count=' + data.page_count + '&num=' + qNum + '&num_from=' + qFrom + '&num_start=' + qStart, '_blank');
-        
-      } catch (e) {
-        alert('Ошибка: ' + e.message);
-      } finally {
-        stopProgress();
-        btn.disabled = false;
-        btn.innerHTML = '👁️ Предпросмотр и редактор';
-      }
-    };
-
     document.getElementById('btn-download').onclick = async () => {
       const merge = document.getElementById('merge').checked;
       const number_pages = document.getElementById('number-pages').checked;
