@@ -325,7 +325,7 @@ window.addEventListener('unhandledrejection', function(e) {
           <input type="text" id="output-name" value="сборка.pdf" style="display:none;" />
           <div class="btn-row">
             <button type="button" id="btn-server" style="display:none;">Конвертировать на сервере</button>
-            <button type="button" id="btn-preview-draft" style="display:none; background: #fbbf24; color: #000;">👁️ Предпросмотр и редактор</button>
+            
             <button type="button" id="btn-download" style="display:none;">Скачать PDF</button>
           </div>
           <pre id="log-work" style="display:none"></pre>
@@ -389,6 +389,7 @@ window.addEventListener('unhandledrejection', function(e) {
     }
 
     function isSelected(path) {
+      if (window.excludedSelections && window.excludedSelections.has(path)) return false;
       return orderedSelections.some(s => s.path === path || path.startsWith(s.path + '/'));
     }
 
@@ -418,15 +419,27 @@ window.addEventListener('unhandledrejection', function(e) {
 
     function toggleSelection(path, name, type, checked) {
       if (checked) {
-        if (!isSelected(path)) orderedSelections.push({ path, name, type });
+        window.excludedSelections.delete(path);
+        // If it was excluded, checking it just removes it from exclusions
+        // But if its parent isn't selected, we must add it to orderedSelections
+        if (!isSelected(path) || window.excludedSelections.has(path)) {
+           orderedSelections.push({ path, name, type });
+        }
       } else {
         const direct = orderedSelections.some(s => s.path === path);
         if (!direct && isSelected(path)) {
-           alert("Этот элемент выделен, потому что выделена папка. Снимите галочку с родительской папки.");
-           setTimeout(updateAllCheckboxes, 10);
-           return;
+           // Parent is selected, so we add to exclusions instead of alerting
+           window.excludedSelections.add(path);
+        } else {
+           // Was directly selected, remove it
+           orderedSelections = orderedSelections.filter(s => s.path !== path);
+           // Also remove any exclusions that were children of this folder
+           if (type === 'dir') {
+             for (const ex of window.excludedSelections) {
+                if (ex.startsWith(path + '/')) window.excludedSelections.delete(ex);
+             }
+           }
         }
-        orderedSelections = orderedSelections.filter(s => s.path !== path);
       }
       updateSelCount();
       refreshMergePanel();
@@ -545,6 +558,8 @@ window.addEventListener('unhandledrejection', function(e) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             paths: orderedSelections.map(s => s.path),
+              excluded_paths: Array.from(window.excludedSelections || []),
+            excluded_paths: Array.from(window.excludedSelections || []),
             recursive: document.getElementById('recursive').checked
           })
         });
@@ -571,7 +586,7 @@ window.addEventListener('unhandledrejection', function(e) {
       const numberPages = document.getElementById('number-pages').checked;
       const btnConvert = document.getElementById('btn-server');
       const btnDownload = document.getElementById('btn-download');
-      const btnPreviewDraft = document.getElementById('btn-preview-draft');
+      
       const outNameLabel = document.querySelector('label[for="output-name"]');
       const outNameInp = document.getElementById('output-name');
       
@@ -579,12 +594,12 @@ window.addEventListener('unhandledrejection', function(e) {
       if (hasFiles) {
         btnConvert.style.display = 'inline-block';
         btnDownload.style.display = 'inline-block';
-        if (mergeOn) btnPreviewDraft.style.display = 'inline-block';
-        else btnPreviewDraft.style.display = 'none';
+        
+        
       } else {
         btnConvert.style.display = 'none';
         btnDownload.style.display = 'none';
-        btnPreviewDraft.style.display = 'none';
+        
       }
       
       if (mergeOn) {
@@ -629,6 +644,8 @@ window.addEventListener('unhandledrejection', function(e) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               paths: orderedSelections.map(s => s.path),
+              excluded_paths: Array.from(window.excludedSelections || []),
+            excluded_paths: Array.from(window.excludedSelections || []),
               recursive: document.getElementById('recursive').checked
             })
           });
@@ -813,6 +830,7 @@ window.addEventListener('unhandledrejection', function(e) {
     }
 
     window.expandedDirs = new Set();
+    window.excludedSelections = new Set();
     
     async function fetchDir(path) {
       const q = path !== undefined ? ('?path=' + encodeURIComponent(path)) : '';
@@ -1548,6 +1566,7 @@ window.addEventListener('unhandledrejection', function(e) {
           }
           checkPayload = {
             paths: mergeOrder.map(f => f.path),
+            excluded_paths: Array.from(window.excludedSelections || []),
             merge: true,
             output_name,
             recursive: document.getElementById('recursive').checked,
@@ -1557,6 +1576,7 @@ window.addEventListener('unhandledrejection', function(e) {
         } else if (orderedSelections.length > 0) {
           checkPayload = {
             paths: orderedSelections.map(s => s.path),
+            excluded_paths: Array.from(window.excludedSelections || []),
             merge: false,
             recursive: document.getElementById('recursive').checked,
             windows_cad_ip: winIpInput.value.trim(),
@@ -1585,6 +1605,7 @@ window.addEventListener('unhandledrejection', function(e) {
         if (merge) {
           const j = await apiPost('/api/convert-paths', {
             paths: mergeOrder.map(f => f.path),
+            excluded_paths: Array.from(window.excludedSelections || []),
             merge: true,
             output_name,
             number_pages,
@@ -1607,6 +1628,7 @@ window.addEventListener('unhandledrejection', function(e) {
           const underlays = window.smbUnderlays ? Object.keys(window.smbUnderlays).filter(k => window.smbUnderlays[k]) : [];
           const j = await apiPost('/api/convert-paths', {
             paths: orderedSelections.map(s => s.path),
+            excluded_paths: Array.from(window.excludedSelections || []),
             underlay_paths: underlays,
             merge: false,
             recursive: document.getElementById('recursive').checked,
@@ -1682,6 +1704,7 @@ window.addEventListener('unhandledrejection', function(e) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             paths: mergeOrder.map(f => f.path),
+            excluded_paths: Array.from(window.excludedSelections || []),
             merge: true,
             output_name: 'draft.pdf',
             recursive: document.getElementById('recursive').checked,
@@ -1747,6 +1770,7 @@ window.addEventListener('unhandledrejection', function(e) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               paths: mergeOrder.map(f => f.path),
+            excluded_paths: Array.from(window.excludedSelections || []),
               merge: true,
               output_name,
               recursive: document.getElementById('recursive').checked,
@@ -1815,6 +1839,8 @@ window.addEventListener('unhandledrejection', function(e) {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 paths: orderedSelections.map(s => s.path),
+              excluded_paths: Array.from(window.excludedSelections || []),
+            excluded_paths: Array.from(window.excludedSelections || []),
                 recursive: document.getElementById('recursive').checked
               })
             });

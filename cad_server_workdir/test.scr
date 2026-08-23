@@ -1,1 +1,0 @@
-(setvar "CTAB" (car (layoutlist))) (command "_.-PLOT" "_Yes" "" "DWG To PDF.pc3" "" "_Millimeters" "_Landscape" "_No" "_Layout" "1:1" "_Yes" "monochrome.ctb" "_Yes" "_No" "_No" "_No" "C:/Users/makeden/Documents/test.pdf" "_No" "_Yes") (command "_.QUIT" "_Y")

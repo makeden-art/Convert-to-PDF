@@ -151,12 +151,10 @@ class FolderRequest(BaseModel):
 
 
 class PathsRequest(BaseModel):
-
     windows_cad_ip: str = ""
 
-
-
     paths: list[str]
+    excluded_paths: list[str] = []
 
     merge: bool = False
 
@@ -1137,12 +1135,10 @@ async def api_convert_merge_download(body: PathsRequest):
         dest, tmp_parent, _ = await asyncio.to_thread(
 
             convert_paths_merged_download,
-
             body.paths,
-
             body.output_name,
-
             recursive=body.recursive,
+            excluded_paths=body.excluded_paths,
 
             numbering_from_page=from_page,
 
@@ -1706,12 +1702,10 @@ async def api_convert_draft(body: PathsRequest):
         dest, tmp_parent, _ = await asyncio.to_thread(
 
             convert_paths_merged_download,
-
             body.paths,
-
             "draft.pdf",
-
             recursive=body.recursive,
+            excluded_paths=body.excluded_paths,
 
             numbering_from_page=None,
 

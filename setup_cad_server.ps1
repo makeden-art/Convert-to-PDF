@@ -14,6 +14,7 @@ if (-not $PortalIp) {
 }
 
 $CadScriptUrl  = "http://$PortalIp/api/cad-server-script"
+$ExcelScriptUrl = "http://$PortalIp/api/excel-export-script"
 $ServiceName   = 'CadServer'
 $WorkDir       = 'C:\CadServer'
 $PythonPath    = 'C:\Python312\python.exe'
