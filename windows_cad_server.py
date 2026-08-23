@@ -138,9 +138,10 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
     lisp_code = f"""(setvar "FILEDIA" 0) (setvar "BACKGROUNDPLOT" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setvar "PROXYSHOW" 1)
 (vl-catch-all-apply 'setvar (list "PDFSHX" 0)) (vl-catch-all-apply 'setvar (list "EPDFSHX" 0)) {common_path_lisp} {attsync_lisp} {ctb_lisp}
 
-(defun GetFrames ( / ss i ent edata pts xmin ymin xmax ymax w h frames obj ll ur blkName)
+(defun GetFrames ( / ss i ent edata pts xmin ymin xmax ymax w h frames obj ll ur blkName layName)
   (setq frames '())
-  (setq ss (ssget "X" '((0 . "LWPOLYLINE") (70 . 1) (410 . "Model"))))
+  ;; 1. Search for any LWPOLYLINE
+  (setq ss (ssget "X" '((0 . "LWPOLYLINE") (410 . "Model"))))
   (if ss
     (progn (setq i 0)
       (while (< i (sslength ss))
@@ -153,33 +154,37 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
             (if (and (> w 150) (> h 150) (< w 5000) (< h 5000))
               (setq frames (cons (list xmin ymin xmax ymax w h) frames)))))
         (setq i (1+ i)))))
+        
+  ;; 2. Search for any INSERT (Block Reference)
   (setq ss (ssget "X" '((0 . "INSERT") (410 . "Model"))))
   (if ss
     (progn (setq i 0)
       (while (< i (sslength ss))
         (setq ent (ssname ss i) obj (vlax-ename->vla-object ent))
-        (if (vlax-property-available-p obj 'EffectiveName)
+        (setq ll (vlax-make-safearray vlax-vbDouble '(0 . 2)) ur (vlax-make-safearray vlax-vbDouble '(0 . 2)))
+        (if (not (vl-catch-all-error-p (vl-catch-all-apply 'vla-GetBoundingBox (list obj 'll 'ur))))
           (progn
-            (setq blkName (strcase (vla-get-EffectiveName obj)))
-            ((setq layName (strcase (vla-get-Layer obj)))
-            (if (or (vl-string-search "ФОРМАТ" blkName) (vl-string-search "РАМКА" blkName) (vl-string-search "FORM" blkName) (vl-string-search "ШТАМП" blkName) (vl-string-search "STAMP" blkName)
-                    (vl-string-search "ФОРМАТ" layName) (vl-string-search "РАМКА" layName))
-              (progn
-                (setq ll (vlax-make-safearray vlax-vbDouble '(0 . 2)) ur (vlax-make-safearray vlax-vbDouble '(0 . 2)))
-                (if (not (vl-catch-all-error-p (vl-catch-all-apply 'vla-GetBoundingBox (list obj 'll 'ur))))
-                  (progn
-                    (setq ll (vlax-safearray->list ll) ur (vlax-safearray->list ur))
-                    (setq xmin (car ll) ymin (cadr ll) xmax (car ur) ymax (cadr ur) w (- xmax xmin) h (- ymax ymin))
-                    (if (and (> w 150) (> h 150) (< w 5000) (< h 5000))
-                      (setq frames (cons (list xmin ymin xmax ymax w h) frames)))
-                  )
-                )
-              )
-            )
+            (setq ll (vlax-safearray->list ll) ur (vlax-safearray->list ur))
+            (setq xmin (car ll) ymin (cadr ll) xmax (car ur) ymax (cadr ur) w (- xmax xmin) h (- ymax ymin))
+            (if (and (> w 150) (> h 150) (< w 5000) (< h 5000))
+              (setq frames (cons (list xmin ymin xmax ymax w h) frames)))
           )
         )
         (setq i (1+ i)))))
-  frames
+        
+  ;; Remove duplicate frames that are very close to each other
+  (setq frames (vl-sort frames (function (lambda (a b) (if (> (abs (- (cadr a) (cadr b))) 10.0) (> (cadr a) (cadr b)) (< (car a) (car b)))))))
+  (setq uniqFrames '())
+  (setq lastFrm nil)
+  (foreach frm frames
+    (if (not lastFrm)
+      (progn (setq uniqFrames (cons frm uniqFrames)) (setq lastFrm frm))
+      (if (or (> (abs (- (car frm) (car lastFrm))) 50.0) (> (abs (- (cadr frm) (cadr lastFrm))) 50.0))
+        (progn (setq uniqFrames (cons frm uniqFrames)) (setq lastFrm frm))
+      )
+    )
+  )
+  uniqFrames
 )
 
 (defun ExportModelFrames ()
