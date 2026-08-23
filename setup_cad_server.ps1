@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Automatic installation/update of Windows CAD Server (windows_cad_server.py)
     and starting it via the Startup folder so it runs as the current user.
@@ -67,7 +67,7 @@ if (-not (Test-Path $PythonPath)) {
 } else { Write-Info "Python found: $PythonPath" }
 
 Write-Info "Installing Python dependencies (fastapi, uvicorn, python-multipart, pywin32)..."
-$pipProcess = Start-Process -FilePath $PythonPath -ArgumentList "-m pip install fastapi uvicorn python-multipart pywin32" -Wait -NoNewWindow -PassThru
+$pipProcess = Start-Process -FilePath $PythonPath -ArgumentList "-m pip install fastapi uvicorn python-multipart pywin32 pypdf" -Wait -NoNewWindow -PassThru
 if ($pipProcess.ExitCode -ne 0) { Write-Warn "Failed to install some dependencies. Server might not start." }
 
 
@@ -123,3 +123,4 @@ New-NetFirewallRule -DisplayName "CAD Server Port 8000" -Direction Inbound -Loca
 
 Write-Host "`nDONE! Server is running in the background as the current user." -ForegroundColor Green
 Write-Host "It will automatically start when you log in to Windows."
+

@@ -7,11 +7,14 @@ import uvicorn
 import shutil
 import glob
 import sys
+import tempfile
+import uuid
+import threading
 
 try:
     import win32com.client
 except ImportError:
-    print("Устанавливаем pywin32 для поддержки MS Office...")
+    print("Устанавливаем pywin32 для работы MS Office...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "pywin32"])
     import win32com.client
 
@@ -70,26 +73,15 @@ def server_status():
         }
     }
 
-import threading
-import tempfile
-import uuid
-
 ACAD_PATH = find_accoreconsole()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WORK_DIR = os.path.join(SCRIPT_DIR, "cad_server_workdir")
 os.makedirs(WORK_DIR, exist_ok=True)
 
-# Путь к расшаренной папке на этом компьютере.
-# Можно переопределить через переменную окружения SHARE_LOCAL_PATH.
 SHARE_LOCAL_PATH = os.environ.get("SHARE_LOCAL_PATH", r"E:\share_test")
-
-# UNC-адрес этого компьютера (та же папка, только сетевой путь).
-SHARE_UNC_PATH = os.environ.get("SHARE_UNC_PATH", r"\\\\192.168.88.14\\share_test")
-
-# Мьютекс для MS Office (Word/Excel не поддерживают параллельную работу через COM)
+SHARE_UNC_PATH = os.environ.get("SHARE_UNC_PATH", r"\\192.168.88.14\share_test")
 _office_lock = threading.Lock()
-
-ACAD_TIMEOUT_SEC = int(os.environ.get("ACAD_TIMEOUT_SEC", "3600"))
+ACAD_TIMEOUT_SEC = 900
 
 def unc_to_local(path: str) -> str:
     normalized = path.replace("/", "\\")
@@ -99,92 +91,50 @@ def unc_to_local(path: str) -> str:
         return local_norm + normalized[len(unc_norm):]
     return path
 
-@app.post("/convert")
-def convert(
-    file: UploadFile = File(None),
-    ctb: str = Form(None),
-    profile: str = Form(None),
-    smb_dwg_path: str = Form(None),
-    smart_search: str = Form(None)
-):
-    if not ACAD_PATH or not os.path.exists(ACAD_PATH):
-        return JSONResponse(status_code=400, content={"error": "AutoCAD (accoreconsole.exe) не найден на этом компьютере. Скрипт CAD-сервера должен запускаться на компьютере с установленным AutoCAD."})
-    import tempfile
-    import uuid
-    safe_uid = uuid.uuid4().hex
-    temp_dir = tempfile.gettempdir()
-    
-    dwg_path = None
-    stdout_text = ""  # Fix #13: init before try
-    if smb_dwg_path:
-        # Fix #10: Конвертируем UNC -> локальный путь
-        local_path = unc_to_local(smb_dwg_path)
-        if local_path != smb_dwg_path:
-            print(f"UNC -> локальный: {smb_dwg_path} -> {local_path}")
-            smb_dwg_path = local_path
-        if not os.path.exists(smb_dwg_path):
-            return JSONResponse(status_code=400, content={"error": f"Путь недоступен: {smb_dwg_path}. Проверьте SHARE_LOCAL_PATH."})
-        print(f"Используем путь: {smb_dwg_path}")
-        safe_dwg_path = smb_dwg_path
-        safe_filename = os.path.basename(smb_dwg_path)
-        pdf_path = os.path.join(temp_dir, f"result_{safe_uid}.pdf")
-    elif file:
-        # Fix #4: safe_uid в имени чтобы избежать race condition
-        orig_name = file.filename.replace(" ", "_")
-        safe_filename = orig_name
-        dwg_path = os.path.join(WORK_DIR, f"{safe_uid}_{orig_name}")
-        pdf_path = os.path.join(WORK_DIR, f"{safe_uid}_{orig_name}").replace(".dwg", ".pdf").replace(".DWG", ".pdf")
-        with open(dwg_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        safe_dwg_path = os.path.join(temp_dir, f"temp_{safe_uid}.dwg")
-        shutil.copy2(dwg_path, safe_dwg_path)
-        
-        # МАГИЧЕСКИЙ ПОИСК: Ищем оригинальный файл по размеру и первым байтам на шаре
-        try:
-            target_size = os.path.getsize(safe_dwg_path)
-            found_local = None
-            for root, dirs, files_in_dir in os.walk(SHARE_LOCAL_PATH):
-                for f in files_in_dir:
-                    if f.lower().endswith('.dwg'):
-                        f_path = os.path.join(root, f)
-                        if os.path.getsize(f_path) == target_size:
-                            # Проверяем первые 4КБ, чтобы избежать коллизий
-                            with open(safe_dwg_path, 'rb') as f1, open(f_path, 'rb') as f2:
-                                if f1.read(4096) == f2.read(4096):
-                                    found_local = f_path
-                                    break
-                if found_local:
-                    break
-            
-            if found_local:
-                print(f"Магический поиск: найден оригинальный файл -> {found_local}")
-                safe_dwg_path = found_local
-                safe_filename = os.path.basename(found_local)
-        except Exception as e:
-            print(f"Ошибка магического поиска: {e}")
-    else:
-        return JSONResponse(status_code=400, content={"error": "Нет файла и нет пути"})
-        
-    safe_pdf_path = os.path.join(temp_dir, f"temp_{safe_uid}.pdf")
-
-    scr_path = os.path.join(temp_dir, f"print_{safe_uid}.scr")
-    # Скрипт печатает ТОЛЬКО Листы (Paper Space). Если ctb не пустой, принудительно ставим его.
+def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None) -> str:
+    """Генерирует LISP-код для печати DWG -> PDF."""
+    ctb_lisp = ""
     if ctb and ctb.lower() != "none":
-        ctb_lisp = f"""(setq dict (dictsearch (namedobjdict) "ACAD_LAYOUT")) (while (setq item (assoc 350 dict)) (setq ent (cdr item)) (setq edata (entget ent)) (if (assoc 7 edata) (setq edata (subst (cons 7 "{ctb}") (assoc 7 edata) edata)) (setq edata (append edata (list (cons 7 "{ctb}"))))) (setq flags (cdr (assoc 70 edata))) (if flags (setq edata (subst (cons 70 (logior flags 32)) (assoc 70 edata) edata))) (entmod edata) (setq dict (cdr (member item dict))))"""
-    else:
-        ctb_lisp = ""
-        
-    # ATTSYNC не поддерживается в accoreconsole (вызывает Unknown command ATTSYNC и ломает скрипт)
-    attsync_lisp = ""
+        ctb_lisp = f"""
+(vl-catch-all-apply 'setvar (list "PLOTSTYLEMODE" 0))
+(vl-catch-all-apply 'setvar (list "CPROFILE" "<<VANILLA>>"))
+(vl-catch-all-apply
+  (function
+    (lambda ()
+      (vlax-for layout (vla-get-Layouts (vla-get-ActiveDocument (vlax-get-acad-object)))
+        (vla-put-StyleSheet layout "{ctb}")
+      )
+    )
+  )
+)
+"""
 
-    # Подключение общих шрифтов и стилей из папки C:\Common (только если НЕ передан профиль)
-    if not profile:
-        common_path_lisp = """(vl-catch-all-apply 'setenv (list "PrinterStyleSheetDir" "C:\\\\Common\\\\Plot_Styles")) (setq curacad (getenv "ACAD")) (if (not (vl-string-search "C:\\\\Common\\\\Fonts" curacad)) (vl-catch-all-apply 'setenv (list "ACAD" (strcat "C:\\\\Common\\\\Fonts;" curacad))))"""
-    else:
-        common_path_lisp = ""
+    attsync_lisp = """
+(vl-catch-all-apply
+  (function
+    (lambda ()
+      (setq blks (vla-get-Blocks (vla-get-ActiveDocument (vlax-get-acad-object))))
+      (vlax-for blk blks
+        (if (= (vla-get-HasAttributes blk) :vlax-true)
+          (command "_.ATTSYNC" "_N" (vla-get-Name blk))
+        )
+      )
+    )
+  )
+)
+"""
 
+    # Динамический поиск C:\Common
+    common_path_lisp = """
+(setq paths (getenv "ACAD"))
+(if (and (findfile "C:\\\\Common") (not (vl-string-search "C:\\\\Common" paths)))
+  (setenv "ACAD" (strcat paths ";C:\\\\Common;C:\\\\Common\\\\Support;C:\\\\Common\\\\Fonts;C:\\\\Common\\\\LISP"))
+)
+"""
+
+    force_smart_val = "T" if force_smart else "nil"
     pdf_prefix = safe_pdf_path.replace("\\", "/").replace(".pdf", "")
-    force_smart_val = "T" if smart_search and smart_search.lower() == "true" else "nil"
+    
     lisp_code = f"""(setvar "FILEDIA" 0) (setvar "BACKGROUNDPLOT" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setvar "PROXYSHOW" 1)
 (vl-catch-all-apply 'setvar (list "PDFSHX" 0)) (vl-catch-all-apply 'setvar (list "EPDFSHX" 0)) {common_path_lisp} {attsync_lisp} {ctb_lisp}
 
@@ -224,157 +174,208 @@ def convert(
             ((and (< w 620) (< h 870)) (setq paper "ISO_full_bleed_A1_(594.00_x_841.00_MM)"))
             (t (setq paper "ISO_full_bleed_A0_(841.00_x_1189.00_MM)"))))
     (setq outpath (strcat "{pdf_prefix}_" (itoa idx) ".pdf"))
-    (command "_.-PLOT" "_Y" "Model" "AutoCAD PDF (General Documentation).pc3" paper "_M" "_L" "_N" "_W" (list (car frm) (cadr frm)) (list (caddr frm) (cadddr frm)) "_F" "_C" "_Y" "monochrome.ctb" "_Y" "_W" outpath "_N" "_Y")
+    (command "_.-PLOT" "_Y" "Model" "DWG To PDF.pc3" paper "_M" "_L" "_N" "_W" (list (car frm) (cadr frm)) (list (caddr frm) (cadddr frm)) "_F" "_C" "_Y" "monochrome.ctb" "_Y" "_W" outpath "_N" "_Y")
     (setq idx (1+ idx))
   )
 )
 
 (defun ExportPaperSpace ()
   (setvar "TILEMODE" 0)
-  (vl-load-com)
   (vl-catch-all-apply
-    (function
-      (lambda ()
-        (vlax-for layout (vla-get-Layouts (vla-get-ActiveDocument (vlax-get-acad-object)))
-          (if (= (vla-get-ModelType layout) :vlax-false)
-            (progn
-              (vla-put-ConfigName layout "AutoCAD PDF (General Documentation).pc3")
-              (vla-put-StandardScale layout 0) ; acScaleToFit
-              ; (vla-put-PlotType layout 1) ; acExtents - sometimes cuts off if elements are far
-              ; By default we keep the PlotType as is (usually acLayout), but force the PDF printer
-            )
-          )
-        )
-      )
-    )
+    (function (lambda ()
+      (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace(chr(92), chr(47))}")
+    ))
   )
-  (vl-catch-all-apply (function (lambda () (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace("\\", "/")}"))))
 )
 
 (setq force-smart {force_smart_val})
-
 (if force-smart
   (ExportModelFrames)
   (ExportPaperSpace)
 )
 (command "_.QUIT" "_Y")"""
-    
-    # Записываем скрипт в одну строку в кодировке ANSI для стабильности
-    with open(scr_path, "w", encoding="cp1251") as f:
-        # Убираем переносы строк для безопасности, но LISP работает и с ними
-        f.write(lisp_code.replace("\\n", " ") + "\n")
+    return lisp_code.replace("\n", " ") + "\n"
 
-    # 3. Запускаем AutoCAD Core Console в фоне
-    print(f"Печатаем {safe_filename} с помощью {ACAD_PATH} (безопасный путь: {safe_dwg_path})...")
-    cmd = [ACAD_PATH, "/i", safe_dwg_path, "/l", "ru-RU", "/s", scr_path]
-    if profile:
-        cmd.extend(["/p", profile])
-    
-    start_time = time.time()
-    try:
-        # Убрали shell=True, чтобы процесс не осиротел при таймауте, иначе Python не сможет убить его
-        result = subprocess.run(cmd, shell=False, capture_output=True, timeout=ACAD_TIMEOUT_SEC)
-        
-        # accoreconsole.exe outputs in UTF-16 on Windows
+def _merge_pdf_parts(pdf_prefix_base: str, output_pdf_path: str):
+    """Склеивает промежуточные PDF файлы (от поиска рамок) в один."""
+    from pypdf import PdfWriter
+    pdf_files = sorted(
+        glob.glob(f"{pdf_prefix_base}_[0-9]*.pdf"),
+        key=lambda f: int(f.rsplit("_", 1)[-1].replace(".pdf", ""))
+    )
+    if pdf_files:
         try:
-            stdout_text = result.stdout.decode("utf-16", errors="replace")
-        except Exception:
-            stdout_text = result.stdout.decode("cp1251", errors="replace")
-            
-    except subprocess.TimeoutExpired:
-        print(f"ТАЙМАУТ ПЕЧАТИ ({ACAD_TIMEOUT_SEC} сек)! Убиваем зависший процесс AutoCAD для файла: {safe_filename}")
-        subprocess.run('taskkill /F /IM accoreconsole.exe', shell=True)
-        return JSONResponse(status_code=504, content={"error": f"AutoCAD timeout {ACAD_TIMEOUT_SEC}s. Process killed.", "log": ""})
-    
-    # Проверяем, не выдал ли AutoCAD ошибку об отсутствии листов
-    if "ERROR_NO_LAYOUTS" in stdout_text:
-        print(f"ОШИБКА: В чертеже {safe_filename} нет настроенных листов!")
-        return JSONResponse(status_code=400, content={"error": "В чертеже нет ни одного листа (Layout).", "log": stdout_text})
-
-    # Если был умный поиск, объединяем PDF-файлы
-    if smart_search and smart_search.lower() == "true":
-        import glob
-        from pypdf import PdfWriter, PdfReader
-        
-        pdf_prefix = safe_pdf_path.replace(".pdf", "")
-        pdf_files = glob.glob(f"{pdf_prefix}_*.pdf")
-        
-        if pdf_files:
-            # Сортируем по индексу (по номеру файла _1, _2 и т.д.)
-            pdf_files.sort(key=lambda f: int(f.split("_")[-1].replace(".pdf", "")))
-            
-            try:
-                merger = PdfWriter()
-                for pdf in pdf_files:
-                    merger.append(pdf)
-                merger.write(safe_pdf_path)
-                merger.close()
-            except Exception as e:
-                print(f"Ошибка при объединении PDF: {e}")
-                
-            # Удаляем временные куски
+            merger = PdfWriter()
             for pdf in pdf_files:
-                try: os.remove(pdf)
-                except: pass
-        else:
-            print(f"Умный поиск не нашел рамок для файла {safe_filename}!")
-            return JSONResponse(status_code=400, content={"error": "В Модели не найдено ни одной прямоугольной рамки поперечника.", "log": stdout_text})
-    
-    # Копируем PDF обратно
-    if os.path.exists(safe_pdf_path):
-        # Удаляем полностью пустые страницы
-        try:
-            import fitz
-            doc = fitz.open(safe_pdf_path)
-            if len(doc) > 1:
-                pages_to_keep = []
-                for pno in range(len(doc)):
-                    page = doc[pno]
-                    text = page.get_text().strip()
-                    images = page.get_images()
-                    drawings = page.get_drawings()
-                    # Если есть хоть какой-то текст, картинки или больше 4 элементов векторной графики (рамка + видовой экран)
-                    if text or images or len(drawings) > 4:
-                        pages_to_keep.append(pno)
-                
-                if len(pages_to_keep) > 0 and len(pages_to_keep) < len(doc):
-                    print(f"Очистка пустых страниц. Оставляем: {pages_to_keep}")
-                    new_doc = fitz.open()
-                    for pno in pages_to_keep:
-                        new_doc.insert_pdf(doc, from_page=pno, to_page=pno)
-                    doc.close()
-                    # Пересохраняем поверх того же файла
-                    tmp_clean = safe_pdf_path + ".clean.pdf"
-                    new_doc.save(tmp_clean)
-                    new_doc.close()
-                    os.replace(tmp_clean, safe_pdf_path)
-                else:
-                    doc.close()
-            else:
-                doc.close()
+                merger.append(pdf)
+            merger.write(output_pdf_path)
+            merger.close()
         except Exception as e:
-            print(f"Не удалось удалить пустые страницы: {e}")
-
-        shutil.copy2(safe_pdf_path, pdf_path)
+            print(f"Ошибка при объединении PDF (smart): {e}")
         
-    # Убираем за собой
-    try:
-        if dwg_path and os.path.exists(safe_dwg_path):
-            os.remove(safe_dwg_path)
-        if os.path.exists(safe_pdf_path): os.remove(safe_pdf_path)
-        os.remove(scr_path)
-    except Exception:
-        pass
-    
-    print(f"Время выполнения: {time.time() - start_time:.1f} сек")
-    
-    # 4. Возвращаем PDF
-    if os.path.exists(pdf_path):
-        return FileResponse(path=pdf_path, filename=safe_filename.replace(".dwg", ".pdf"), media_type='application/pdf')
+        # Удаляем промежуточные куски
+        for pdf in pdf_files:
+            try: os.remove(pdf)
+            except: pass
     else:
-        print("ОШИБКА ПЕЧАТИ:")
-        print(stdout_text)
-        return JSONResponse(status_code=500, content={"error": "Не удалось создать PDF. Проверьте консоль сервера.", "log": stdout_text})
+        raise ValueError("В Модели не найдено ни одной прямоугольной рамки поперечника.")
+
+def _remove_empty_pages(pdf_path: str):
+    """Рендерит страницы в мини-картинки и удаляет пустые (шаблонные) листы."""
+    if not os.path.exists(pdf_path):
+        return
+        
+    try:
+        import fitz
+        doc = fitz.open(pdf_path)
+        if len(doc) <= 1:
+            doc.close()
+            return
+            
+        pages_to_keep = []
+        mat = fitz.Matrix(0.08, 0.08)  # 8% масштаб
+        
+        for pno in range(len(doc)):
+            page = doc[pno]
+            pix = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
+            total = len(pix.samples)
+            if total == 0:
+                continue
+            white = sum(1 for b in pix.samples if b > 245)
+            if white / total < 0.98:  # есть реальный контент
+                pages_to_keep.append(pno)
+
+        print(f"Страниц: {len(doc)}, непустых: {len(pages_to_keep)}")
+        if 0 < len(pages_to_keep) < len(doc):
+            new_doc = fitz.open()
+            for pno in pages_to_keep:
+                new_doc.insert_pdf(doc, from_page=pno, to_page=pno)
+            doc.close()
+            
+            tmp_clean = pdf_path + ".clean.pdf"
+            new_doc.save(tmp_clean)
+            new_doc.close()
+            os.replace(tmp_clean, pdf_path)
+        else:
+            doc.close()
+    except Exception as e:
+        print(f"Не удалось удалить пустые страницы: {e}")
+
+@app.post("/convert")
+def convert(
+    file: UploadFile = File(None),
+    ctb: str = Form(None),
+    profile: str = Form(None),
+    smb_dwg_path: str = Form(None),
+    smart_search: str = Form(None)
+):
+    if not ACAD_PATH or not os.path.exists(ACAD_PATH):
+        return JSONResponse(status_code=400, content={"error": "AutoCAD (accoreconsole.exe) не найден на сервере."})
+
+    safe_uid = uuid.uuid4().hex
+    temp_dir = tempfile.gettempdir()
+    
+    dwg_path = None
+    safe_dwg_path = None
+    safe_pdf_path = None
+    scr_path = None
+    stdout_text = ""
+    is_smart = False
+    
+    try:
+        # 1. Определение путей и копирование файла
+        if smb_dwg_path:
+            local_path = unc_to_local(smb_dwg_path)
+            if os.path.exists(local_path):
+                safe_dwg_path = local_path
+                safe_filename = os.path.basename(local_path)
+            else:
+                return JSONResponse(status_code=400, content={"error": f"Файл не найден по локальному пути: {local_path}"})
+        elif file:
+            safe_filename = file.filename.replace(" ", "_")
+            dwg_path = os.path.join(temp_dir, f"{safe_uid}_{safe_filename}")
+            with open(dwg_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            safe_dwg_path = dwg_path
+        else:
+            return JSONResponse(status_code=400, content={"error": "Не передан файл."})
+
+        # Итоговые пути
+        safe_pdf_path = os.path.join(temp_dir, f"{safe_uid}_{safe_filename}.pdf")
+        scr_path = os.path.join(WORK_DIR, f"print_{safe_uid}.scr")
+
+        # 2. Флаги логики
+        name_lower = safe_filename.lower()
+        if "_model" in name_lower or "модель" in name_lower or "поперечник" in name_lower:
+            smart_search = "true"
+        is_smart = (smart_search and smart_search.lower() == "true")
+
+        # 3. Генерация и запись LISP скрипта
+        lisp_code = _generate_lisp_script(safe_pdf_path, is_smart, ctb)
+        with open(scr_path, "w", encoding="cp1251") as f:
+            f.write(lisp_code)
+
+        # 4. Запуск AutoCAD
+        print(f"Печатаем {safe_filename} с помощью {ACAD_PATH} (путь: {safe_dwg_path})...")
+        cmd = [ACAD_PATH, "/i", safe_dwg_path, "/l", "ru-RU", "/s", scr_path]
+        if profile:
+            cmd.extend(["/p", profile])
+        
+        start_time = time.time()
+        try:
+            result = subprocess.run(cmd, shell=False, capture_output=True, timeout=ACAD_TIMEOUT_SEC)
+            try:
+                stdout_text = result.stdout.decode("utf-16", errors="replace")
+            except Exception:
+                stdout_text = result.stdout.decode("cp1251", errors="replace")
+        except subprocess.TimeoutExpired:
+            print(f"ТАЙМАУТ ПЕЧАТИ ({ACAD_TIMEOUT_SEC} сек)! Убиваем зависший процесс AutoCAD для файла: {safe_filename}")
+            subprocess.run('taskkill /F /IM accoreconsole.exe', shell=True)
+            return JSONResponse(status_code=504, content={"error": f"AutoCAD timeout {ACAD_TIMEOUT_SEC}s. Process killed.", "log": ""})
+
+        if "ERROR_NO_LAYOUTS" in stdout_text:
+            print(f"ОШИБКА: В чертеже {safe_filename} нет настроенных листов!")
+            return JSONResponse(status_code=400, content={"error": "В чертеже нет ни одного листа (Layout).", "log": stdout_text})
+
+        # 5. Сборка PDF и удаление пустых листов
+        if is_smart:
+            try:
+                pdf_prefix_base = safe_pdf_path.replace(".pdf", "")
+                _merge_pdf_parts(pdf_prefix_base, safe_pdf_path)
+            except ValueError as e:
+                return JSONResponse(status_code=400, content={"error": str(e), "log": stdout_text})
+        else:
+            # Чистим мусорные файлы _ps_ на всякий случай
+            for f in glob.glob(safe_pdf_path.replace(".pdf", "") + "_ps_*.pdf"):
+                try: os.remove(f)
+                except Exception: pass
+
+        _remove_empty_pages(safe_pdf_path)
+
+        # 6. Возврат результата
+        print(f"Время выполнения: {time.time() - start_time:.1f} сек")
+        if os.path.exists(safe_pdf_path):
+            return FileResponse(path=safe_pdf_path, filename=safe_filename.replace(".dwg", ".pdf"), media_type='application/pdf')
+        else:
+            print("ОШИБКА ПЕЧАТИ:")
+            print(stdout_text)
+            return JSONResponse(status_code=500, content={"error": "Не удалось создать PDF. Проверьте консоль сервера.", "log": stdout_text})
+
+    finally:
+        # 7. Гарантированная очистка (в любом случае: и при успехе, и при ошибке)
+        try:
+            if dwg_path and os.path.exists(dwg_path):
+                os.remove(dwg_path)
+            if scr_path and os.path.exists(scr_path):
+                os.remove(scr_path)
+            
+            # Удаляем PDF-ку, так как FileResponse может держать её открытой только если мы передаем background task,
+            # но FastAPI FileResponse сам не удаляет файл по умолчанию. 
+            # ВАЖНО: Если мы удалим файл ДО того как FastAPI его отправит, пользователь получит 0 байт!
+            # Идеально было бы использовать BackgroundTasks, но пока оставим как было, только удалим scr_path
+            # Для безопасноти оставляем safe_pdf_path висеть во временной папке (temp_dir), ОС сама её почистит
+        except Exception as e:
+            print(f"Ошибка при очистке временных файлов: {e}")
 
 @app.post("/convert-office")
 def convert_office(file: UploadFile = File(...)):
@@ -399,21 +400,20 @@ def _convert_office_impl(file: UploadFile):
         
     start_time = time.time()
     import pythoncom
-    pythoncom.CoInitialize()
     try:
         if ext in [".doc", ".docx", ".rtf"]:
             print(f"Конвертация Word: {safe_filename}")
+            pythoncom.CoInitialize()
             word = win32com.client.DispatchEx("Word.Application")
             word.Visible = False
             word.DisplayAlerts = False
             doc = word.Documents.Open(in_path, ReadOnly=True)
-            # Используем ExportAsFixedFormat для более надежного и точного сохранения (wdExportFormatPDF = 17)
             doc.ExportAsFixedFormat(
                 OutputFileName=pdf_path,
-                ExportFormat=17,         # PDF
+                ExportFormat=17,
                 OpenAfterExport=False,
-                OptimizeFor=0,           # wdExportOptimizeForPrint
-                CreateBookmarks=1,       # wdExportCreateHeadingBookmarks
+                OptimizeFor=0,
+                CreateBookmarks=1,
                 DocStructureTags=True,
                 BitmapMissingFonts=True,
                 UseISO19005_1=False
@@ -423,72 +423,13 @@ def _convert_office_impl(file: UploadFile):
             
         elif ext in [".xls", ".xlsx"]:
             print(f"Конвертация Excel: {safe_filename}")
-            excel = win32com.client.DispatchEx("Excel.Application")
-            excel.Visible = False
-            excel.DisplayAlerts = False
+            import excel_export
+            from pathlib import Path
+            excel_export.excel_to_pdf(Path(in_path), Path(pdf_path))
             
-            # Switch ActivePrinter ONLY to standard 'Microsoft Print to PDF' (built-in Windows 10/11).
-            try:
-                import winreg
-                key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Microsoft\Windows NT\CurrentVersion\Devices')
-                for i in range(winreg.QueryInfoKey(key)[1]):
-                    name, value, _ = winreg.EnumValue(key, i)
-                    if 'Microsoft Print to PDF' in name:
-                        port = value.split(',')[1]
-                        printer_str = f'{name} on {port}'
-                        try:
-                            excel.ActivePrinter = printer_str
-                            break
-                        except Exception:
-                            continue
-            except Exception:
-                pass
-                
-            wb = excel.Workbooks.Open(in_path)
-            
-            for ws in wb.Worksheets:
-                try:
-                    ws.PageSetup.PaperSize = 9 # xlPaperA4
-                    ws.PageSetup.Zoom = False
-                    ws.PageSetup.FitToPagesWide = 1
-                    ws.PageSetup.FitToPagesTall = False
-                    
-                    # Ставим поля строго по 0.5 см, колонтитулы 0, без центрирования
-                    cm_to_pts = excel.CentimetersToPoints(0.5)
-                    ws.PageSetup.LeftMargin = cm_to_pts
-                    ws.PageSetup.RightMargin = cm_to_pts
-                    ws.PageSetup.TopMargin = cm_to_pts
-                    ws.PageSetup.BottomMargin = cm_to_pts
-                    ws.PageSetup.HeaderMargin = 0
-                    ws.PageSetup.FooterMargin = 0
-                    
-                    ws.PageSetup.CenterHorizontally = False
-                    ws.PageSetup.CenterVertically = False
-                    
-                    # Фикс для "пустых страниц": вытаскиваем Print_Area из именованных диапазонов,
-                    # так как COM иногда возвращает пустую строку для PageSetup.PrintArea.
-                    if not ws.PageSetup.PrintArea:
-                        for i in range(1, wb.Names.Count + 1):
-                            n = wb.Names(i)
-                            if "Print_Area" in n.Name and ws.Name in n.Name:
-                                ws.PageSetup.PrintArea = n.RefersTo
-                                break
-                                
-                except Exception as e:
-                    print(f"PageSetup Error on sheet {ws.Name}: {e}")
-            
-            # Используем ExportAsFixedFormat как в вашем скрипте, на уровне всей книги
-            wb.ExportAsFixedFormat(
-                Type=0,              # xlTypePDF
-                Filename=pdf_path,
-                Quality=0,           # xlQualityStandard
-                IncludeDocProperties=True,
-                IgnorePrintAreas=False,  # ВАЖНО: уважать сохраненную область печати!
-                OpenAfterPublish=False
-            )
-            wb.Close(SaveChanges=False)
-            excel.Quit()
-            
+            if excel_export._pdf_is_empty(Path(pdf_path)):
+                return JSONResponse(status_code=500, content={"error": "Получен пустой PDF после экспорта из Excel", "log": ""})
+
         else:
             return JSONResponse(status_code=400, content={"error": f"Формат {ext} не поддерживается"})
             
@@ -504,7 +445,8 @@ def _convert_office_impl(file: UploadFile):
             os.remove(in_path)
         except Exception:
             pass
-        pythoncom.CoUninitialize()
+        if ext in [".doc", ".docx", ".rtf"]:
+            pythoncom.CoUninitialize()
             
     print(f"Время выполнения: {time.time() - start_time:.1f} сек")
     

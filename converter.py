@@ -1,5 +1,8 @@
-"""Логика конвертации: один файл или вся папка, PDF рядом с оригиналом."""
+﻿"""Р›РѕРіРёРєР° РєРѕРЅРІРµСЂС‚Р°С†РёРё: РѕРґРёРЅ С„Р°Р№Р» РёР»Рё РІСЃСЏ РїР°РїРєР°, PDF СЂСЏРґРѕРј СЃ РѕСЂРёРіРёРЅР°Р»РѕРј."""
 from __future__ import annotations
+
+import logging
+logger = logging.getLogger(__name__)
 
 import json
 import os
@@ -35,7 +38,7 @@ SUPPORTED_ALL = SUPPORTED_OFFICE | SUPPORTED_CAD | {".pdf"}
 
 
 def release_memory() -> None:
-    """Вернуть неиспользуемую RAM процессу ОС (Python сам этого не делает)."""
+    """Р’РµСЂРЅСѓС‚СЊ РЅРµРёСЃРїРѕР»СЊР·СѓРµРјСѓСЋ RAM РїСЂРѕС†РµСЃСЃСѓ РћРЎ (Python СЃР°Рј СЌС‚РѕРіРѕ РЅРµ РґРµР»Р°РµС‚)."""
     gc.collect()
     if os.name != "posix":
         return
@@ -56,13 +59,13 @@ def allowed_roots() -> list[Path]:
 
 
 def get_file_content_hash(path: Path) -> str:
-    """Быстрый хэш файла на основе размера, mtime и структуры байт."""
+    """Р‘С‹СЃС‚СЂС‹Р№ С…СЌС€ С„Р°Р№Р»Р° РЅР° РѕСЃРЅРѕРІРµ СЂР°Р·РјРµСЂР°, mtime Рё СЃС‚СЂСѓРєС‚СѓСЂС‹ Р±Р°Р№С‚."""
     try:
         stat = path.stat()
         h = hashlib.md5()
-        # Добавляем имя, размер и время изменения
+        # Р”РѕР±Р°РІР»СЏРµРј РёРјСЏ, СЂР°Р·РјРµСЂ Рё РІСЂРµРјСЏ РёР·РјРµРЅРµРЅРёСЏ
         h.update(f"{path.name}_{stat.st_size}_{stat.st_mtime}".encode())
-        # Если файл не пустой, берем крайние байты для страховки от коллизий при подмене
+        # Р•СЃР»Рё С„Р°Р№Р» РЅРµ РїСѓСЃС‚РѕР№, Р±РµСЂРµРј РєСЂР°Р№РЅРёРµ Р±Р°Р№С‚С‹ РґР»СЏ СЃС‚СЂР°С…РѕРІРєРё РѕС‚ РєРѕР»Р»РёР·РёР№ РїСЂРё РїРѕРґРјРµРЅРµ
         if stat.st_size > 0:
             with open(path, "rb") as f:
                 h.update(f.read(8192))
@@ -75,7 +78,7 @@ def get_file_content_hash(path: Path) -> str:
 
 
 def get_global_cache_dir() -> Path:
-    """Глобальная папка кэша (резервная)."""
+    """Р“Р»РѕР±Р°Р»СЊРЅР°СЏ РїР°РїРєР° РєСЌС€Р° (СЂРµР·РµСЂРІРЅР°СЏ)."""
     d = Path(os.getenv("CONVERT_CACHE_DIR", "/data/cache/convert"))
     try:
         d.mkdir(parents=True, exist_ok=True)
@@ -90,7 +93,7 @@ def get_global_cache_dir() -> Path:
 
 
 def get_local_cache_dir(src_file: Path) -> Path:
-    """Локальная папка проекта `.convert_cache`. Если папка read-only, отдает глобальную."""
+    """Р›РѕРєР°Р»СЊРЅР°СЏ РїР°РїРєР° РїСЂРѕРµРєС‚Р° `.convert_cache`. Р•СЃР»Рё РїР°РїРєР° read-only, РѕС‚РґР°РµС‚ РіР»РѕР±Р°Р»СЊРЅСѓСЋ."""
     parent = src_file.parent
     cache_dir = parent / ".convert_cache"
     try:
@@ -104,7 +107,7 @@ def get_local_cache_dir(src_file: Path) -> Path:
 
 
 def server_path_exists(path: Path) -> bool:
-    """Проверить, существует ли файл на сервере (локально или SMB)."""
+    """РџСЂРѕРІРµСЂРёС‚СЊ, СЃСѓС‰РµСЃС‚РІСѓРµС‚ Р»Рё С„Р°Р№Р» РЅР° СЃРµСЂРІРµСЂРµ (Р»РѕРєР°Р»СЊРЅРѕ РёР»Рё SMB)."""
     p = path.expanduser().resolve()
     try:
         _ensure_under_allowed_roots(p.parent)
@@ -131,10 +134,10 @@ def check_output_files(
     paths: list[str] | None = None,
     folder_path: str | None = None,
     merge: bool = False,
-    output_name: str = "сборка.pdf",
+    output_name: str = "СЃР±РѕСЂРєР°.pdf",
     recursive: bool = True,
 ) -> dict:
-    """Проверить итоговые PDF: существуют ли и можно ли записать до конвертации."""
+    """РџСЂРѕРІРµСЂРёС‚СЊ РёС‚РѕРіРѕРІС‹Рµ PDF: СЃСѓС‰РµСЃС‚РІСѓСЋС‚ Р»Рё Рё РјРѕР¶РЅРѕ Р»Рё Р·Р°РїРёСЃР°С‚СЊ РґРѕ РєРѕРЅРІРµСЂС‚Р°С†РёРё."""
     targets_paths: list[Path] = []
 
     if merge:
@@ -145,7 +148,7 @@ def check_output_files(
             folder = validate_folder(folder_path)
         else:
             return {"targets": [], "existing": [], "blocked": [], "count": 0, "can_proceed": True}
-        safe_name = Path(output_name).name or "сборка.pdf"
+        safe_name = Path(output_name).name or "СЃР±РѕСЂРєР°.pdf"
         if not safe_name.lower().endswith(".pdf"):
             safe_name += ".pdf"
         targets_paths.append(folder / safe_name)
@@ -187,7 +190,7 @@ def check_output_files(
 
 
 def _check_output_writable(path: Path) -> dict:
-    """Проверить, можно ли записать итоговый PDF по указанному пути."""
+    """РџСЂРѕРІРµСЂРёС‚СЊ, РјРѕР¶РЅРѕ Р»Рё Р·Р°РїРёСЃР°С‚СЊ РёС‚РѕРіРѕРІС‹Р№ PDF РїРѕ СѓРєР°Р·Р°РЅРЅРѕРјСѓ РїСѓС‚Рё."""
     p = path.expanduser().resolve()
     exists = server_path_exists(p)
     writable, message = _can_write_output(p)
@@ -208,13 +211,13 @@ def _can_write_output(path: Path) -> tuple[bool, str]:
         return _smb_can_create_in_folder(path)
     parent = path.parent
     if not parent.exists():
-        return False, "Папка назначения не найдена"
+        return False, "РџР°РїРєР° РЅР°Р·РЅР°С‡РµРЅРёСЏ РЅРµ РЅР°Р№РґРµРЅР°"
     if not os.access(parent, os.W_OK):
-        return False, "Нет прав на запись в папку"
+        return False, "РќРµС‚ РїСЂР°РІ РЅР° Р·Р°РїРёСЃСЊ РІ РїР°РїРєСѓ"
     if path.exists() and not os.access(path, os.W_OK):
         return False, (
-            "Файл не перезаписан — используется в другой программе. "
-            "Закройте его и повторите."
+            "Р¤Р°Р№Р» РЅРµ РїРµСЂРµР·Р°РїРёСЃР°РЅ вЂ” РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РІ РґСЂСѓРіРѕР№ РїСЂРѕРіСЂР°РјРјРµ. "
+            "Р—Р°РєСЂРѕР№С‚Рµ РµРіРѕ Рё РїРѕРІС‚РѕСЂРёС‚Рµ."
         )
     return True, ""
 
@@ -243,7 +246,7 @@ def _smb_can_create_in_folder(virtual_path: Path) -> tuple[bool, str]:
 def _smb_can_overwrite(virtual_path: Path) -> tuple[bool, str]:
     remote_dir, remote_name = _virtual_smb_remote(virtual_path)
     if not remote_name:
-        return False, "Некорректный путь к файлу"
+        return False, "РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РїСѓС‚СЊ Рє С„Р°Р№Р»Сѓ"
     temp_name = f".__lck_{uuid.uuid4().hex[:8]}_{remote_name}"
     q_old = remote_name.replace('"', '\\"')
     q_new = temp_name.replace('"', '\\"')
@@ -261,16 +264,16 @@ def validate_folder(path: str) -> Path:
     if _is_smb_path(folder) and _smb_mounted():
         remote_dir, remote_name = _virtual_smb_remote(folder)
         if remote_name:
-            raise ValueError(f"Это не папка: {folder}")
+            raise ValueError(f"Р­С‚Рѕ РЅРµ РїР°РїРєР°: {folder}")
         try:
             _run_smbclient(remote_dir, "ls")
         except ValueError as e:
-            raise ValueError(f"Папка не найдена на SMB: {folder}") from e
+            raise ValueError(f"РџР°РїРєР° РЅРµ РЅР°Р№РґРµРЅР° РЅР° SMB: {folder}") from e
         return folder
     if not folder.exists():
-        raise ValueError(f"Папка не найдена: {folder}")
+        raise ValueError(f"РџР°РїРєР° РЅРµ РЅР°Р№РґРµРЅР°: {folder}")
     if not folder.is_dir():
-        raise ValueError(f"Это не папка: {folder}")
+        raise ValueError(f"Р­С‚Рѕ РЅРµ РїР°РїРєР°: {folder}")
     return folder
 
 
@@ -289,7 +292,7 @@ def _ensure_under_allowed_roots(path: Path) -> None:
             continue
     if not allowed:
         raise ValueError(
-            f"Путь вне разрешённых каталогов. Разрешено: {', '.join(str(r) for r in roots)}"
+            f"РџСѓС‚СЊ РІРЅРµ СЂР°Р·СЂРµС€С‘РЅРЅС‹С… РєР°С‚Р°Р»РѕРіРѕРІ. Р Р°Р·СЂРµС€РµРЅРѕ: {', '.join(str(r) for r in roots)}"
         )
 
 
@@ -299,15 +302,15 @@ def validate_file(path: str) -> Path:
     if _is_smb_path(file_path) and _smb_mounted():
         remote_dir, remote_name = _virtual_smb_remote(file_path)
         if not remote_name:
-            raise ValueError(f"Это не файл: {file_path}")
+            raise ValueError(f"Р­С‚Рѕ РЅРµ С„Р°Р№Р»: {file_path}")
         names = {e["name"] for e in _parse_smbclient_ls(_run_smbclient(remote_dir, "ls"))}
         if remote_name not in names:
-            raise ValueError(f"Файл не найден на SMB: {file_path}")
+            raise ValueError(f"Р¤Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ РЅР° SMB: {file_path}")
         return file_path
     if not file_path.exists():
-        raise ValueError(f"Файл не найден: {file_path}")
+        raise ValueError(f"Р¤Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ: {file_path}")
     if not file_path.is_file():
-        raise ValueError(f"Это не файл: {file_path}")
+        raise ValueError(f"Р­С‚Рѕ РЅРµ С„Р°Р№Р»: {file_path}")
     return file_path
 
 
@@ -378,7 +381,7 @@ def _join_remote_dir(*parts: str) -> str:
 
 
 def _virtual_smb_remote(path: Path, is_dir: bool | None = None) -> tuple[str, str | None]:
-    """Путь в UI → (каталог на шаре, имя файла или None для каталога)."""
+    """РџСѓС‚СЊ РІ UI в†’ (РєР°С‚Р°Р»РѕРі РЅР° С€Р°СЂРµ, РёРјСЏ С„Р°Р№Р»Р° РёР»Рё None РґР»СЏ РєР°С‚Р°Р»РѕРіР°)."""
     base = _smb_mount_base()
     share_prefix = _smb_share_path_prefix()
     rel = path.resolve().relative_to(base)
@@ -402,7 +405,7 @@ def _run_smbclient(remote_dir: str, command: str, *, timeout: float = 30) -> str
     mount_id = info.get("mount_id", "default")
     creds = _smb_creds_path(mount_id)
     if not unc or not creds.exists():
-        raise ValueError("SMB не настроен — подключите сетевую папку выше")
+        raise ValueError("SMB РЅРµ РЅР°СЃС‚СЂРѕРµРЅ вЂ” РїРѕРґРєР»СЋС‡РёС‚Рµ СЃРµС‚РµРІСѓСЋ РїР°РїРєСѓ РІС‹С€Рµ")
     remote = remote_dir.replace("/", "\\").strip("\\") if remote_dir not in (".", "") else ""
     full_command = f'cd "{remote}"; {command}' if remote else command
     cmd = [
@@ -424,17 +427,17 @@ def _friendly_smb_error(err: str) -> str:
     low = err.lower()
     if "authentication file" in low or "credentials file" in low:
         return (
-            "SMB: не найден файл учётных данных. "
-            "Переподключите сетевую папку в блоке «Сетевая папка (SMB)»."
+            "SMB: РЅРµ РЅР°Р№РґРµРЅ С„Р°Р№Р» СѓС‡С‘С‚РЅС‹С… РґР°РЅРЅС‹С…. "
+            "РџРµСЂРµРїРѕРґРєР»СЋС‡РёС‚Рµ СЃРµС‚РµРІСѓСЋ РїР°РїРєСѓ РІ Р±Р»РѕРєРµ В«РЎРµС‚РµРІР°СЏ РїР°РїРєР° (SMB)В»."
         )
     if "NT_STATUS_SHARING_VIOLATION" in err or "SHARING_VIOLATION" in err:
         return (
-            "Файл не перезаписан — используется в другой программе на Windows. "
-            "Закройте его (PDF, Word, проводник) и повторите."
+            "Р¤Р°Р№Р» РЅРµ РїРµСЂРµР·Р°РїРёСЃР°РЅ вЂ” РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РІ РґСЂСѓРіРѕР№ РїСЂРѕРіСЂР°РјРјРµ РЅР° Windows. "
+            "Р—Р°РєСЂРѕР№С‚Рµ РµРіРѕ (PDF, Word, РїСЂРѕРІРѕРґРЅРёРє) Рё РїРѕРІС‚РѕСЂРёС‚Рµ."
         )
     if "BAD_NETWORK_NAME" in err:
         return (
-            "Шара не найдена. Укажите имя шары и подпапку через слэш: scan/pdf."
+            "РЁР°СЂР° РЅРµ РЅР°Р№РґРµРЅР°. РЈРєР°Р¶РёС‚Рµ РёРјСЏ С€Р°СЂС‹ Рё РїРѕРґРїР°РїРєСѓ С‡РµСЂРµР· СЃР»СЌС€: scan/pdf."
         )
     return err
 
@@ -472,7 +475,7 @@ def inspect_file_format(
     file_size: int | None = None,
     light: bool = False,
 ) -> FormatInfo:
-    """Определить реальный формат файла (magic bytes или по расширению для крупных SMB)."""
+    """РћРїСЂРµРґРµР»РёС‚СЊ СЂРµР°Р»СЊРЅС‹Р№ С„РѕСЂРјР°С‚ С„Р°Р№Р»Р° (magic bytes РёР»Рё РїРѕ СЂР°СЃС€РёСЂРµРЅРёСЋ РґР»СЏ РєСЂСѓРїРЅС‹С… SMB)."""
     ext = path.suffix.lower()
     if ext not in SUPPORTED_ALL:
         return inspect_from_extension_only(ext)
@@ -485,7 +488,7 @@ def inspect_file_format(
         if size == 0:
             info = inspect_from_extension_only(ext)
             info.valid = False
-            info.error = "Файл пустой"
+            info.error = "Р¤Р°Р№Р» РїСѓСЃС‚РѕР№"
             info.extension_ok = False
             return info
         if size is not None and size > MAGIC_INSPECT_MAX_SIZE:
@@ -495,18 +498,18 @@ def inspect_file_format(
             if path.stat().st_size == 0:
                 info = inspect_from_extension_only(ext)
                 info.valid = False
-                info.error = "Файл пустой"
+                info.error = "Р¤Р°Р№Р» РїСѓСЃС‚РѕР№"
                 info.extension_ok = False
                 return info
         except OSError:
             info = inspect_from_extension_only(ext)
             info.valid = False
-            info.error = "Не удалось прочитать файл"
+            info.error = "РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ С„Р°Р№Р»"
             return info
     else:
         info = inspect_from_extension_only(ext)
         info.valid = False
-        info.error = "Файл не найден"
+        info.error = "Р¤Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ"
         return info
 
     try:
@@ -515,18 +518,18 @@ def inspect_file_format(
         if ext in SUPPORTED_ALL:
             return _extension_fallback(
                 ext,
-                reason=f"Не удалось прочитать заголовок ({e}), конвертация по расширению",
+                reason=f"РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ Р·Р°РіРѕР»РѕРІРѕРє ({e}), РєРѕРЅРІРµСЂС‚Р°С†РёСЏ РїРѕ СЂР°СЃС€РёСЂРµРЅРёСЋ",
             )
         info = inspect_from_extension_only(ext)
         info.valid = False
-        info.error = f"Не удалось прочитать файл: {e}"
+        info.error = f"РќРµ СѓРґР°Р»РѕСЃСЊ РїСЂРѕС‡РёС‚Р°С‚СЊ С„Р°Р№Р»: {e}"
         return info
 
     info = detect_format_from_bytes(data, ext)
     if not info.valid and ext in SUPPORTED_ALL and info.detected in ("unknown", "zip"):
         return _extension_fallback(
             ext,
-            reason=info.error or "Содержимое не распознано, конвертация по расширению",
+            reason=info.error or "РЎРѕРґРµСЂР¶РёРјРѕРµ РЅРµ СЂР°СЃРїРѕР·РЅР°РЅРѕ, РєРѕРЅРІРµСЂС‚Р°С†РёСЏ РїРѕ СЂР°СЃС€РёСЂРµРЅРёСЋ",
         )
     return info
 
@@ -613,16 +616,16 @@ def _browse_smb_directory(folder: Path) -> dict:
 
 @contextmanager
 def _smb_local_file(virtual_path: Path):
-    """Скачать файл с SMB во временный каталог для конвертации."""
+    """РЎРєР°С‡Р°С‚СЊ С„Р°Р№Р» СЃ SMB РІРѕ РІСЂРµРјРµРЅРЅС‹Р№ РєР°С‚Р°Р»РѕРі РґР»СЏ РєРѕРЅРІРµСЂС‚Р°С†РёРё."""
     remote_dir, remote_name = _virtual_smb_remote(virtual_path)
     if not remote_name:
-        raise ValueError(f"Это не файл: {virtual_path}")
+        raise ValueError(f"Р­С‚Рѕ РЅРµ С„Р°Р№Р»: {virtual_path}")
     tmp_dir = Path(tempfile.mkdtemp(prefix="smb_get_"))
     local = tmp_dir / remote_name
     quoted = remote_name.replace('"', '\\"')
     _run_smbclient(remote_dir, f'get "{quoted}" "{local}"', timeout=120)
     if not local.exists():
-        raise ValueError(f"Не удалось скачать с SMB: {remote_name}")
+        raise ValueError(f"РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєР°С‡Р°С‚СЊ СЃ SMB: {remote_name}")
     try:
         yield local
     finally:
@@ -630,7 +633,7 @@ def _smb_local_file(virtual_path: Path):
 
 
 def _smb_mkdir(virtual_path: Path):
-    """Создать папку на SMB."""
+    """РЎРѕР·РґР°С‚СЊ РїР°РїРєСѓ РЅР° SMB."""
     remote_dir, remote_name = _virtual_smb_remote(virtual_path)
     if not remote_name:
         remote_name = virtual_path.name
@@ -643,7 +646,7 @@ def _smb_mkdir(virtual_path: Path):
             raise
 
 def _smb_delete(virtual_path: Path, is_dir: bool):
-    """Удалить файл или папку на SMB."""
+    """РЈРґР°Р»РёС‚СЊ С„Р°Р№Р» РёР»Рё РїР°РїРєСѓ РЅР° SMB."""
     remote_dir, remote_name = _virtual_smb_remote(virtual_path)
     if not remote_name:
         remote_name = virtual_path.name
@@ -658,7 +661,7 @@ def _smb_delete(virtual_path: Path, is_dir: bool):
             raise
 
 def _smb_put_file(local_path: Path, virtual_path: Path) -> Path:
-    """Загрузить файл на SMB. Возвращает фактический путь (может отличаться при блокировке)."""
+    """Р—Р°РіСЂСѓР·РёС‚СЊ С„Р°Р№Р» РЅР° SMB. Р’РѕР·РІСЂР°С‰Р°РµС‚ С„Р°РєС‚РёС‡РµСЃРєРёР№ РїСѓС‚СЊ (РјРѕР¶РµС‚ РѕС‚Р»РёС‡Р°С‚СЊСЃСЏ РїСЂРё Р±Р»РѕРєРёСЂРѕРІРєРµ)."""
     remote_dir, remote_name = _virtual_smb_remote(virtual_path)
     if not remote_name:
         remote_name = local_path.name
@@ -673,7 +676,7 @@ def _smb_put_file(local_path: Path, virtual_path: Path) -> Path:
             return virtual_path
         except ValueError as e:
             last_err = str(e)
-            if "не перезаписан" not in last_err and "SHARING_VIOLATION" not in last_err:
+            if "РЅРµ РїРµСЂРµР·Р°РїРёСЃР°РЅ" not in last_err and "SHARING_VIOLATION" not in last_err:
                 raise
             if attempt < 3:
                 time.sleep(2 * (attempt + 1))
@@ -690,11 +693,11 @@ def _smb_put_file(local_path: Path, virtual_path: Path) -> Path:
             return virtual_path.parent / alt_name
         except ValueError as e:
             last_err = str(e)
-            if "не перезаписан" not in last_err and "SHARING_VIOLATION" not in last_err:
+            if "РЅРµ РїРµСЂРµР·Р°РїРёСЃР°РЅ" not in last_err and "SHARING_VIOLATION" not in last_err:
                 raise
             continue
 
-    raise ValueError(last_err or "Не удалось сохранить файл на SMB")
+    raise ValueError(last_err or "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРѕС…СЂР°РЅРёС‚СЊ С„Р°Р№Р» РЅР° SMB")
 
 
 def _is_smb_path(folder: Path) -> bool:
@@ -712,11 +715,11 @@ def _call_with_timeout(func, timeout: float = BROWSE_TIMEOUT_SEC):
             return fut.result(timeout=timeout)
         except FuturesTimeoutError as e:
             raise ValueError(
-                "Каталог недоступен (таймаут). Возможно SMB отключён — "
-                "включите Windows-ПК и переподключите шару."
+                "РљР°С‚Р°Р»РѕРі РЅРµРґРѕСЃС‚СѓРїРµРЅ (С‚Р°Р№РјР°СѓС‚). Р’РѕР·РјРѕР¶РЅРѕ SMB РѕС‚РєР»СЋС‡С‘РЅ вЂ” "
+                "РІРєР»СЋС‡РёС‚Рµ Windows-РџРљ Рё РїРµСЂРµРїРѕРґРєР»СЋС‡РёС‚Рµ С€Р°СЂСѓ."
             ) from e
         except OSError as e:
-            raise ValueError(f"Каталог недоступен: {e}") from e
+            raise ValueError(f"РљР°С‚Р°Р»РѕРі РЅРµРґРѕСЃС‚СѓРїРµРЅ: {e}") from e
 
 
 def _dir_accessible(folder: Path) -> bool:
@@ -727,7 +730,7 @@ def _dir_accessible(folder: Path) -> bool:
 
 
 def browse_directory(path: str = "") -> dict:
-    """Содержимое каталога для дерева выбора (один уровень)."""
+    """РЎРѕРґРµСЂР¶РёРјРѕРµ РєР°С‚Р°Р»РѕРіР° РґР»СЏ РґРµСЂРµРІР° РІС‹Р±РѕСЂР° (РѕРґРёРЅ СѓСЂРѕРІРµРЅСЊ)."""
     if not path.strip():
         if not _smb_mounted():
             return {
@@ -735,7 +738,7 @@ def browse_directory(path: str = "") -> dict:
                 "parent": None,
                 "smb_mounted": False,
                 "entries": [],
-                "message": "SMB не подключён. Подключите сетевую папку выше.",
+                "message": "SMB РЅРµ РїРѕРґРєР»СЋС‡С‘РЅ. РџРѕРґРєР»СЋС‡РёС‚Рµ СЃРµС‚РµРІСѓСЋ РїР°РїРєСѓ РІС‹С€Рµ.",
             }
         base = _smb_mount_base()
         result = _browse_smb_directory(base)
@@ -743,7 +746,7 @@ def browse_directory(path: str = "") -> dict:
         if not result.get("entries"):
             result.setdefault(
                 "message",
-                "Папка пуста или нет доступа к файлам. Проверьте путь шары (scan/pdf).",
+                "РџР°РїРєР° РїСѓСЃС‚Р° РёР»Рё РЅРµС‚ РґРѕСЃС‚СѓРїР° Рє С„Р°Р№Р»Р°Рј. РџСЂРѕРІРµСЂСЊС‚Рµ РїСѓС‚СЊ С€Р°СЂС‹ (scan/pdf).",
             )
         return result
 
@@ -752,7 +755,7 @@ def browse_directory(path: str = "") -> dict:
 
     if _is_smb_path(folder) and not _smb_configured():
         raise ValueError(
-            "SMB не подключён. Подключите сетевую папку в блоке «Сетевая папка (SMB)» выше."
+            "SMB РЅРµ РїРѕРґРєР»СЋС‡С‘РЅ. РџРѕРґРєР»СЋС‡РёС‚Рµ СЃРµС‚РµРІСѓСЋ РїР°РїРєСѓ РІ Р±Р»РѕРєРµ В«РЎРµС‚РµРІР°СЏ РїР°РїРєР° (SMB)В» РІС‹С€Рµ."
         )
 
     if _is_smb_path(folder) and _smb_configured():
@@ -775,7 +778,7 @@ def browse_directory(path: str = "") -> dict:
 
     if not _dir_accessible(folder):
         raise ValueError(
-            "Папка недоступна. Если это SMB — включите Windows-ПК и переподключите шару."
+            "РџР°РїРєР° РЅРµРґРѕСЃС‚СѓРїРЅР°. Р•СЃР»Рё СЌС‚Рѕ SMB вЂ” РІРєР»СЋС‡РёС‚Рµ Windows-РџРљ Рё РїРµСЂРµРїРѕРґРєР»СЋС‡РёС‚Рµ С€Р°СЂСѓ."
         )
 
     def _list_items() -> list[Path]:
@@ -786,7 +789,7 @@ def browse_directory(path: str = "") -> dict:
     except ValueError:
         raise
     except PermissionError as e:
-        raise ValueError("Нет доступа к каталогу") from e
+        raise ValueError("РќРµС‚ РґРѕСЃС‚СѓРїР° Рє РєР°С‚Р°Р»РѕРіСѓ") from e
 
     entries: list[dict] = []
     for item in items:
@@ -841,7 +844,7 @@ def browse_directory(path: str = "") -> dict:
         result["entries"] = [e for e in entries if e.get("name") != "smb"]
     if str(folder) == str(SMB_ROOT.resolve()) and not _smb_mounted():
         result["smb_mounted"] = False
-        result["message"] = "SMB не подключён"
+        result["message"] = "SMB РЅРµ РїРѕРґРєР»СЋС‡С‘РЅ"
     return result
 
 
@@ -849,7 +852,7 @@ def convert_paths(
     paths: list[str],
     *,
     merge: bool = False,
-    output_name: str = "сборка.pdf",
+    output_name: str = "СЃР±РѕСЂРєР°.pdf",
     recursive: bool = True,
     windows_cad_ip: str = "",
     windows_cad_profile: str = "",
@@ -859,7 +862,7 @@ def convert_paths(
     underlay_paths: list[str] | None = None,
     smart_search: bool = False,
 ) -> dict:
-    """Конвертировать выбранные файлы и папки на сервере."""
+    """РљРѕРЅРІРµСЂС‚РёСЂРѕРІР°С‚СЊ РІС‹Р±СЂР°РЅРЅС‹Рµ С„Р°Р№Р»С‹ Рё РїР°РїРєРё РЅР° СЃРµСЂРІРµСЂРµ."""
     inputs = resolve_ordered_inputs(paths, recursive=recursive)
     
     if underlay_paths:
@@ -938,7 +941,7 @@ def _convert_with_libreoffice(src: Path, out_dir: Path) -> Path:
         raise RuntimeError((proc.stderr or proc.stdout or "LibreOffice error").strip())
     pdf = out_dir / f"{src.stem}.pdf"
     if not pdf.exists():
-        raise RuntimeError("PDF не создан после конвертации")
+        raise RuntimeError("PDF РЅРµ СЃРѕР·РґР°РЅ РїРѕСЃР»Рµ РєРѕРЅРІРµСЂС‚Р°С†РёРё")
     return pdf
 
 
@@ -949,9 +952,9 @@ def merge_pdfs(
     numbering_from_page: int | None = None,
     numbering_start: int = 1,
 ) -> Path:
-    """Склеить PDF-файлы в один (порядок — как в списке sources)."""
+    """РЎРєР»РµРёС‚СЊ PDF-С„Р°Р№Р»С‹ РІ РѕРґРёРЅ (РїРѕСЂСЏРґРѕРє вЂ” РєР°Рє РІ СЃРїРёСЃРєРµ sources)."""
     if not sources:
-        raise ValueError("Нет PDF для сборки")
+        raise ValueError("РќРµС‚ PDF РґР»СЏ СЃР±РѕСЂРєРё")
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     if len(sources) == 1:
@@ -972,7 +975,7 @@ def merge_pdfs(
 
 
 def _merge_pdfs_ghostscript(sources: list[Path], dest: Path) -> None:
-    """Сборка PDF через Ghostscript — не раздувает RAM процесса Python."""
+    """РЎР±РѕСЂРєР° PDF С‡РµСЂРµР· Ghostscript вЂ” РЅРµ СЂР°Р·РґСѓРІР°РµС‚ RAM РїСЂРѕС†РµСЃСЃР° Python."""
     cmd = [
         "gs",
         "-dBATCH",
@@ -988,11 +991,11 @@ def _merge_pdfs_ghostscript(sources: list[Path], dest: Path) -> None:
     proc = run_monitored(cmd, timeout=600)
     if proc.returncode != 0 or not dest.exists():
         err = (proc.stderr or proc.stdout or "ghostscript error").strip()
-        raise RuntimeError(f"Ошибка сборки PDF (gs): {err}")
+        raise RuntimeError(f"РћС€РёР±РєР° СЃР±РѕСЂРєРё PDF (gs): {err}")
 
 
 def _merge_pdfs_fitz(sources: list[Path], dest: Path) -> None:
-    """Fallback: PyMuPDF, по одному файлу с принудительной очисткой."""
+    """Fallback: PyMuPDF, РїРѕ РѕРґРЅРѕРјСѓ С„Р°Р№Р»Сѓ СЃ РїСЂРёРЅСѓРґРёС‚РµР»СЊРЅРѕР№ РѕС‡РёСЃС‚РєРѕР№."""
     import fitz
 
     out = fitz.open(str(sources[0]))
@@ -1024,9 +1027,9 @@ def _apply_pdf_numbering(path: Path, *, from_page: int, start: int) -> None:
                 continue
             num = str(first_num + (page_num - page_from))
             rect = page.rect
-            # Для чертежей штамп всегда имеет фиксированный физический размер (185x55 мм)
-            # При печати на плоттере 1 к 1 размер шрифта должен быть постоянным (~5-7 мм).
-            # В PDF 1 пункт = 1/72 дюйма. 14pt = ~5мм, 18pt = ~6.3мм.
+            # Р”Р»СЏ С‡РµСЂС‚РµР¶РµР№ С€С‚Р°РјРї РІСЃРµРіРґР° РёРјРµРµС‚ С„РёРєСЃРёСЂРѕРІР°РЅРЅС‹Р№ С„РёР·РёС‡РµСЃРєРёР№ СЂР°Р·РјРµСЂ (185x55 РјРј)
+            # РџСЂРё РїРµС‡Р°С‚Рё РЅР° РїР»РѕС‚С‚РµСЂРµ 1 Рє 1 СЂР°Р·РјРµСЂ С€СЂРёС„С‚Р° РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ РїРѕСЃС‚РѕСЏРЅРЅС‹Рј (~5-7 РјРј).
+            # Р’ PDF 1 РїСѓРЅРєС‚ = 1/72 РґСЋР№РјР°. 14pt = ~5РјРј, 18pt = ~6.3РјРј.
             fs = 14
             x_off = 30
             y_off = 15
@@ -1052,7 +1055,7 @@ def _apply_pdf_numbering(path: Path, *, from_page: int, start: int) -> None:
 def _run_merge_parts(
     inputs: list[Path], tmp: Path, windows_cad_ip: str = "", windows_cad_profile: str = ""
 ) -> list[tuple[int, Path | None, dict]]:
-    """Конвертация частей сборки: по умолчанию последовательно (экономия RAM)."""
+    """РљРѕРЅРІРµСЂС‚Р°С†РёСЏ С‡Р°СЃС‚РµР№ СЃР±РѕСЂРєРё: РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ РїРѕСЃР»РµРґРѕРІР°С‚РµР»СЊРЅРѕ (СЌРєРѕРЅРѕРјРёСЏ RAM)."""
     workers = min(MERGE_WORKERS, len(inputs))
     part_results: list[tuple[int, Path | None, dict]] = []
     if workers <= 1:
@@ -1071,7 +1074,7 @@ def _run_merge_parts(
 
 
 def _child_memory_limit() -> None:
-    """Ограничить RAM дочернего процесса (OOM убивает ребёнка, не uvicorn)."""
+    """РћРіСЂР°РЅРёС‡РёС‚СЊ RAM РґРѕС‡РµСЂРЅРµРіРѕ РїСЂРѕС†РµСЃСЃР° (OOM СѓР±РёРІР°РµС‚ СЂРµР±С‘РЅРєР°, РЅРµ uvicorn)."""
     if os.name != "posix":
         return
     import resource
@@ -1090,7 +1093,7 @@ def _convert_timeout_for(src: Path) -> int:
 
 
 def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None, original_src: Path = None, windows_cad_profile: str = "", smart_search: bool = False) -> dict | None:
-    """Конвертация в отдельном процессе — OOM дочернего не роняет uvicorn."""
+    """РљРѕРЅРІРµСЂС‚Р°С†РёСЏ РІ РѕС‚РґРµР»СЊРЅРѕРј РїСЂРѕС†РµСЃСЃРµ вЂ” OOM РґРѕС‡РµСЂРЅРµРіРѕ РЅРµ СЂРѕРЅСЏРµС‚ uvicorn."""
     import sys
     import json
 
@@ -1114,17 +1117,17 @@ def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = ""
         )
     except subprocess.TimeoutExpired as e:
         raise RuntimeError(
-            f"Таймаут конвертации {src.name} ({timeout_sec} с)"
+            f"РўР°Р№РјР°СѓС‚ РєРѕРЅРІРµСЂС‚Р°С†РёРё {src.name} ({timeout_sec} СЃ)"
         ) from e
     if proc.returncode != 0:
-        msg = (proc.stderr or proc.stdout or "ошибка конвертации").strip()
+        msg = (proc.stderr or proc.stdout or "РѕС€РёР±РєР° РєРѕРЅРІРµСЂС‚Р°С†РёРё").strip()
         if proc.returncode < 0:
             raise RuntimeError(
-                f"Процесс конвертации прерван ({src.name}): нехватка памяти или сбой ODA"
+                f"РџСЂРѕС†РµСЃСЃ РєРѕРЅРІРµСЂС‚Р°С†РёРё РїСЂРµСЂРІР°РЅ ({src.name}): РЅРµС…РІР°С‚РєР° РїР°РјСЏС‚Рё РёР»Рё СЃР±РѕР№ ODA"
             )
         raise RuntimeError(msg)
     if not dest.is_file():
-        raise RuntimeError(f"PDF не создан: {src.name}")
+        raise RuntimeError(f"PDF РЅРµ СЃРѕР·РґР°РЅ: {src.name}")
 
     meta = None
     if meta_file.exists():
@@ -1144,7 +1147,7 @@ def _convert_local_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", 
 
 
 def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None, original_src: Path = None, windows_cad_profile: str = "", smart_search: bool = False) -> dict | None:
-    """Конвертировать один локальный файл в указанный PDF. Для CAD возвращает meta."""
+    """РљРѕРЅРІРµСЂС‚РёСЂРѕРІР°С‚СЊ РѕРґРёРЅ Р»РѕРєР°Р»СЊРЅС‹Р№ С„Р°Р№Р» РІ СѓРєР°Р·Р°РЅРЅС‹Р№ PDF. Р”Р»СЏ CAD РІРѕР·РІСЂР°С‰Р°РµС‚ meta."""
     src = src.resolve()
     suffix = src.suffix.lower()
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1155,7 +1158,7 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
         return None
 
     if suffix not in SUPPORTED_OFFICE and suffix not in SUPPORTED_CAD:
-        raise ValueError(f"Формат {suffix} не поддерживается")
+        raise ValueError(f"Р¤РѕСЂРјР°С‚ {suffix} РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ")
 
     _validate_file_format_or_raise(src)
 
@@ -1167,7 +1170,7 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
 
         if suffix in SUPPORTED_CAD:
             if not windows_cad_ip:
-                raise RuntimeError("Не указан Windows CAD IP для конвертации DWG/DXF")
+                raise RuntimeError("РќРµ СѓРєР°Р·Р°РЅ Windows CAD IP РґР»СЏ РєРѕРЅРІРµСЂС‚Р°С†РёРё DWG/DXF")
             
             smb_dwg_path = ""
             try:
@@ -1202,7 +1205,7 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
                 if ip.count(':') == 1:
                     ip += ":8000"
                 url = f"{ip.rstrip('/')}/convert-office"
-                print(f"Отправляем {src.name} на Windows Server MS Office ({url})...")
+                print(f"РћС‚РїСЂР°РІР»СЏРµРј {src.name} РЅР° Windows Server MS Office ({url})...")
                 
                 payload = {'profile': windows_cad_profile} if windows_cad_profile else {}
                 cmd = [
@@ -1233,7 +1236,7 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
 
 
 def _convert_source_to_temp_pdf(src: Path, dest: Path, windows_cad_ip: str = "", windows_cad_profile: str = "") -> dict | None:
-    """Конвертировать файл с сервера (локальный или SMB) во временный PDF."""
+    """РљРѕРЅРІРµСЂС‚РёСЂРѕРІР°С‚СЊ С„Р°Р№Р» СЃ СЃРµСЂРІРµСЂР° (Р»РѕРєР°Р»СЊРЅС‹Р№ РёР»Рё SMB) РІРѕ РІСЂРµРјРµРЅРЅС‹Р№ PDF."""
     if _is_smb_path(src) and _smb_mounted():
         with _smb_local_file(src) as local_src:
             return _convert_local_file_to_pdf(local_src, dest, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile, original_src=src)
@@ -1241,7 +1244,7 @@ def _convert_source_to_temp_pdf(src: Path, dest: Path, windows_cad_ip: str = "",
 
 
 def _save_merged_pdf(local_pdf: Path, dest: Path) -> Path:
-    """Сохранить собранный PDF в целевую папку (SMB или локально)."""
+    """РЎРѕС…СЂР°РЅРёС‚СЊ СЃРѕР±СЂР°РЅРЅС‹Р№ PDF РІ С†РµР»РµРІСѓСЋ РїР°РїРєСѓ (SMB РёР»Рё Р»РѕРєР°Р»СЊРЅРѕ)."""
     if _is_smb_path(dest) and _smb_mounted():
         return _smb_put_file(local_pdf, dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1256,8 +1259,9 @@ def convert_file_in_place(
     numbering_from_page: int | None = None,
     numbering_start: int = 1,
     windows_cad_profile: str = "",
+    smart_search: bool = False,
 ) -> dict:
-    """Конвертирует файл и кладёт PDF в ту же папку: doc.docx → doc.pdf."""
+    """РљРѕРЅРІРµСЂС‚РёСЂСѓРµС‚ С„Р°Р№Р» Рё РєР»Р°РґС‘С‚ PDF РІ С‚Сѓ Р¶Рµ РїР°РїРєСѓ: doc.docx в†’ doc.pdf."""
     src = src.resolve()
     suffix = src.suffix.lower()
     dest = src.with_suffix(".pdf")
@@ -1276,7 +1280,7 @@ def convert_file_in_place(
                     "source": str(src),
                     "pdf": str(saved),
                     "status": "ok",
-                    "message": "Пронумеровано",
+                    "message": "РџСЂРѕРЅСѓРјРµСЂРѕРІР°РЅРѕ",
                 }
             except Exception as e:
                 return {
@@ -1290,7 +1294,7 @@ def convert_file_in_place(
                 "source": str(src),
                 "pdf": str(src),
                 "status": "skipped",
-                "message": "Уже PDF",
+                "message": "РЈР¶Рµ PDF",
             }
 
     if suffix not in SUPPORTED_OFFICE and suffix not in SUPPORTED_CAD:
@@ -1298,7 +1302,7 @@ def convert_file_in_place(
             "source": str(src),
             "pdf": None,
             "status": "skipped",
-            "message": f"Формат {suffix} не поддерживается",
+            "message": f"Р¤РѕСЂРјР°С‚ {suffix} РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ",
         }
 
     try:
@@ -1306,26 +1310,26 @@ def convert_file_in_place(
         if _is_smb_path(src) and _smb_mounted():
             with _smb_local_file(src) as local_src:
                 tmp_pdf = local_src.with_suffix(".pdf")
-                cad_meta = _convert_local_file_to_pdf(local_src, tmp_pdf, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile, original_src=src)
+                cad_meta = _convert_local_file_to_pdf(local_src, tmp_pdf, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile, original_src=src, smart_search=smart_search)
                 if number_pages and tmp_pdf.exists():
                     _apply_pdf_numbering(tmp_pdf, from_page=numbering_from_page or 1, start=numbering_start)
                 saved = _smb_put_file(tmp_pdf, dest)
         else:
-            cad_meta = _convert_local_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile)
+            cad_meta = _convert_local_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile, smart_search=smart_search)
             if number_pages and dest.exists():
                 _apply_pdf_numbering(dest, from_page=numbering_from_page or 1, start=numbering_start)
             saved = dest
-        msg = "Сконвертировано"
+        msg = "РЎРєРѕРЅРІРµСЂС‚РёСЂРѕРІР°РЅРѕ"
         if cad_meta and cad_meta.get("engine") == "ezdxf" and cad_meta.get("fallback"):
-            msg = "Сконвертировано (запасной режим ezdxf — качество может быть ниже ODA)"
+            msg = "РЎРєРѕРЅРІРµСЂС‚РёСЂРѕРІР°РЅРѕ (Р·Р°РїР°СЃРЅРѕР№ СЂРµР¶РёРј ezdxf вЂ” РєР°С‡РµСЃС‚РІРѕ РјРѕР¶РµС‚ Р±С‹С‚СЊ РЅРёР¶Рµ ODA)"
         if cad_meta and cad_meta.get("render_mode") == "frames":
             n = cad_meta.get("frames_rendered") or 0
             if n:
-                msg += f", рамок: {n}"
+                msg += f", СЂР°РјРѕРє: {n}"
         if str(saved) != str(dest):
             msg = (
-                f"Файл «{dest.name}» не перезаписан — используется в другой программе. "
-                f"Сохранено как «{saved.name}»"
+                f"Р¤Р°Р№Р» В«{dest.name}В» РЅРµ РїРµСЂРµР·Р°РїРёСЃР°РЅ вЂ” РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РІ РґСЂСѓРіРѕР№ РїСЂРѕРіСЂР°РјРјРµ. "
+                f"РЎРѕС…СЂР°РЅРµРЅРѕ РєР°Рє В«{saved.name}В»"
             )
         return {
             "source": str(src),
@@ -1396,9 +1400,9 @@ def resolve_ordered_inputs(
     *,
     recursive: bool = True,
 ) -> list[Path]:
-    """Развернуть выбранные файлы и папки в упорядоченный список файлов."""
+    """Р Р°Р·РІРµСЂРЅСѓС‚СЊ РІС‹Р±СЂР°РЅРЅС‹Рµ С„Р°Р№Р»С‹ Рё РїР°РїРєРё РІ СѓРїРѕСЂСЏРґРѕС‡РµРЅРЅС‹Р№ СЃРїРёСЃРѕРє С„Р°Р№Р»РѕРІ."""
     if not paths:
-        raise ValueError("Не выбрано ни одного файла или папки")
+        raise ValueError("РќРµ РІС‹Р±СЂР°РЅРѕ РЅРё РѕРґРЅРѕРіРѕ С„Р°Р№Р»Р° РёР»Рё РїР°РїРєРё")
 
     inputs: list[Path] = []
     seen: set[str] = set()
@@ -1423,14 +1427,14 @@ def resolve_ordered_inputs(
         else:
             fp = validate_file(str(p))
             if fp.suffix.lower() not in SUPPORTED_ALL:
-                raise ValueError(f"Формат не поддерживается: {fp.name}")
+                raise ValueError(f"Р¤РѕСЂРјР°С‚ РЅРµ РїРѕРґРґРµСЂР¶РёРІР°РµС‚СЃСЏ: {fp.name}")
             key = str(fp)
             if key not in seen:
                 seen.add(key)
                 inputs.append(fp)
 
     if not inputs:
-        raise ValueError("Нет поддерживаемых файлов для конвертации")
+        raise ValueError("РќРµС‚ РїРѕРґРґРµСЂР¶РёРІР°РµРјС‹С… С„Р°Р№Р»РѕРІ РґР»СЏ РєРѕРЅРІРµСЂС‚Р°С†РёРё")
     return inputs
 
 
@@ -1439,7 +1443,7 @@ def resolve_ordered_inputs_with_format(
     *,
     recursive: bool = True,
 ) -> list[dict]:
-    """Развернуть выбор в список файлов с информацией о формате."""
+    """Р Р°Р·РІРµСЂРЅСѓС‚СЊ РІС‹Р±РѕСЂ РІ СЃРїРёСЃРѕРє С„Р°Р№Р»РѕРІ СЃ РёРЅС„РѕСЂРјР°С†РёРµР№ Рѕ С„РѕСЂРјР°С‚Рµ."""
     files = resolve_ordered_inputs(paths, recursive=recursive)
     out: list[dict] = []
     for f in files:
@@ -1469,7 +1473,7 @@ def convert_folder(
     recursive: bool = True,
     *,
     merge: bool = False,
-    output_name: str = "сборка.pdf",
+    output_name: str = "СЃР±РѕСЂРєР°.pdf",
     windows_cad_ip: str = "",
     windows_cad_profile: str = "",
     number_pages: bool = False,
@@ -1518,7 +1522,7 @@ def convert_folder(
 
     for f in inputs:
         check_cancelled()
-        item = convert_file_in_place(f, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile)
+        item = convert_file_in_place(f, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile, smart_search=smart_search)
         results.append(item)
         stats[item["status"]] = stats.get(item["status"], 0) + 1
 
@@ -1538,7 +1542,7 @@ def _convert_merge_part(idx: int, src: Path, tmp: Path, windows_cad_ip: str = ""
     cache_dir = get_local_cache_dir(src)
     cached_pdf = cache_dir / f"{h}.pdf"
 
-    # Пытаемся взять готовый PDF из локального кэша
+    # РџС‹С‚Р°РµРјСЃСЏ РІР·СЏС‚СЊ РіРѕС‚РѕРІС‹Р№ PDF РёР· Р»РѕРєР°Р»СЊРЅРѕРіРѕ РєСЌС€Р°
     if cached_pdf.exists():
         try:
             shutil.copy2(cached_pdf, part)
@@ -1546,16 +1550,16 @@ def _convert_merge_part(idx: int, src: Path, tmp: Path, windows_cad_ip: str = ""
                 "source": str(src),
                 "pdf": str(part),
                 "status": "ok",
-                "message": "Включён в сборку (из кэша)",
+                "message": "Р’РєР»СЋС‡С‘РЅ РІ СЃР±РѕСЂРєСѓ (РёР· РєСЌС€Р°)",
                 "hash": h,
             }
         except Exception:
             pass
 
-    # Стандартная конвертация
+    # РЎС‚Р°РЅРґР°СЂС‚РЅР°СЏ РєРѕРЅРІРµСЂС‚Р°С†РёСЏ
     try:
         _convert_source_to_temp_pdf(src, part, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile)
-        # Сохраняем результат в кэш для последующих сборок
+        # РЎРѕС…СЂР°РЅСЏРµРј СЂРµР·СѓР»СЊС‚Р°С‚ РІ РєСЌС€ РґР»СЏ РїРѕСЃР»РµРґСѓСЋС‰РёС… СЃР±РѕСЂРѕРє
         try:
             shutil.copy2(part, cached_pdf)
         except Exception:
@@ -1564,7 +1568,7 @@ def _convert_merge_part(idx: int, src: Path, tmp: Path, windows_cad_ip: str = ""
             "source": str(src),
             "pdf": str(part),
             "status": "ok",
-            "message": "Включён в сборку",
+            "message": "Р’РєР»СЋС‡С‘РЅ РІ СЃР±РѕСЂРєСѓ",
             "hash": h,
         }
     except Exception as e:
@@ -1590,9 +1594,9 @@ def _convert_folder_merged(
     download_to: Path | None = None,
 ) -> dict:
     if not inputs:
-        raise ValueError("В папке нет поддерживаемых файлов для сборки")
+        raise ValueError("Р’ РїР°РїРєРµ РЅРµС‚ РїРѕРґРґРµСЂР¶РёРІР°РµРјС‹С… С„Р°Р№Р»РѕРІ РґР»СЏ СЃР±РѕСЂРєРё")
 
-    safe_name = Path(output_name).name or "сборка.pdf"
+    safe_name = Path(output_name).name or "СЃР±РѕСЂРєР°.pdf"
     if not safe_name.lower().endswith(".pdf"):
         safe_name += ".pdf"
 
@@ -1617,12 +1621,12 @@ def _convert_folder_merged(
 
         if not pdf_parts:
             details = "; ".join(
-                f"{Path(r['source']).name}: {r.get('message', 'ошибка')}"
+                f"{Path(r['source']).name}: {r.get('message', 'РѕС€РёР±РєР°')}"
                 for r in results
                 if r.get("status") == "error"
             )
             raise ValueError(
-                "Не удалось сконвертировать ни одного файла для сборки"
+                "РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєРѕРЅРІРµСЂС‚РёСЂРѕРІР°С‚СЊ РЅРё РѕРґРЅРѕРіРѕ С„Р°Р№Р»Р° РґР»СЏ СЃР±РѕСЂРєРё"
                 + (f" ({details})" if details else "")
             )
 
@@ -1637,7 +1641,7 @@ def _convert_folder_merged(
             saved_path = download_to
         else:
             saved_path = _save_merged_pdf(local_merged, merged_path)
-            # Сохраняем манифест сборки (.cache.json) рядом с итоговым PDF
+            # РЎРѕС…СЂР°РЅСЏРµРј РјР°РЅРёС„РµСЃС‚ СЃР±РѕСЂРєРё (.cache.json) СЂСЏРґРѕРј СЃ РёС‚РѕРіРѕРІС‹Рј PDF
             try:
                 manifest_path = saved_path.with_suffix(".pdf.cache.json")
                 manifest_sources = {}
@@ -1686,18 +1690,18 @@ def _convert_folder_merged(
 
 def convert_paths_merged_download(
     paths: list[str],
-    output_name: str = "сборка.pdf",
+    output_name: str = "СЃР±РѕСЂРєР°.pdf",
     *,
     recursive: bool = True,
     numbering_from_page: int | None = None,
     numbering_start: int = 1,
     windows_cad_ip: str = "",
 ) -> tuple[Path, Path, dict]:
-    """Собрать PDF во временный файл для скачивания (без записи на SMB)."""
+    """РЎРѕР±СЂР°С‚СЊ PDF РІРѕ РІСЂРµРјРµРЅРЅС‹Р№ С„Р°Р№Р» РґР»СЏ СЃРєР°С‡РёРІР°РЅРёСЏ (Р±РµР· Р·Р°РїРёСЃРё РЅР° SMB)."""
     inputs = resolve_ordered_inputs(paths, recursive=recursive)
     if not inputs:
-        raise ValueError("Нет файлов для сборки")
-    safe_name = Path(output_name).name or "сборка.pdf"
+        raise ValueError("РќРµС‚ С„Р°Р№Р»РѕРІ РґР»СЏ СЃР±РѕСЂРєРё")
+    safe_name = Path(output_name).name or "СЃР±РѕСЂРєР°.pdf"
     if not safe_name.lower().endswith(".pdf"):
         safe_name += ".pdf"
     tmp_parent = Path(tempfile.mkdtemp(prefix="cvt_dl_"))
@@ -1723,9 +1727,9 @@ def convert_uploads_to_merged_pdf(
     numbering_start: int = 1,
     windows_cad_ip: str = "",
 ) -> dict:
-    """Сконвертировать загруженные файлы и собрать в один PDF."""
+    """РЎРєРѕРЅРІРµСЂС‚РёСЂРѕРІР°С‚СЊ Р·Р°РіСЂСѓР¶РµРЅРЅС‹Рµ С„Р°Р№Р»С‹ Рё СЃРѕР±СЂР°С‚СЊ РІ РѕРґРёРЅ PDF."""
     if not sources:
-        raise ValueError("Не передано ни одного файла")
+        raise ValueError("РќРµ РїРµСЂРµРґР°РЅРѕ РЅРё РѕРґРЅРѕРіРѕ С„Р°Р№Р»Р°")
 
     tmp = Path(tempfile.mkdtemp(prefix="cvt_up_merge_"))
     results: list[dict] = []
@@ -1745,7 +1749,7 @@ def convert_uploads_to_merged_pdf(
                 stats["error"] += 1
 
         if not pdf_parts:
-            raise ValueError("Не удалось сконвертировать ни одного файла")
+            raise ValueError("РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєРѕРЅРІРµСЂС‚РёСЂРѕРІР°С‚СЊ РЅРё РѕРґРЅРѕРіРѕ С„Р°Р№Р»Р°")
 
         merge_pdfs(
             pdf_parts,
@@ -1770,10 +1774,10 @@ def number_pdf_file(
     numbering_from_page: int = 1,
     numbering_start: int = 1,
 ) -> dict:
-    """Пронумеровать существующий PDF файл на сервере."""
+    """РџСЂРѕРЅСѓРјРµСЂРѕРІР°С‚СЊ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёР№ PDF С„Р°Р№Р» РЅР° СЃРµСЂРІРµСЂРµ."""
     fp = validate_file(file_path)
     if fp.suffix.lower() != ".pdf":
-        raise ValueError("Файл не является PDF")
+        raise ValueError("Р¤Р°Р№Р» РЅРµ СЏРІР»СЏРµС‚СЃСЏ PDF")
 
     _apply_pdf_numbering(fp, from_page=numbering_from_page, start=numbering_start)
 
@@ -1783,3 +1787,5 @@ def number_pdf_file(
         "numbering_from_page": numbering_from_page,
         "numbering_start": numbering_start,
     }
+
+

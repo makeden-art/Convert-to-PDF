@@ -732,7 +732,17 @@ async def api_convert(
             pdf_tmp, _cad_meta = convert_cad_to_pdf(str(src), meta={"windows_cad_ip": windows_cad_ip})
             shutil.move(str(pdf_tmp), str(out))
         else:
-            out = _convert_with_libreoffice(src, tmp)
+            out = tmp / "result.pdf"
+            if windows_cad_ip and suffix in SUPPORTED_OFFICE:
+                try:
+                    from converter import convert_file_to_pdf
+                    convert_file_to_pdf(src, out, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile)
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Windows Office conversion failed: {e}. Falling back to LibreOffice.")
+                    out = _convert_with_libreoffice(src, tmp)
+            else:
+                out = _convert_with_libreoffice(src, tmp)
 
         if number_pages and out.exists():
             _apply_pdf_numbering(out, from_page=numbering_from_page or 1, start=numbering_start)
