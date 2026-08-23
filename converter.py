@@ -261,19 +261,13 @@ def server_path_exists(path: Path) -> bool:
 
 
 def check_output_files(
-
     *,
-
     paths: list[str] | None = None,
-
     folder_path: str | None = None,
-
     merge: bool = False,
-
     output_name: str = "сборка.pdf",
-
     recursive: bool = True,
-
+    excluded_paths: list[str] = None,
 ) -> dict:
 
     """Проверить итоговые PDF: существуют ли и можно ли записать до конвертации."""
@@ -310,7 +304,7 @@ def check_output_files(
 
         if paths:
 
-            for raw in resolve_ordered_inputs(paths, recursive=recursive):
+            for raw in resolve_ordered_inputs(paths, recursive=recursive, excluded_paths=excluded_paths):
 
                 if raw.suffix.lower() != ".pdf":
 

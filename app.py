@@ -189,8 +189,8 @@ class ResolveRequest(BaseModel):
 
 
 class CheckOutputRequest(BaseModel):
-
     paths: list[str] | None = None
+    excluded_paths: list[str] = []
 
     folder_path: str | None = None
 
@@ -511,17 +511,12 @@ async def api_check_output(body: CheckOutputRequest):
         return JSONResponse(
 
             check_output_files(
-
                 paths=body.paths,
-
                 folder_path=body.folder_path,
-
                 merge=body.merge,
-
                 output_name=body.output_name,
-
                 recursive=body.recursive,
-
+                excluded_paths=body.excluded_paths,
             )
 
         )
