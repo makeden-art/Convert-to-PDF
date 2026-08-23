@@ -104,7 +104,7 @@ MAX_MERGE_FILES = int(os.getenv("CONVERT_MAX_MERGE_FILES", "50"))
 
 
 
-app = FastAPI(title="Перевод в PDF", version="0.9.37")
+app = FastAPI(title="Перевод в PDF", version="0.9.38")
 
 
 
