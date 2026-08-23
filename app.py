@@ -850,6 +850,7 @@ async def api_convert_paths(body: PathsRequest):
                 output_name=body.output_name,
 
                 recursive=body.recursive,
+                excluded_paths=body.excluded_paths,
 
                 number_pages=body.number_pages,
 
@@ -1133,7 +1134,7 @@ async def api_convert_merge_download(body: PathsRequest):
             body.paths,
             body.output_name,
             recursive=body.recursive,
-            excluded_paths=body.excluded_paths,
+                excluded_paths=body.excluded_paths,
 
             numbering_from_page=from_page,
 
@@ -1700,7 +1701,7 @@ async def api_convert_draft(body: PathsRequest):
             body.paths,
             "draft.pdf",
             recursive=body.recursive,
-            excluded_paths=body.excluded_paths,
+                excluded_paths=body.excluded_paths,
 
             numbering_from_page=None,
 

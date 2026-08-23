@@ -1693,31 +1693,19 @@ def browse_directory(path: str = "") -> dict:
 
 
 def convert_paths(
-
     paths: list[str],
-
     *,
-
     merge: bool = False,
-
     output_name: str = "сборка.pdf",
-
     recursive: bool = True,
-
+    excluded_paths: list[str] = None,
     windows_cad_ip: str = "",
-
     windows_cad_profile: str = "",
-
     number_pages: bool = False,
-
     numbering_from_page: int = 1,
-
     numbering_start: int = 1,
-
     underlay_paths: list[str] | None = None,
-
     smart_search: bool = False,
-
 ) -> dict:
 
     """Конвертировать выбранные файлы и папки на сервере."""
