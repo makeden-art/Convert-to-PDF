@@ -40,7 +40,11 @@
 
 <div class="header">
   <h1>Редактор документа (Предпросмотр)</h1>
-  <button class="btn" id="btn-finalize">💾 Сохранить и Скачать PDF</button>
+  
+    <button class="btn" id="btn-save" style="background:#22c55e; margin-right:8px; display:none;">💾 Сохранить</button>
+    <button class="btn" id="btn-download" style="background:#3b82f6; margin-right:8px;">⬇️ Скачать PDF</button>
+    <button class="btn btn-danger" id="btn-close" style="background:#ef4444;">❌ Закрыть</button>
+
 </div>
 
 <div class="controls">
@@ -169,45 +173,83 @@
   });
   
   // Finalize
-  document.getElementById('btn-finalize').addEventListener('click', async () => {
-    const pageOrder = [...document.querySelectorAll('.page-card')].map(c => parseInt(c.dataset.page));
-    
-    const req = {
-      page_order: pageOrder,
-      deleted_pages: Array.from(deletedPages),
-      number_pages: document.getElementById('chk-numbering').checked,
-      numbering_from_page: parseInt(document.getElementById('num-from').value),
-      numbering_start: parseInt(document.getElementById('num-start').value),
-    };
-    
-    const btn = document.getElementById('btn-finalize');
-    btn.disabled = true;
-    btn.innerText = '⏳ Сборка...';
-    
-    try {
-      const res = await fetch(`/api/draft/${draftId}/finalize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req)
-      });
-      
-      if (!res.ok) throw new Error(await res.text());
-      
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'сборка.pdf';
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-    } catch (e) {
-      alert("Ошибка: " + e.message);
-    } finally {
-      btn.disabled = false;
-      btn.innerText = '💾 Сохранить и Скачать PDF';
+  const origPath = urlParams.get('path');
+    if (origPath) {
+      const btnSave = document.getElementById('btn-save');
+      if (btnSave) btnSave.style.display = 'inline-block';
     }
-  });
+
+    const btnClose = document.getElementById('btn-close');
+    if (btnClose) {
+      btnClose.addEventListener('click', () => {
+        window.close();
+      });
+    }
+
+    function getReqData() {
+      return {
+        path: origPath || '',
+        page_order: [...document.querySelectorAll('.page-card')].map(c => parseInt(c.dataset.page)),
+        deleted_pages: Array.from(deletedPages),
+        number_pages: document.getElementById('chk-numbering').checked,
+        numbering_from_page: parseInt(document.getElementById('num-from').value),
+        numbering_start: parseInt(document.getElementById('num-start').value),
+      };
+    }
+
+    const btnSave = document.getElementById('btn-save');
+    if (btnSave) {
+      btnSave.addEventListener('click', async () => {
+        if (!origPath) return;
+        const oldText = btnSave.innerText;
+        btnSave.disabled = true;
+        btnSave.innerText = '⏳ Сохранение...';
+        try {
+          const res = await fetch(`/api/draft/${draftId}/save-to-smb`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(getReqData())
+          });
+          if (!res.ok) throw new Error(await res.text());
+          btnSave.innerText = '✅ Сохранено!';
+          setTimeout(() => window.close(), 1500);
+        } catch (err) {
+          alert("Ошибка сохранения: " + err.message);
+          btnSave.innerText = oldText;
+          btnSave.disabled = false;
+        }
+      });
+    }
+
+    const btnDownload = document.getElementById('btn-download');
+    if (btnDownload) {
+      btnDownload.addEventListener('click', async () => {
+        const oldText = btnDownload.innerText;
+        btnDownload.disabled = true;
+        btnDownload.innerText = '⏳ Подготовка...';
+        try {
+          const res = await fetch(`/api/draft/${draftId}/finalize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(getReqData())
+          });
+          if (!res.ok) throw new Error(await res.text());
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = (origPath ? origPath.split('/').pop() : 'сборка.pdf');
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        } catch (err) {
+          alert("Ошибка скачивания: " + err.message);
+        } finally {
+          btnDownload.disabled = false;
+          btnDownload.innerText = oldText;
+        }
+      });
+    }
 </script>
 </body>
 </html>

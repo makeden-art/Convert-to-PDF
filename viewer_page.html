@@ -185,6 +185,8 @@
     <a href="/convert">← Конвертация</a>
     <h1 id="title">Загрузка…</h1>
     <div class="tabs" id="tabs"></div>
+    
+    <a href="#" id="btn-edit" style="background:#38bdf8; color:#000; padding:6px 12px; border-radius:6px; font-weight:600; display:none; margin-left:12px;">✏️ Редактировать PDF</a>
     <div class="nav" id="nav" style="display:none">
       <button type="button" id="btn-prev">◀</button>
       <span id="page-label">—</span>
@@ -317,6 +319,45 @@
           pdfView.onerror = () => { if (token === state.loadToken) showError('Не удалось открыть PDF'); };
           pdfView.src = url;
           showPdf();
+
+      if (state.format === 'pdf' || state.path.toLowerCase().endsWith('.pdf')) {
+        const editBtn = document.getElementById('btn-edit');
+        if (editBtn) {
+          editBtn.style.display = 'inline-flex';
+          editBtn.onclick = async (e) => {
+            e.preventDefault();
+            const originalText = editBtn.textContent;
+            editBtn.textContent = 'Создание черновика...';
+            editBtn.style.pointerEvents = 'none';
+            try {
+              const r = await fetch('/api/convert-draft', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  paths: [state.path],
+                  merge: false,
+                  output_name: 'draft.pdf',
+                  recursive: false,
+                  windows_cad_ip: '',
+                  windows_cad_profile: ''
+                })
+              });
+              if (!r.ok) {
+                 let msg = 'Ошибка подготовки черновика';
+                 try { msg = (await r.json()).detail || msg; } catch(err){}
+                 throw new Error(msg);
+              }
+              const data = await r.json();
+              window.location.href = '/convert/editor?draft_id=' + encodeURIComponent(data.draft_id) + '&count=' + data.page_count + '&path=' + encodeURIComponent(state.path);
+            } catch(err) {
+              alert(err.message);
+              editBtn.textContent = originalText;
+              editBtn.style.pointerEvents = 'auto';
+            }
+          };
+        }
+      }
+
           setTimeout(() => {
             if (token === state.loadToken) hideOverlay();
           }, 2000);

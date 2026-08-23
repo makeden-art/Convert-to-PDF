@@ -306,6 +306,7 @@ window.addEventListener('unhandledrejection', function(e) {
         <p class="sel-count" id="upload-count" style="display:none; color:#94a3b8">С компьютера: 0</p>
         <div class="chk" style="display:none"><input type="checkbox" id="recursive" checked /><label for="recursive" style="margin:0">Включая вложенные подпапки (для выбранных папок)</label></div>
         <div class="chk"><input type="checkbox" id="smart-search" /><label for="smart-search" style="margin:0">Умный поиск поперечников (печать рамок из Модели)</label></div>
+          <p class="hint" style="margin-top: -6px; margin-bottom: 10px; margin-left: 24px; color: #94a3b8; font-size: 13px;">Если в имени файла есть <b>_модель</b> или <b>_model</b>, листы (Layouts) игнорируются, печать рамок производится из пространства Модели.</p>
         <div class="chk"><input type="checkbox" id="merge" /><label for="merge" style="margin:0">Собрать в один PDF</label></div>
           <div class="merge-panel" id="merge-panel">
             <p class="hint" style="margin:0 0 6px">Порядок в сборке — перетащите мышью или ↑ ↓:</p>
@@ -388,17 +389,49 @@ window.addEventListener('unhandledrejection', function(e) {
     }
 
     function isSelected(path) {
-      return orderedSelections.some(s => s.path === path);
+      return orderedSelections.some(s => s.path === path || path.startsWith(s.path + '/'));
+    }
+
+    
+    function updateAllCheckboxes() {
+         document.querySelectorAll('.chk-box').forEach(cb => {
+           if (cb.dataset.path) {
+             const p = cb.dataset.path;
+             if (isSelected(p)) {
+               cb.checked = true;
+               cb.indeterminate = false;
+             } else if (isIndeterminate(p)) {
+               cb.checked = false;
+               cb.indeterminate = true;
+             } else {
+               cb.checked = false;
+               cb.indeterminate = false;
+             }
+           }
+         });
+    }
+
+    function isIndeterminate(path) {
+      if (isSelected(path)) return false;
+      return orderedSelections.some(s => s.path.startsWith(path + '/'));
     }
 
     function toggleSelection(path, name, type, checked) {
       if (checked) {
         if (!isSelected(path)) orderedSelections.push({ path, name, type });
       } else {
+        const direct = orderedSelections.some(s => s.path === path);
+        if (!direct && isSelected(path)) {
+           alert("Этот элемент выделен, потому что выделена папка. Снимите галочку с родительской папки.");
+           setTimeout(updateAllCheckboxes, 10);
+           return;
+        }
         orderedSelections = orderedSelections.filter(s => s.path !== path);
       }
       updateSelCount();
       refreshMergePanel();
+      
+      setTimeout(updateAllCheckboxes, 10);
     }
 
     function updateSelCount() {
@@ -829,7 +862,7 @@ window.addEventListener('unhandledrejection', function(e) {
         row.style.paddingLeft = (12 + level * 20) + 'px';
         
         const checked = sel ? 'checked' : '';
-        const cb = '<input type="checkbox" class="chk-box" ' + checked + ' />';
+        const cb = '<input type="checkbox" class="chk-box" data-path="' + escapeHtml(e.path) + '" ' + checked + ' />';
 
         function formatDate(m) {
           if (!m) return '';
