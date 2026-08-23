@@ -140,39 +140,65 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
 
 (defun GetFrames ( / ss i ent edata pts xmin ymin xmax ymax w h frames obj ll ur blkName layName)
   (setq frames '())
-  ;; 1. Search for any LWPOLYLINE
+  
+  (defun IsValidName (name)
+    (setq name (strcase name))
+    (or (vl-string-search "ФОРМАТ" name) 
+        (vl-string-search "РАМКА" name) 
+        (vl-string-search "ШТАМП" name)
+        (vl-string-search "FORM" name) 
+        (vl-string-search "FRAME" name) 
+        (vl-string-search "STAMP" name))
+  )
+
+  ;; 1. Search for LWPOLYLINE (closed or open)
   (setq ss (ssget "X" '((0 . "LWPOLYLINE") (410 . "Model"))))
   (if ss
     (progn (setq i 0)
       (while (< i (sslength ss))
         (setq ent (ssname ss i) edata (entget ent) pts '())
-        (foreach item edata (if (= (car item) 10) (setq pts (cons (cdr item) pts))))
-        (if (= (length pts) 4)
-          (progn (setq xmin (caar pts) xmax (caar pts) ymin (cadar pts) ymax (cadar pts))
-            (foreach p (cdr pts) (if (< (car p) xmin) (setq xmin (car p))) (if (> (car p) xmax) (setq xmax (car p))) (if (< (cadr p) ymin) (setq ymin (cadr p))) (if (> (cadr p) ymax) (setq ymax (cadr p))))
-            (setq w (- xmax xmin) h (- ymax ymin))
-            (if (and (> w 150) (> h 150) (< w 5000) (< h 5000))
-              (setq frames (cons (list xmin ymin xmax ymax w h) frames)))))
+        (setq layName (cdr (assoc 8 edata)))
+        ;; Only process if layer matches keywords
+        (if (IsValidName layName)
+          (progn
+            (foreach item edata (if (= (car item) 10) (setq pts (cons (cdr item) pts))))
+            (if (= (length pts) 4)
+              (progn (setq xmin (caar pts) xmax (caar pts) ymin (cadar pts) ymax (cadar pts))
+                (foreach p (cdr pts) (if (< (car p) xmin) (setq xmin (car p))) (if (> (car p) xmax) (setq xmax (car p))) (if (< (cadr p) ymin) (setq ymin (cadr p))) (if (> (cadr p) ymax) (setq ymax (cadr p))))
+                (setq w (- xmax xmin) h (- ymax ymin))
+                (if (and (> w 150) (> h 150) (< w 5000) (< h 5000))
+                  (setq frames (cons (list xmin ymin xmax ymax w h) frames)))))))
         (setq i (1+ i)))))
         
-  ;; 2. Search for any INSERT (Block Reference)
+  ;; 2. Search for INSERT (Block Reference)
   (setq ss (ssget "X" '((0 . "INSERT") (410 . "Model"))))
   (if ss
     (progn (setq i 0)
       (while (< i (sslength ss))
-        (setq ent (ssname ss i) obj (vlax-ename->vla-object ent))
-        (setq ll (vlax-make-safearray vlax-vbDouble '(0 . 2)) ur (vlax-make-safearray vlax-vbDouble '(0 . 2)))
-        (if (not (vl-catch-all-error-p (vl-catch-all-apply 'vla-GetBoundingBox (list obj 'll 'ur))))
+        (setq ent (ssname ss i) edata (entget ent))
+        (setq layName (cdr (assoc 8 edata)))
+        (setq obj (vlax-ename->vla-object ent))
+        (setq blkName "")
+        (if (vlax-property-available-p obj 'EffectiveName)
+          (setq blkName (vla-get-EffectiveName obj))
+        )
+        ;; Process if layer OR block name matches keywords
+        (if (or (IsValidName layName) (IsValidName blkName))
           (progn
-            (setq ll (vlax-safearray->list ll) ur (vlax-safearray->list ur))
-            (setq xmin (car ll) ymin (cadr ll) xmax (car ur) ymax (cadr ur) w (- xmax xmin) h (- ymax ymin))
-            (if (and (> w 150) (> h 150) (< w 5000) (< h 5000))
-              (setq frames (cons (list xmin ymin xmax ymax w h) frames)))
+            (setq ll (vlax-make-safearray vlax-vbDouble '(0 . 2)) ur (vlax-make-safearray vlax-vbDouble '(0 . 2)))
+            (if (not (vl-catch-all-error-p (vl-catch-all-apply 'vla-GetBoundingBox (list obj 'll 'ur))))
+              (progn
+                (setq ll (vlax-safearray->list ll) ur (vlax-safearray->list ur))
+                (setq xmin (car ll) ymin (cadr ll) xmax (car ur) ymax (cadr ur) w (- xmax xmin) h (- ymax ymin))
+                (if (and (> w 150) (> h 150) (< w 5000) (< h 5000))
+                  (setq frames (cons (list xmin ymin xmax ymax w h) frames)))
+              )
+            )
           )
         )
         (setq i (1+ i)))))
         
-  ;; Remove duplicate frames that are very close to each other
+  ;; Remove duplicate frames
   (setq frames (vl-sort frames (function (lambda (a b) (if (> (abs (- (cadr a) (cadr b))) 10.0) (> (cadr a) (cadr b)) (< (car a) (car b)))))))
   (setq uniqFrames '())
   (setq lastFrm nil)
