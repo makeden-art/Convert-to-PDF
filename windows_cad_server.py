@@ -138,8 +138,9 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
     lisp_code = f"""(vl-load-com) (setvar "FILEDIA" 0) (setvar "BACKGROUNDPLOT" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setvar "PROXYSHOW" 1)
 (vl-catch-all-apply 'setvar (list "PDFSHX" 0)) (vl-catch-all-apply 'setvar (list "EPDFSHX" 0)) {common_path_lisp} {attsync_lisp} {ctb_lisp}
 
-(defun GetFrames ( / ss i ent edata pts xmin ymin xmax ymax w h frames obj ll ur blkName layName)
-  (princ "\n[DEBUG] Starting GetFrames...")
+(defun GetFrames ( / ss i ent edata pts xmin ymin xmax ymax w h frames obj ll ur blkName layName logf)
+  (setq logf (open "C:\\cad_debug.log" "w"))
+  (write-line "[DEBUG] Starting GetFrames..." logf)
   (setq frames (quote ()))
   
   (defun IsValidName (name)
@@ -153,12 +154,11 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
         (vl-string-search "STAMP" name))
   )
 
-  (princ "\n[DEBUG] Searching for LWPOLYLINE...")
-  ;; 1. Search for LWPOLYLINE
+  (write-line "[DEBUG] Searching for LWPOLYLINE..." logf)
   (setq ss (ssget "X" (quote ((0 . "LWPOLYLINE") (410 . "Model")))))
   (if ss
     (progn 
-      (princ (strcat "\n[DEBUG] Found " (itoa (sslength ss)) " LWPOLYLINEs."))
+      (write-line (strcat "[DEBUG] Found " (itoa (sslength ss)) " LWPOLYLINEs.") logf)
       (setq i 0)
       (while (< i (sslength ss))
         (setq ent (ssname ss i) edata (entget ent))
@@ -180,15 +180,14 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
         (setq i (1+ i))
       )
     )
-    (princ "\n[DEBUG] No LWPOLYLINEs found.")
+    (write-line "[DEBUG] No LWPOLYLINEs found." logf)
   )
         
-  (princ "\n[DEBUG] Searching for INSERTs...")
-  ;; 2. Search for INSERT
+  (write-line "[DEBUG] Searching for INSERTs..." logf)
   (setq ss (ssget "X" (quote ((0 . "INSERT") (410 . "Model")))))
   (if ss
     (progn 
-      (princ (strcat "\n[DEBUG] Found " (itoa (sslength ss)) " INSERTs."))
+      (write-line (strcat "[DEBUG] Found " (itoa (sslength ss)) " INSERTs.") logf)
       (setq i 0)
       (while (< i (sslength ss))
         (setq ent (ssname ss i) edata (entget ent))
@@ -214,10 +213,10 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
         (setq i (1+ i))
       )
     )
-    (princ "\n[DEBUG] No INSERTs found.")
+    (write-line "[DEBUG] No INSERTs found." logf)
   )
         
-  (princ "\n[DEBUG] Filtering duplicates...")
+  (write-line "[DEBUG] Filtering duplicates..." logf)
   (setq frames (vl-sort frames (function (lambda (a b) (if (> (abs (- (cadr a) (cadr b))) 10.0) (> (cadr a) (cadr b)) (< (car a) (car b)))))))
   (setq uniqFrames (quote ()))
   (setq lastFrm nil)
@@ -229,7 +228,8 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
       )
     )
   )
-  (princ (strcat "\n[DEBUG] Finished GetFrames. Found valid frames: " (itoa (length uniqFrames))))
+  (write-line (strcat "[DEBUG] Finished GetFrames. Found valid frames: " (itoa (length uniqFrames))) logf)
+  (close logf)
   uniqFrames
 )
 
@@ -407,18 +407,13 @@ def convert(
                 stdout_text = result.stdout.decode("cp1251", errors="replace")
         except subprocess.TimeoutExpired as e:
             subprocess.run('taskkill /F /IM accoreconsole.exe', shell=True)
-            out = ""
-            if e.stdout: out += e.stdout.decode('cp1251', errors='replace')
-            if e.stderr: out += "\n" + e.stderr.decode('cp1251', errors='replace')
-            print("="*50)
-            print("AUTOCAD TIMEOUT LOG:")
-            print(out)
-            print("="*50)
+            out = 'LOG C:\\cad_debug.log:\\n'
             try:
-                with open("C:\timeout_log.txt", "w", encoding="utf-8") as f:
-                    f.write(out)
-            except: pass
-            return JSONResponse(status_code=504, content={"error": f"AutoCAD timeout {ACAD_TIMEOUT_SEC}s. Process killed.", "log": out[-400:] if len(out)>400 else out})
+                with open('C:\\cad_debug.log', 'r', encoding='utf-8') as f:
+                    out += f.read()
+            except Exception as exc:
+                out += str(exc)
+            return JSONResponse(status_code=504, content={'error': f'AutoCAD timeout {ACAD_TIMEOUT_SEC}s. Process killed.', 'log': out[-400:] if len(out)>400 else out})
 
         if "ERROR_NO_LAYOUTS" in stdout_text:
             print(f"ОШИБКА: В чертеже {safe_filename} нет настроенных листов!")
