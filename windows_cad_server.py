@@ -139,6 +139,7 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
 (vl-catch-all-apply 'setvar (list "PDFSHX" 0)) (vl-catch-all-apply 'setvar (list "EPDFSHX" 0)) {common_path_lisp} {attsync_lisp} {ctb_lisp}
 
 (defun GetFrames ( / ss i ent edata pts xmin ymin xmax ymax w h frames obj ll ur blkName layName)
+  (princ "\n[DEBUG] Starting GetFrames...")
   (setq frames (quote ()))
   
   (defun IsValidName (name)
@@ -152,14 +153,16 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
         (vl-string-search "STAMP" name))
   )
 
-  ;; 1. Search for LWPOLYLINE (closed or open, any number of points)
+  (princ "\n[DEBUG] Searching for LWPOLYLINE...")
+  ;; 1. Search for LWPOLYLINE
   (setq ss (ssget "X" (quote ((0 . "LWPOLYLINE") (410 . "Model")))))
   (if ss
-    (progn (setq i 0)
+    (progn 
+      (princ (strcat "\n[DEBUG] Found " (itoa (sslength ss)) " LWPOLYLINEs."))
+      (setq i 0)
       (while (< i (sslength ss))
         (setq ent (ssname ss i) edata (entget ent))
         (setq layName (cdr (assoc 8 edata)))
-        ;; Only process if layer matches keywords
         (if (IsValidName layName)
           (progn
             (setq obj (vlax-ename->vla-object ent))
@@ -174,12 +177,19 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
             )
           )
         )
-        (setq i (1+ i)))))
+        (setq i (1+ i))
+      )
+    )
+    (princ "\n[DEBUG] No LWPOLYLINEs found.")
+  )
         
-  ;; 2. Search for INSERT (Block Reference)
+  (princ "\n[DEBUG] Searching for INSERTs...")
+  ;; 2. Search for INSERT
   (setq ss (ssget "X" (quote ((0 . "INSERT") (410 . "Model")))))
   (if ss
-    (progn (setq i 0)
+    (progn 
+      (princ (strcat "\n[DEBUG] Found " (itoa (sslength ss)) " INSERTs."))
+      (setq i 0)
       (while (< i (sslength ss))
         (setq ent (ssname ss i) edata (entget ent))
         (setq layName (cdr (assoc 8 edata)))
@@ -188,7 +198,6 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
         (if (vlax-property-available-p obj (quote EffectiveName))
           (setq blkName (vla-get-EffectiveName obj))
         )
-        ;; Process if layer OR block name matches keywords
         (if (or (IsValidName layName) (IsValidName blkName))
           (progn
             (setq ll (vlax-make-safearray vlax-vbDouble (quote (0 . 2))) ur (vlax-make-safearray vlax-vbDouble (quote (0 . 2))))
@@ -202,9 +211,13 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
             )
           )
         )
-        (setq i (1+ i)))))
+        (setq i (1+ i))
+      )
+    )
+    (princ "\n[DEBUG] No INSERTs found.")
+  )
         
-  ;; Remove duplicate frames
+  (princ "\n[DEBUG] Filtering duplicates...")
   (setq frames (vl-sort frames (function (lambda (a b) (if (> (abs (- (cadr a) (cadr b))) 10.0) (> (cadr a) (cadr b)) (< (car a) (car b)))))))
   (setq uniqFrames (quote ()))
   (setq lastFrm nil)
@@ -216,6 +229,7 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
       )
     )
   )
+  (princ (strcat "\n[DEBUG] Finished GetFrames. Found valid frames: " (itoa (length uniqFrames))))
   uniqFrames
 )
 
@@ -391,10 +405,12 @@ def convert(
                 stdout_text = result.stdout.decode("utf-16", errors="replace")
             except Exception:
                 stdout_text = result.stdout.decode("cp1251", errors="replace")
-        except subprocess.TimeoutExpired:
-            print(f"ТАЙМАУТ ПЕЧАТИ ({ACAD_TIMEOUT_SEC} сек)! Убиваем зависший процесс AutoCAD для файла: {safe_filename}")
+        except subprocess.TimeoutExpired as e:
             subprocess.run('taskkill /F /IM accoreconsole.exe', shell=True)
-            return JSONResponse(status_code=504, content={"error": f"AutoCAD timeout {ACAD_TIMEOUT_SEC}s. Process killed.", "log": ""})
+            out = ""
+            if e.stdout: out += e.stdout.decode('cp1251', errors='replace')
+            if e.stderr: out += "\n" + e.stderr.decode('cp1251', errors='replace')
+            return JSONResponse(status_code=504, content={"error": f"AutoCAD timeout {ACAD_TIMEOUT_SEC}s. Process killed.", "log": out})
 
         if "ERROR_NO_LAYOUTS" in stdout_text:
             print(f"ОШИБКА: В чертеже {safe_filename} нет настроенных листов!")
