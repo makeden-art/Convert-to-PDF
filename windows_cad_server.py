@@ -81,7 +81,7 @@ os.makedirs(WORK_DIR, exist_ok=True)
 SHARE_LOCAL_PATH = os.environ.get("SHARE_LOCAL_PATH", r"E:\share_test")
 SHARE_UNC_PATH = os.environ.get("SHARE_UNC_PATH", r"\\192.168.88.14\share_test")
 _office_lock = threading.Lock()
-ACAD_TIMEOUT_SEC = 900
+ACAD_TIMEOUT_SEC = 60
 
 def unc_to_local(path: str) -> str:
     normalized = path.replace("/", "\\")
@@ -146,7 +146,6 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
         (setq ent (ssname ss i) edata (entget ent) pts (quote ()))
         (foreach item edata (if (= (car item) 10) (setq pts (cons (cdr item) pts))))
         
-        ;; Only process polylines with 4 or 5 vertices
         (if (or (= (length pts) 4) (= (length pts) 5))
           (progn 
             (setq xmin (caar pts) xmax (caar pts) ymin (cadar pts) ymax (cadar pts))
@@ -157,10 +156,9 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
               (if (> (cadr p) ymax) (setq ymax (cadr p)))
             )
             (setq w (- xmax xmin) h (- ymax ymin))
-            (if (> h 0)
+            (if (and (> h 0.01) (> w 0.01))
               (progn
-                (if (> w h) (setq ratio (/ w h)) (setq ratio (/ h w)))
-                ;; Check if size is reasonable AND aspect ratio is ~1.414 (ISO A-series paper)
+                (if (> w h) (setq ratio (/ (float w) (float h))) (setq ratio (/ (float h) (float w))))
                 (if (and (> w 150) (> h 150) (< w 5000) (< h 5000) (> ratio 1.35) (< ratio 1.48))
                   (setq frames (cons (list xmin ymin xmax ymax w h) frames))
                 )
@@ -173,7 +171,6 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
     )
   )
         
-  ;; Remove duplicate frames
   (setq frames (vl-sort frames (function (lambda (a b) (if (> (abs (- (cadr a) (cadr b))) 10.0) (> (cadr a) (cadr b)) (< (car a) (car b)))))))
   (setq uniqFrames (quote ()))
   (setq lastFrm nil)
