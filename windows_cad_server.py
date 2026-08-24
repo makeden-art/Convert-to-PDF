@@ -136,9 +136,28 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
     pdf_prefix = safe_pdf_path.replace("\\", "/").replace(".pdf", "")
     
     lisp_code = f"""(vl-load-com)
-(defun GetFrames ( / ss i ent edata pts xmin ymin xmax ymax w h ratio frames)
+(defun GetFrames ( / ss ssJoin ssLines i ent edata p1 p2 dx dy pts xmin ymin xmax ymax w h ratio frames)
+  (setvar "PEDITACCEPT" 1)
+  (setq ssJoin (ssadd))
+  (setq ssLines (ssget "X" (quote ((0 . "LINE") (410 . "Model")))))
+  (if ssLines
+    (progn (setq i 0)
+      (while (< i (sslength ssLines))
+        (setq ent (ssname ssLines i) edata (entget ent))
+        (setq p1 (cdr (assoc 10 edata)) p2 (cdr (assoc 11 edata)))
+        (setq dx (abs (- (car p1) (car p2))) dy (abs (- (cadr p1) (cadr p2))))
+        (if (or (and (> dx 150) (< dy 1.0)) (and (> dy 150) (< dx 1.0)))
+          (ssadd ent ssJoin)
+        )
+        (setq i (1+ i))
+      )
+    )
+  )
+  (if (> (sslength ssJoin) 0)
+    (command "_.PEDIT" "_M" ssJoin "" "_J" "0.1" "")
+  )
+
   (setq frames (quote ()))
-  
   (setq ss (ssget "X" (quote ((0 . "LWPOLYLINE") (410 . "Model")))))
   (if ss
     (progn (setq i 0)
