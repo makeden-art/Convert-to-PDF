@@ -410,6 +410,14 @@ def convert(
             out = ""
             if e.stdout: out += e.stdout.decode('cp1251', errors='replace')
             if e.stderr: out += "\n" + e.stderr.decode('cp1251', errors='replace')
+            print("="*50)
+            print("AUTOCAD TIMEOUT LOG:")
+            print(out)
+            print("="*50)
+            try:
+                with open("C:\timeout_log.txt", "w", encoding="utf-8") as f:
+                    f.write(out)
+            except: pass
             return JSONResponse(status_code=504, content={"error": f"AutoCAD timeout {ACAD_TIMEOUT_SEC}s. Process killed.", "log": out})
 
         if "ERROR_NO_LAYOUTS" in stdout_text:
