@@ -135,7 +135,7 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
     force_smart_val = "T" if force_smart else "nil"
     pdf_prefix = safe_pdf_path.replace("\\", "/").replace(".pdf", "")
     
-    lisp_code = f"""(setvar "FILEDIA" 0) (setvar "BACKGROUNDPLOT" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setvar "PROXYSHOW" 1)
+    lisp_code = f"""(vl-load-com) (setvar "FILEDIA" 0) (setvar "BACKGROUNDPLOT" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setvar "PROXYSHOW" 1)
 (vl-catch-all-apply 'setvar (list "PDFSHX" 0)) (vl-catch-all-apply 'setvar (list "EPDFSHX" 0)) {common_path_lisp} {attsync_lisp} {ctb_lisp}
 
 (defun GetFrames ( / ss i ent edata pts xmin ymin xmax ymax w h frames obj ll ur blkName layName)
