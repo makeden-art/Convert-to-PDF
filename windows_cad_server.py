@@ -81,7 +81,7 @@ os.makedirs(WORK_DIR, exist_ok=True)
 SHARE_LOCAL_PATH = os.environ.get("SHARE_LOCAL_PATH", r"E:\share_test")
 SHARE_UNC_PATH = os.environ.get("SHARE_UNC_PATH", r"\\192.168.88.14\share_test")
 _office_lock = threading.Lock()
-ACAD_TIMEOUT_SEC = 60
+ACAD_TIMEOUT_SEC = 900
 
 def unc_to_local(path: str) -> str:
     normalized = path.replace("/", "\\")
@@ -135,27 +135,31 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
     force_smart_val = "T" if force_smart else "nil"
     pdf_prefix = safe_pdf_path.replace("\\", "/").replace(".pdf", "")
     
-    lisp_code = f"""(vl-load-com) (setvar "FILEDIA" 0) (setvar "BACKGROUNDPLOT" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5) (setvar "PROXYSHOW" 1)
-(vl-catch-all-apply 'setvar (list "PDFSHX" 0)) (vl-catch-all-apply 'setvar (list "EPDFSHX" 0)) {common_path_lisp} {attsync_lisp} {ctb_lisp}
-
-(defun GetFrames ( / ss i ent edata pts xmin ymin xmax ymax w h frames obj ll ur)
+    lisp_code = f"""(vl-load-com)
+(defun GetFrames ( / ss i ent edata pts xmin ymin xmax ymax w h frames)
   (setq frames (quote ()))
   
-  ;; 1. Search for LWPOLYLINE
   (setq ss (ssget "X" (quote ((0 . "LWPOLYLINE") (410 . "Model")))))
   (if ss
-    (progn 
-      (setq i 0)
+    (progn (setq i 0)
       (while (< i (sslength ss))
-        (setq ent (ssname ss i))
-        (setq obj (vlax-ename->vla-object ent))
-        (setq ll (vlax-make-safearray vlax-vbDouble (quote (0 . 2))) ur (vlax-make-safearray vlax-vbDouble (quote (0 . 2))))
-        (if (not (vl-catch-all-error-p (vl-catch-all-apply (quote vla-GetBoundingBox) (list obj (quote ll) (quote ur)))))
-          (progn
-            (setq ll (vlax-safearray->list ll) ur (vlax-safearray->list ur))
-            (setq xmin (car ll) ymin (cadr ll) xmax (car ur) ymax (cadr ur) w (- xmax xmin) h (- ymax ymin))
+        (setq ent (ssname ss i) edata (entget ent) pts (quote ()))
+        (foreach item edata (if (= (car item) 10) (setq pts (cons (cdr item) pts))))
+        
+        ;; Only process polylines with 4 or 5 vertices (rectangles, closed or manually closed)
+        (if (or (= (length pts) 4) (= (length pts) 5))
+          (progn 
+            (setq xmin (caar pts) xmax (caar pts) ymin (cadar pts) ymax (cadar pts))
+            (foreach p (cdr pts) 
+              (if (< (car p) xmin) (setq xmin (car p))) 
+              (if (> (car p) xmax) (setq xmax (car p))) 
+              (if (< (cadr p) ymin) (setq ymin (cadr p))) 
+              (if (> (cadr p) ymax) (setq ymax (cadr p)))
+            )
+            (setq w (- xmax xmin) h (- ymax ymin))
             (if (and (> w 150) (> h 150) (< w 5000) (< h 5000))
-              (setq frames (cons (list xmin ymin xmax ymax w h) frames)))
+              (setq frames (cons (list xmin ymin xmax ymax w h) frames))
+            )
           )
         )
         (setq i (1+ i))
@@ -163,29 +167,7 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
     )
   )
         
-  ;; 2. Search for INSERT
-  (setq ss (ssget "X" (quote ((0 . "INSERT") (410 . "Model")))))
-  (if ss
-    (progn 
-      (setq i 0)
-      (while (< i (sslength ss))
-        (setq ent (ssname ss i))
-        (setq obj (vlax-ename->vla-object ent))
-        (setq ll (vlax-make-safearray vlax-vbDouble (quote (0 . 2))) ur (vlax-make-safearray vlax-vbDouble (quote (0 . 2))))
-        (if (not (vl-catch-all-error-p (vl-catch-all-apply (quote vla-GetBoundingBox) (list obj (quote ll) (quote ur)))))
-          (progn
-            (setq ll (vlax-safearray->list ll) ur (vlax-safearray->list ur))
-            (setq xmin (car ll) ymin (cadr ll) xmax (car ur) ymax (cadr ur) w (- xmax xmin) h (- ymax ymin))
-            (if (and (> w 150) (> h 150) (< w 5000) (< h 5000))
-              (setq frames (cons (list xmin ymin xmax ymax w h) frames)))
-          )
-        )
-        (setq i (1+ i))
-      )
-    )
-  )
-        
-  ;; Remove duplicates
+  ;; Remove duplicate frames
   (setq frames (vl-sort frames (function (lambda (a b) (if (> (abs (- (cadr a) (cadr b))) 10.0) (> (cadr a) (cadr b)) (< (car a) (car b)))))))
   (setq uniqFrames (quote ()))
   (setq lastFrm nil)
