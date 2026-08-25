@@ -381,32 +381,176 @@ def convert(
         is_smart = (smart_search and smart_search.lower() == "true")
 
         # 3. Генерация и запись LISP скрипта
-        lisp_code = _generate_lisp_script(safe_pdf_path, is_smart, ctb)
-        with open(scr_path, "w", encoding="cp1251") as f:
-            f.write(lisp_code)
+        if not is_smart:
+            lisp_code = _generate_lisp_script(safe_pdf_path, False, ctb)
+            with open(scr_path, "w", encoding="cp1251") as f:
+                f.write(lisp_code)
 
-        # 4. Запуск AutoCAD
-        print(f"Печатаем {safe_filename} с помощью {ACAD_PATH} (путь: {safe_dwg_path})...")
-        cmd = [ACAD_PATH, "/i", safe_dwg_path, "/l", "ru-RU", "/s", scr_path]
-        if profile:
-            cmd.extend(["/p", profile])
-        
-        start_time = time.time()
-        try:
-            result = subprocess.run(cmd, shell=False, capture_output=True, timeout=ACAD_TIMEOUT_SEC)
+            cmd = [ACAD_PATH, "/i", safe_dwg_path, "/l", "ru-RU", "/s", scr_path]
+            if profile:
+                cmd.extend(["/p", profile])
+            
             try:
-                stdout_text = result.stdout.decode("utf-16", errors="replace")
-            except Exception:
-                stdout_text = result.stdout.decode("cp1251", errors="replace")
-        except subprocess.TimeoutExpired as e:
-            subprocess.run('taskkill /F /IM accoreconsole.exe', shell=True)
-            out = 'LOG C:\\cad_debug.log:\\n'
+                result = subprocess.run(cmd, shell=False, capture_output=True, timeout=ACAD_TIMEOUT_SEC)
+                try:
+                    stdout_text = result.stdout.decode("utf-16", errors="replace")
+                except Exception:
+                    stdout_text = result.stdout.decode("cp1251", errors="replace")
+            except subprocess.TimeoutExpired as e:
+                subprocess.run("taskkill /F /IM accoreconsole.exe", shell=True)
+                return JSONResponse(status_code=504, content={"error": f"AutoCAD timeout {ACAD_TIMEOUT_SEC}s. Process killed.", "log": ""})
+        else:
+            lines_file = os.path.join(temp_dir, f"cad_lines_{safe_uid}.txt").replace("\\", "/")
+            dump_lisp = """(vl-load-com)
+(defun DumpFrames ( / ss i ent edata p1 p2 dx dy f pts xmin ymin xmax ymax w h)
+  (setq f (open "###LINES_FILE###" "w"))
+  (if (not f) (exit))
+  (setq ss (ssget "X" (quote ((0 . "LINE") (8 . "*ШТАМП*,*РАМКА*,*Штамп*,*рамка*") (410 . "Model")))))
+  (if ss
+    (progn (setq i 0)
+      (while (< i (sslength ss))
+        (setq ent (ssname ss i) edata (entget ent))
+        (setq p1 (cdr (assoc 10 edata)) p2 (cdr (assoc 11 edata)))
+        (setq dx (abs (- (car p1) (car p2))) dy (abs (- (cadr p1) (cadr p2))))
+        (if (and (> dx 150) (< dy 1.0)) (write-line (strcat "H;" (rtos (min (car p1) (car p2)) 2 2) ";" (rtos (max (car p1) (car p2)) 2 2) ";" (rtos (cadr p1) 2 2)) f))
+        (if (and (> dy 150) (< dx 1.0)) (write-line (strcat "V;" (rtos (car p1) 2 2) ";" (rtos (min (cadr p1) (cadr p2)) 2 2) ";" (rtos (max (cadr p1) (cadr p2)) 2 2)) f))
+        (setq i (1+ i))
+      )
+    )
+  )
+  (setq ss (ssget "X" (quote ((0 . "LWPOLYLINE") (8 . "*ШТАМП*,*РАМКА*,*Штамп*,*рамка*") (410 . "Model")))))
+  (if ss
+    (progn (setq i 0)
+      (while (< i (sslength ss))
+        (setq ent (ssname ss i) edata (entget ent) pts (quote ()))
+        (foreach item edata (if (= (car item) 10) (setq pts (cons (cdr item) pts))))
+        (if (or (= (length pts) 4) (= (length pts) 5))
+          (progn 
+            (setq xmin (caar pts) xmax (caar pts) ymin (cadar pts) ymax (cadar pts))
+            (foreach p (cdr pts) 
+              (if (< (car p) xmin) (setq xmin (car p))) 
+              (if (> (car p) xmax) (setq xmax (car p))) 
+              (if (< (cadr p) ymin) (setq ymin (cadr p))) 
+              (if (> (cadr p) ymax) (setq ymax (cadr p)))
+            )
+            (setq w (- xmax xmin) h (- ymax ymin))
+            (if (and (> h 150) (> w 150))
+              (write-line (strcat "P;" (rtos xmin 2 2) ";" (rtos ymin 2 2) ";" (rtos xmax 2 2) ";" (rtos ymax 2 2)) f)
+            )
+          )
+        )
+        (setq i (1+ i))
+      )
+    )
+  )
+  (close f)
+)
+(DumpFrames)
+(command "_.QUIT" "_Y")
+"""
+            dump_lisp = dump_lisp.replace("###LINES_FILE###", lines_file)
+            
+            dump_scr = os.path.join(temp_dir, f"dump_{safe_uid}.scr")
+            with open(dump_scr, "w", encoding="cp1251") as f:
+                f.write(dump_lisp)
+                
+            cmd1 = [ACAD_PATH, "/i", safe_dwg_path, "/l", "ru-RU", "/s", dump_scr]
+            if profile: cmd1.extend(["/p", profile])
             try:
-                with open('C:\\cad_debug.log', 'r', encoding='utf-8') as f:
-                    out += f.read()
-            except Exception as exc:
-                out += str(exc)
-            return JSONResponse(status_code=504, content={'error': f'AutoCAD timeout {ACAD_TIMEOUT_SEC}s. Process killed.', 'log': out[-400:] if len(out)>400 else out})
+                subprocess.run(cmd1, shell=False, capture_output=True, timeout=60)
+            except subprocess.TimeoutExpired:
+                subprocess.run("taskkill /F /IM accoreconsole.exe", shell=True)
+                return JSONResponse(status_code=504, content={"error": f"AutoCAD timeout on step 1."})
+                
+            if not os.path.exists(lines_file):
+                return JSONResponse(status_code=400, content={"error": "Failed to extract frames. Layer not found or empty."})
+                
+            frames = []
+            hl = []
+            vl = []
+            with open(lines_file, "r") as f:
+                for line in f:
+                    parts = line.strip().split(";")
+                    if len(parts) < 4: continue
+                    if parts[0] == "H":
+                        hl.append((float(parts[1]), float(parts[2]), float(parts[3])))
+                    elif parts[0] == "V":
+                        vl.append((float(parts[1]), float(parts[2]), float(parts[3])))
+                    elif parts[0] == "P":
+                        if len(parts) < 5: continue
+                        xmin, ymin, xmax, ymax = float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
+                        w, h = xmax - xmin, ymax - ymin
+                        ratio = w / h if w > h else h / w
+                        if 150 < w < 5000 and 150 < h < 5000 and 1.35 < ratio < 1.48:
+                            frames.append((xmin, ymin, xmax, ymax, w, h))
+                            
+            vl_dict = {}
+            for v in vl:
+                key = f"{v[0]:.1f}_{v[1]:.1f}"
+                vl_dict[key] = v
+                
+            for h_line in hl:
+                xmin, xmax, y = h_line
+                w = xmax - xmin
+                key = f"{xmin:.1f}_{y:.1f}"
+                if key in vl_dict:
+                    v_line = vl_dict[key]
+                    h_val = v_line[2] - v_line[1]
+                    if h_val > 0.01:
+                        ratio = w / h_val if w > h_val else h_val / w
+                        if 150 < w < 5000 and 150 < h_val < 5000 and 1.35 < ratio < 1.48:
+                            frames.append((xmin, y, xmax, v_line[2], w, h_val))
+                            
+            if not frames:
+                return JSONResponse(status_code=400, content={"error": "В Модели не найдено ни одной рамки."})
+                
+            frames.sort(key=lambda f: (-f[1], f[0]))
+            unique_frames = []
+            for f in frames:
+                if not unique_frames:
+                    unique_frames.append(f)
+                else:
+                    last_f = unique_frames[-1]
+                    if abs(f[0] - last_f[0]) > 50.0 or abs(f[1] - last_f[1]) > 50.0:
+                        unique_frames.append(f)
+                        
+            plot_lisp = """(vl-load-com)
+(defun PlotFrames ()
+  (setvar "FILEDIA" 0) (setvar "BACKGROUNDPLOT" 0) (setvar "CMDDIA" 0) (setvar "PROXYNOTICE" 0) (setvar "EXPERT" 5)
+  (setvar "TILEMODE" 1)
+"""
+            for idx, frm in enumerate(unique_frames, 1):
+                w, h = frm[4], frm[5]
+                if w > h:
+                    if w < 450 and h < 320: paper = "ISO_full_bleed_A3_(420.00_x_297.00_MM)"
+                    elif w < 620 and h < 450: paper = "ISO_full_bleed_A2_(594.00_x_420.00_MM)"
+                    elif w < 870 and h < 620: paper = "ISO_full_bleed_A1_(841.00_x_594.00_MM)"
+                    else: paper = "ISO_full_bleed_A0_(1189.00_x_841.00_MM)"
+                else:
+                    if w < 320 and h < 450: paper = "ISO_full_bleed_A3_(297.00_x_420.00_MM)"
+                    elif w < 450 and h < 620: paper = "ISO_full_bleed_A2_(420.00_x_594.00_MM)"
+                    elif w < 620 and h < 870: paper = "ISO_full_bleed_A1_(594.00_x_841.00_MM)"
+                    else: paper = "ISO_full_bleed_A0_(841.00_x_1189.00_MM)"
+                    
+                outpath = f"{safe_pdf_path.replace('.pdf', '')}_{idx}.pdf".replace("\\", "/")
+                plot_lisp += "  (command \"_.-PLOT\" \"_Y\" \"Model\" \"DWG To PDF.pc3\" \"" + paper + "\" \"_M\" \"_L\" \"_N\" \"_W\" (list " + str(frm[0]) + " " + str(frm[1]) + ") (list " + str(frm[2]) + " " + str(frm[3]) + ") \"_F\" \"_C\" \"_Y\" \"monochrome.ctb\" \"_Y\" \"_W\" \"" + outpath + "\" \"_N\" \"_Y\")\n"
+                
+            plot_lisp += "  (command \"_.QUIT\" \"_Y\")\n)\n(PlotFrames)\n"
+            
+            with open(scr_path, "w", encoding="cp1251") as f:
+                f.write(plot_lisp)
+                
+            cmd2 = [ACAD_PATH, "/i", safe_dwg_path, "/l", "ru-RU", "/s", scr_path]
+            if profile: cmd2.extend(["/p", profile])
+            try:
+                result = subprocess.run(cmd2, shell=False, capture_output=True, timeout=ACAD_TIMEOUT_SEC)
+                try:
+                    stdout_text = result.stdout.decode("utf-16", errors="replace")
+                except Exception:
+                    stdout_text = result.stdout.decode("cp1251", errors="replace")
+            except subprocess.TimeoutExpired:
+                subprocess.run("taskkill /F /IM accoreconsole.exe", shell=True)
+                return JSONResponse(status_code=504, content={"error": f"AutoCAD timeout {ACAD_TIMEOUT_SEC}s on step 2."})
 
         if "ERROR_NO_LAYOUTS" in stdout_text:
             print(f"ОШИБКА: В чертеже {safe_filename} нет настроенных листов!")
