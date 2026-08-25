@@ -136,36 +136,58 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
     pdf_prefix = safe_pdf_path.replace("\\", "/").replace(".pdf", "")
     
     lisp_code = f"""(vl-load-com)
-(defun GetFrames ( / ss ssJoin ssLines i ent edata p1 p2 dx dy pts xmin ymin xmax ymax w h ratio frames)
-  (setvar "PEDITACCEPT" 1)
-  (setq ssJoin (ssadd))
-  ;; ONLY grab lines on layers with underscores to avoid joining 100,000 topo lines!
-  (setq ssLines (ssget "X" (quote ((0 . "LINE") (8 . "*ШТАМП*,*РАМКА*,*Штамп*,*рамка*") (410 . "Model")))))
-  (if ssLines
+(defun GetFrames ( / ss i ent edata p1 p2 dx dy lines xmin ymin xmax ymax w h ratio frames vx vymin vymax pts)
+  (setq frames (quote ()))
+  (setq lines (quote ()))
+  
+  (setq ss (ssget "X" (quote ((0 . "LINE") (8 . "*ШТАМП*,*РАМКА*,*Штамп*,*рамка*") (410 . "Model")))))
+  (if ss
     (progn (setq i 0)
-      (while (< i (sslength ssLines))
-        (setq ent (ssname ssLines i) edata (entget ent))
+      (while (< i (sslength ss))
+        (setq ent (ssname ss i) edata (entget ent))
         (setq p1 (cdr (assoc 10 edata)) p2 (cdr (assoc 11 edata)))
         (setq dx (abs (- (car p1) (car p2))) dy (abs (- (cadr p1) (cadr p2))))
-        (if (or (and (> dx 150) (< dy 1.0)) (and (> dy 150) (< dx 1.0)))
-          (ssadd ent ssJoin)
-        )
+        (if (and (> dx 150) (< dy 1.0)) (setq lines (cons (list (quote H) (min (car p1) (car p2)) (max (car p1) (car p2)) (cadr p1)) lines)))
+        (if (and (> dy 150) (< dx 1.0)) (setq lines (cons (list (quote V) (car p1) (min (cadr p1) (cadr p2)) (max (cadr p1) (cadr p2))) lines)))
         (setq i (1+ i))
       )
     )
   )
-  (if (> (sslength ssJoin) 0)
-    (command "_.PEDIT" "_M" ssJoin "" "_J" "0.1" "")
+  
+  (foreach h1 lines
+    (if (eq (car h1) (quote H))
+      (progn
+        (setq xmin (cadr h1) xmax (caddr h1) y (cadddr h1) w (- xmax xmin))
+        (foreach v1 lines
+          (if (eq (car v1) (quote V))
+            (progn
+              (setq vx (cadr v1) vymin (caddr v1) vymax (cadddr v1))
+              (if (and (< (abs (- vx xmin)) 1.0) (< (abs (- vymin y)) 1.0))
+                (progn
+                  (setq h (- vymax vymin))
+                  (if (and (> h 0.01) (> w 0.01))
+                    (progn
+                      (if (> w h) (setq ratio (/ (float w) (float h))) (setq ratio (/ (float h) (float w))))
+                      (if (and (> w 150) (> h 150) (< w 5000) (< h 5000) (> ratio 1.35) (< ratio 1.48))
+                        (setq frames (cons (list xmin y xmax vymax w h) frames))
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
   )
-
-  (setq frames (quote ()))
+  
   (setq ss (ssget "X" (quote ((0 . "LWPOLYLINE") (8 . "*ШТАМП*,*РАМКА*,*Штамп*,*рамка*") (410 . "Model")))))
   (if ss
     (progn (setq i 0)
       (while (< i (sslength ss))
         (setq ent (ssname ss i) edata (entget ent) pts (quote ()))
         (foreach item edata (if (= (car item) 10) (setq pts (cons (cdr item) pts))))
-        
         (if (or (= (length pts) 4) (= (length pts) 5))
           (progn 
             (setq xmin (caar pts) xmax (caar pts) ymin (cadar pts) ymax (cadar pts))
@@ -204,7 +226,6 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
   )
   uniqFrames
 )
-
 (defun ExportModelFrames ()
   (setvar "TILEMODE" 1)
   (setq frames (GetFrames))
