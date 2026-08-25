@@ -81,7 +81,7 @@ os.makedirs(WORK_DIR, exist_ok=True)
 SHARE_LOCAL_PATH = os.environ.get("SHARE_LOCAL_PATH", r"E:\share_test")
 SHARE_UNC_PATH = os.environ.get("SHARE_UNC_PATH", r"\\192.168.88.14\share_test")
 _office_lock = threading.Lock()
-ACAD_TIMEOUT_SEC = 900
+ACAD_TIMEOUT_SEC = 3600
 
 def unc_to_local(path: str) -> str:
     normalized = path.replace("/", "\\")
