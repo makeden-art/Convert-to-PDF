@@ -140,7 +140,7 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
   (setvar "PEDITACCEPT" 1)
   (setq ssJoin (ssadd))
   ;; ONLY grab lines on layers with underscores to avoid joining 100,000 topo lines!
-  (setq ssLines (ssget "X" (quote ((0 . "LINE") (8 . "*_*") (410 . "Model")))))
+  (setq ssLines (ssget "X" (quote ((0 . "LINE") (8 . "*ШТАМП*,*РАМКА*,*Штамп*,*рамка*") (410 . "Model")))))
   (if ssLines
     (progn (setq i 0)
       (while (< i (sslength ssLines))
@@ -159,7 +159,7 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
   )
 
   (setq frames (quote ()))
-  (setq ss (ssget "X" (quote ((0 . "LWPOLYLINE") (8 . "*_*") (410 . "Model")))))
+  (setq ss (ssget "X" (quote ((0 . "LWPOLYLINE") (8 . "*ШТАМП*,*РАМКА*,*Штамп*,*рамка*") (410 . "Model")))))
   (if ss
     (progn (setq i 0)
       (while (< i (sslength ss))
