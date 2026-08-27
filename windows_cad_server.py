@@ -945,13 +945,14 @@ def convert(
         if smb_dwg_path:
             local_path = unc_to_local(smb_dwg_path)
             if os.path.exists(local_path):
-                safe_dwg_path = local_path
+                safe_dwg_path = os.path.join(WORK_DIR, f"input_{safe_uid}.dwg")
+                shutil.copy2(local_path, safe_dwg_path)
                 safe_filename = os.path.basename(local_path)
             else:
                 return JSONResponse(status_code=400, content={"error": f"Файл не найден по локальному пути: {local_path}"})
         elif file and file.filename:
             safe_filename = file.filename.replace(" ", "_")
-            dwg_path = os.path.join(temp_dir, f"{safe_uid}_{safe_filename}")
+            dwg_path = os.path.join(WORK_DIR, f"input_{safe_uid}.dwg")
             with open(dwg_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
             safe_dwg_path = dwg_path
@@ -959,7 +960,7 @@ def convert(
             return JSONResponse(status_code=400, content={"error": "Не передан файл."})
 
         # Итоговые пути
-        safe_pdf_path = os.path.join(temp_dir, f"{safe_uid}_{safe_filename}.pdf")
+        safe_pdf_path = os.path.join(WORK_DIR, f"input_{safe_uid}.pdf")
         scr_path = os.path.join(WORK_DIR, f"print_{safe_uid}.scr")
 
         # 2. Флаги логики
