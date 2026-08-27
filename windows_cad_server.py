@@ -182,7 +182,7 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
     )
   )
   
-  (setq ss (ssget "X" (quote ((0 . "LWPOLYLINE") (8 . "*ШТАМП*,*РАМКА*,*Штамп*,*рамка*") (410 . "Model")))))
+  (setq ss (ssget "X" (quote ((0 . "*POLYLINE") (8 . "*ШТАМП*,*РАМКА*,*Штамп*,*рамка*") (410 . "Model")))))
   (if ss
     (progn (setq i 0)
       (while (< i (sslength ss))
@@ -312,7 +312,7 @@ def _remove_empty_pages(pdf_path: str):
             if total == 0:
                 continue
             white = sum(1 for b in pix.samples if b > 245)
-            if white / total < 0.98:  # есть реальный контент
+            if white / total < 0.999:  # есть реальный контент
                 pages_to_keep.append(pno)
 
         print(f"Страниц: {len(doc)}, непустых: {len(pages_to_keep)}")
@@ -510,7 +510,7 @@ def _build_dump_lisp(lines_file: str) -> str:
       )
     )
   )
-  (setq ss (ssget "X" (quote ((0 . "LWPOLYLINE")))))
+  (setq ss (ssget "X" (quote ((0 . "*POLYLINE")))))
   (if ss
     (progn
       (setq i 0)
@@ -538,7 +538,7 @@ def _build_dump_lisp(lines_file: str) -> str:
                   (if (> (cadr p) ymax) (setq ymax (cadr p)))
                 )
                 (setq w (- xmax xmin) h (- ymax ymin))
-                (if (and (> w 250.0) (> h 250.0) (< w 2000.0) (< h 2000.0))
+                (if (and (> w 200.0) (> h 200.0) (< w 2000.0) (< h 2000.0))
                   (write-line
                     (strcat "P;"
                             (rtos xmin 2 3) ";"
@@ -566,10 +566,10 @@ def _build_dump_lisp(lines_file: str) -> str:
 
 def _write_lsp_and_scr(lsp_path: str, scr_path: str, lisp_code: str):
     """Пишет .lsp и короткий .scr с (load ...), чтобы не ломать парсер SCR."""
-    with open(lsp_path, "w", encoding="ascii", errors="replace") as f:
+    with open(lsp_path, "w", encoding="cp1251", errors="replace") as f:
         f.write(lisp_code)
     load_path = lsp_path.replace("\\", "/")
-    with open(scr_path, "w", encoding="ascii", errors="replace") as f:
+    with open(scr_path, "w", encoding="cp1251", errors="replace") as f:
         f.write(f'(load "{load_path}")\n')
 
 def _is_sheet_size(w: float, h: float) -> bool:
@@ -658,7 +658,7 @@ def _rects_from_hv(hl, vl, require_v=True):
 
 
 def _keep_outermost(frames):
-    def contains(outer, inner, pad=5.0):
+    def contains(outer, inner, pad=-2.0):
         return (
             outer[0] <= inner[0] + pad
             and outer[1] <= inner[1] + pad
@@ -778,7 +778,7 @@ def _find_frames_from_dump(lines_file: str):
         for fr in _rects_from_hv(stamp_hl, stamp_vl, require_v=True):
             if _is_inner_drawing_frame(fr[4], fr[5]):
                 continue
-            if _is_sheet_size(fr[4], fr[5]) or (fr[4] > 250 and fr[5] > 250):
+            if _is_sheet_size(fr[4], fr[5]) or (fr[4] > 200 and fr[5] > 200):
                 stamp_line_frames.append(fr[:6])
 
     stamp_frames = _keep_outermost(stamp_line_frames + stamp_poly_frames)
@@ -822,20 +822,11 @@ def _find_frames_from_dump(lines_file: str):
                         chosen = host
                         was_expanded = True
             if line_outer and any(
-                _frames_overlap(chosen, L, pad=5.0) or _frame_contains(chosen, L, pad=20.0)
+                _frames_overlap(chosen, L, pad=-2.0) or _frame_contains(chosen, L, pad=20.0)
                 for L in line_outer
             ):
                 continue
-            if was_expanded and line_outer and len(line_outer) <= 10:
-                adj = False
-                for L in line_outer:
-                    if abs(chosen[0] - L[0]) > 50:
-                        continue
-                    if 0 <= (L[1] - chosen[3]) <= 15 or 0 <= (chosen[1] - L[3]) <= 15:
-                        adj = True
-                        break
-                if adj:
-                    continue
+
             expanded.append(chosen)
         expanded.extend(L[:6] for L in line_outer)
         result = _keep_outermost(expanded)
@@ -993,7 +984,7 @@ def convert(
         else:
             lines_file = os.path.join(WORK_DIR, f"cad_lines_{safe_uid}.txt")
             dump_scr = os.path.join(WORK_DIR, f"dump_{safe_uid}.scr")
-            with open(dump_scr, "w", encoding="ascii", errors="replace") as f:
+            with open(dump_scr, "w", encoding="cp1251", errors="replace") as f:
                 f.write(_build_dump_lisp(lines_file))
 
             cmd1 = [ACAD_PATH, "/i", safe_dwg_path, "/l", "ru-RU", "/s", dump_scr]
@@ -1025,7 +1016,7 @@ def convert(
                 return JSONResponse(status_code=400, content={"error": "В Модели не найдено ни одной рамки.", "log": stdout_text[-4000:]})
 
             pdf_prefix = safe_pdf_path.replace(".pdf", "")
-            with open(scr_path, "w", encoding="ascii", errors="replace") as f:
+            with open(scr_path, "w", encoding="cp1251", errors="replace") as f:
                 f.write(_build_plot_lisp(unique_frames, pdf_prefix))
 
             cmd2 = [ACAD_PATH, "/i", safe_dwg_path, "/l", "ru-RU", "/s", scr_path]

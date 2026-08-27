@@ -45,7 +45,7 @@ def main():
     print("Step 1/2: dump ISO candidates...")
 
     # Multiline LISP прямо в SCR — так accoreconsole уже успешно отрабатывал
-    with open(dump_scr, "w", encoding="ascii", errors="replace") as f:
+    with open(dump_scr, "w", encoding="cp1251", errors="replace") as f:
         f.write(srv._build_dump_lisp(lines_file))
 
     cmd1 = [srv.ACAD_PATH, "/i", dwg, "/l", "ru-RU", "/s", dump_scr]
@@ -89,7 +89,7 @@ def main():
 
     print("Step 2/2: plot frames...")
     # Каждый (command ...) — отдельная полная строка SCR
-    with open(plot_scr, "w", encoding="ascii", errors="replace") as f:
+    with open(plot_scr, "w", encoding="cp1251", errors="replace") as f:
         f.write(srv._build_plot_lisp(frames, pdf_prefix))
 
     cmd2 = [srv.ACAD_PATH, "/i", dwg, "/l", "ru-RU", "/s", plot_scr]
