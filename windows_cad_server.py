@@ -618,36 +618,42 @@ def _is_stamp_layer(name: str) -> bool:
 
 
 def _rects_from_hv(hl, vl, require_v=True):
-    """Собрать прямоугольники из H/V отрезков с проверкой вертикалей."""
     frames = []
     n = len(hl)
     for i in range(n):
         x1a, x2a, ya = hl[i]
-        wa = x2a - x1a
         for j in range(i + 1, n):
             x1b, x2b, yb = hl[j]
-            if abs((x2b - x1b) - wa) > CORNER_TOL:
-                continue
-            if abs(x1a - x1b) > CORNER_TOL or abs(x2a - x2b) > CORNER_TOL:
+            overlap_min = max(x1a, x1b)
+            overlap_max = min(x2a, x2b)
+            if overlap_max - overlap_min < 150:
                 continue
             height = abs(yb - ya)
             if height < 200:
                 continue
-            xmin, xmax = min(x1a, x1b), max(x2a, x2b)
             ymin, ymax = min(ya, yb), max(ya, yb)
-            if require_v and vl:
-                def has_v(x):
-                    for vx, vy0, vy1 in vl:
-                        if abs(vx - x) > CORNER_TOL:
+            
+            valid_v = []
+            if vl:
+                for vx, vy0, vy1 in vl:
+                    if vx >= overlap_min - 10.0 and vx <= overlap_max + 10.0:
+                        if min(vy0, vy1) <= ymin + 10.0 and max(vy0, vy1) >= ymax - 10.0:
+                            valid_v.append(vx)
+            valid_v.sort()
+            
+            if require_v:
+                for vidx1 in range(len(valid_v)):
+                    for vidx2 in range(vidx1 + 1, len(valid_v)):
+                        v_left = valid_v[vidx1]
+                        v_right = valid_v[vidx2]
+                        w = v_right - v_left
+                        if w < 150:
                             continue
-                        if abs(vy0 - ymin) <= CORNER_TOL and abs(vy1 - ymax) <= CORNER_TOL:
-                            return True
-                        if abs(vy0 - ymax) <= CORNER_TOL and abs(vy1 - ymin) <= CORNER_TOL:
-                            return True
-                    return False
-                if not (has_v(xmin) and has_v(xmax)):
-                    continue
-            frames.append((xmin, ymin, xmax, ymax, xmax - xmin, ymax - ymin))
+                        if w / height > 3.0 or height / w > 3.0:
+                            continue
+                        frames.append((v_left, ymin, v_right, ymax, w, height))
+            else:
+                frames.append((overlap_min, ymin, overlap_max, ymax, overlap_max - overlap_min, height))
     return frames
 
 
