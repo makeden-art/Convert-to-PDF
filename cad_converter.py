@@ -59,6 +59,12 @@ def convert_cad_to_pdf(
             
             if smb_dwg_path:
                 cmd.extend(['-F', f'smb_dwg_path={smb_dwg_path}'])
+                smb_user = meta.get('smb_user')
+                smb_pass = meta.get('smb_pass')
+                if smb_user:
+                    cmd.extend(['-F', f'smb_user={smb_user}'])
+                if smb_pass:
+                    cmd.extend(['-F', f'smb_pass={smb_pass}'])
             else:
                 cmd.extend(['-F', f'file=@{input_path};filename=input{input_path.suffix}'])
 

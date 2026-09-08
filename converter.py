@@ -2330,6 +2330,10 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
 
             smb_dwg_path = ""
 
+            smb_user = ""
+
+            smb_pass = ""
+
             try:
 
                 check_src = Path(original_src) if original_src else src
@@ -2356,6 +2360,24 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
 
                             smb_dwg_path = f"{win_unc}\\{win_dir}\\{remote_name}"
 
+                    
+
+                    mount_id = info.get("mount_id", "default")
+
+                    creds_p = _smb_creds_path(mount_id)
+
+                    if creds_p.exists():
+
+                        for line in creds_p.read_text(encoding="utf-8").splitlines():
+
+                            if line.startswith("username="):
+
+                                smb_user = line.split("=", 1)[1].strip()
+
+                            elif line.startswith("password="):
+
+                                smb_pass = line.split("=", 1)[1].strip()
+
             except Exception as e:
 
                 logger.debug("smb_dwg_path build error: %s", e)
@@ -2364,7 +2386,18 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
 
             with _cad_sem:
 
-                pdf_tmp, cad_meta = convert_cad_to_pdf(str(src), meta={"windows_cad_ip": windows_cad_ip, "windows_cad_profile": windows_cad_profile, "dsd_path": dsd_path, "smb_dwg_path": smb_dwg_path, "smart_search": smart_search})
+                pdf_tmp, cad_meta = convert_cad_to_pdf(
+                    str(src),
+                    meta={
+                        "windows_cad_ip": windows_cad_ip,
+                        "windows_cad_profile": windows_cad_profile,
+                        "dsd_path": dsd_path,
+                        "smb_dwg_path": smb_dwg_path,
+                        "smb_user": smb_user,
+                        "smb_pass": smb_pass,
+                        "smart_search": smart_search
+                    }
+                )
 
             try:
 

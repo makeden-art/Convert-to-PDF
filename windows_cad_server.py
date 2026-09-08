@@ -1,7 +1,8 @@
 import os
 import subprocess
 import time
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+import json
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Body
 from fastapi.responses import FileResponse, JSONResponse
 import uvicorn
 import shutil
@@ -73,6 +74,14 @@ def server_status():
         }
     }
 
+@app.post("/shutdown")
+def shutdown_server():
+    def _kill():
+        time.sleep(0.5)
+        os._exit(0)
+    threading.Thread(target=_kill, daemon=True).start()
+    return {"status": "shutting down"}
+
 ACAD_PATH = find_accoreconsole()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WORK_DIR = os.path.join(SCRIPT_DIR, "cad_server_workdir")
@@ -83,12 +92,92 @@ SHARE_UNC_PATH = os.environ.get("SHARE_UNC_PATH", r"\\192.168.88.14\share_test")
 _office_lock = threading.Lock()
 ACAD_TIMEOUT_SEC = 3600
 
+SMB_CACHE_FILE = os.path.join(SCRIPT_DIR, "smb_credentials.json")
+
+def _load_smb_credentials() -> dict:
+    defaults = {
+        "192.168.88.22": ["caduser", "smbpasswd"],
+        "192.168.88.13": ["smbuser", "smbuser"],
+        "192.168.88.14": ["makeden", "Acfbfba2dt"],
+    }
+    if os.path.exists(SMB_CACHE_FILE):
+        try:
+            with open(SMB_CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                defaults.update(data)
+        except Exception as e:
+            print(f"[SMB] Ошибка чтения {SMB_CACHE_FILE}: {e}")
+    return defaults
+
+def _save_smb_credentials(creds: dict):
+    try:
+        with open(SMB_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(creds, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"[SMB] Ошибка записи {SMB_CACHE_FILE}: {e}")
+
+SMB_CREDENTIALS = _load_smb_credentials()
+
+def ensure_smb_connection(unc_path: str, username: str = None, password: str = None):
+    """Автоматически подключает сетевую шару, если она недоступна или переданы новые креды"""
+    if not unc_path or not unc_path.startswith(r"\\"):
+        return
+    parts = unc_path.lstrip("\\").split("\\")
+    if not parts:
+        return
+    server_ip = parts[0]
+    share_name = parts[1] if len(parts) > 1 else ""
+    share_root = rf"\\{server_ip}\{share_name}" if share_name else rf"\\{server_ip}"
+
+    # Если переданы явные креды — сохраняем/обновляем
+    if username and password:
+        SMB_CREDENTIALS[server_ip] = [username, password]
+        _save_smb_credentials(SMB_CREDENTIALS)
+
+    if os.path.exists(share_root):
+        return
+
+    creds = SMB_CREDENTIALS.get(server_ip)
+    if creds:
+        user, pwd = creds
+        try:
+            print(f"[SMB] Подключаем сетевую шару {share_root} под пользователем {user}...")
+            subprocess.run(["cmdkey", f"/add:{server_ip}", f"/user:{user}", f"/pass:{pwd}"], capture_output=True, text=True)
+            subprocess.run(["net", "use", share_root, f"/user:{user}", pwd, "/y"], capture_output=True, text=True)
+        except Exception as e:
+            print(f"[SMB] Ошибка подключения {share_root}: {e}")
+
+@app.post("/api/smb/auth")
+def api_smb_auth(data: dict = Body(...)):
+    """Регистрация сетевой шары и её реквизитов от портала"""
+    server = data.get("server", "").strip()
+    share = data.get("share", "").strip()
+    user = data.get("username", "").strip()
+    pwd = data.get("password", "").strip()
+    if not server or not user:
+        return JSONResponse(status_code=400, content={"error": "Не указаны server или username"})
+    
+    unc_path = rf"\\{server}\{share}" if share else rf"\\{server}"
+    ensure_smb_connection(unc_path, username=user, password=pwd)
+    accessible = os.path.exists(unc_path)
+    return {
+        "ok": True,
+        "unc": unc_path,
+        "accessible": accessible,
+        "server": server,
+        "username": user
+    }
+
 def unc_to_local(path: str) -> str:
-    normalized = path.replace("/", "\\")
-    unc_norm = SHARE_UNC_PATH.replace("/", "\\").rstrip("\\")
+    if not path:
+        return path
+    import re
+    p = path.replace("/", "\\")
+    p_clean = "\\\\" + re.sub(r"\\+", r"\\", p).lstrip("\\")
+    unc_clean = "\\\\" + re.sub(r"\\+", r"\\", SHARE_UNC_PATH.replace("/", "\\")).lstrip("\\").rstrip("\\")
     local_norm = SHARE_LOCAL_PATH.rstrip("\\")
-    if normalized.lower().startswith(unc_norm.lower()):
-        return local_norm + normalized[len(unc_norm):]
+    if p_clean.lower().startswith(unc_clean.lower()):
+        return local_norm + p_clean[len(unc_clean):]
     return path
 
 def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None) -> str:
@@ -130,6 +219,56 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
 (if (and (findfile "C:\\\\Common") (not (vl-string-search "C:\\\\Common" paths)))
   (setenv "ACAD" (strcat paths ";C:\\\\Common;C:\\\\Common\\\\Support;C:\\\\Common\\\\Fonts;C:\\\\Common\\\\LISP"))
 )
+"""
+
+    if not force_smart:
+        out_dir = safe_pdf_path.replace("\\", "/").replace(".pdf", "")
+        return f"""(command "_.UNDO" "_Control" "_None")
+(setvar "TILEMODE" 0)
+(setvar "EXPERT" 5)
+(setvar "CMDDIA" 0)
+(setvar "FILEDIA" 0)
+(setvar "XREFNOTIFY" 0)
+(setvar "PROXYSHOW" 1)
+(setvar "PROXYNOTICE" 0)
+(setvar "XLOADCTL" 2)
+(setvar "DEMANDLOAD" 3)
+(setvar "INDEXCTL" 3)
+(setvar "REGENMODE" 0)
+(setvar "DRAWORDERCTL" 0)
+(setq dwgDir (getvar "DWGPREFIX"))
+(setq paths (getenv "ACAD"))
+(if (and dwgDir (not (vl-string-search dwgDir paths)))
+  (setenv "ACAD" (strcat paths ";" dwgDir ";" dwgDir "Внешние ссылки;" dwgDir "Xref;" dwgDir "Xrefs"))
+)
+{common_path_lisp}
+(defun ExportPaperSpace ()
+  (setq lays (quote ()))
+  (setq dict (dictsearch (namedobjdict) "ACAD_LAYOUT"))
+  (foreach item dict
+    (if (= (car item) 3)
+      (if (/= (cdr item) "Model")
+        (setq lays (cons (cdr item) lays))
+      )
+    )
+  )
+  (setq lays (reverse lays))
+  (setq i 1)
+  (setq out-dir "{out_dir}")
+  (foreach lay lays
+    (setvar "CTAB" lay)
+    (setq pdfPath (strcat out-dir "_" (itoa i) ".pdf"))
+    (if (findfile pdfPath) (vl-file-delete pdfPath))
+    (vl-catch-all-apply
+      (function (lambda ()
+        (command "_.-EXPORT" "_PDF" "_Current" "_N" pdfPath)
+      ))
+    )
+    (setq i (1+ i))
+  )
+)
+(ExportPaperSpace)
+(command "_.QUIT" "_Y")
 """
 
     force_smart_val = "T" if force_smart else "nil"
@@ -251,10 +390,33 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
 
 (defun ExportPaperSpace ()
   (setvar "TILEMODE" 0)
-  (vl-catch-all-apply
-    (function (lambda ()
-      (command "_.-EXPORT" "_PDF" "_All" "{safe_pdf_path.replace(chr(92), chr(47))}")
-    ))
+  (setvar "EXPERT" 5)
+  (setvar "CMDDIA" 0)
+  (setvar "FILEDIA" 0)
+  (setq lays (quote ()))
+  (setq dict (dictsearch (namedobjdict) "ACAD_LAYOUT"))
+  (foreach item dict
+    (if (= (car item) 3)
+      (if (/= (cdr item) "Model")
+        (setq lays (cons (cdr item) lays))
+      )
+    )
+  )
+  (setq lays (reverse lays))
+  (setq i 1)
+  (setq out-dir "{safe_pdf_path.replace(chr(92), chr(47)).replace('.pdf', '')}")
+  (foreach lay lays
+    (setvar "CTAB" lay)
+    (setq pdfPath (strcat out-dir "_" (itoa i) ".pdf"))
+    (if (findfile pdfPath) (vl-file-delete pdfPath))
+    (vl-catch-all-apply
+      (function (lambda ()
+        (print (strcat "STARTING_EXPORT_FOR_" lay))
+        (command "_.-EXPORT" "_PDF" "_Current" "_N" pdfPath)
+        (print (strcat "FINISHED_EXPORT_FOR_" lay))
+      ))
+    )
+    (setq i (1+ i))
   )
 )
 
@@ -264,9 +426,9 @@ def _generate_lisp_script(safe_pdf_path: str, force_smart: bool, ctb: str = None
   (ExportPaperSpace)
 )
 (command "_.QUIT" "_Y")"""
-    return lisp_code.replace("\n", " ") + "\n"
+    return lisp_code + "\n"
 
-def _merge_pdf_parts(pdf_prefix_base: str, output_pdf_path: str):
+def _merge_pdf_parts(pdf_prefix_base: str, output_pdf_path: str, stamp_result: list = None):
     """Склеивает промежуточные PDF файлы (от поиска рамок) в один."""
     from pypdf import PdfWriter
     pdf_files = sorted(
@@ -307,6 +469,13 @@ def _remove_empty_pages(pdf_path: str):
         
         for pno in range(len(doc)):
             page = doc[pno]
+            # Страница с реальным чертежом должна иметь чертежи и текст
+            drawings = page.get_drawings()
+            text = page.get_text().strip()
+            # Если почти нет векторных элементов (< 10) и нет текста - это пустая заготовка/артефакт
+            if len(drawings) < 10 and len(text) < 5:
+                continue
+            
             pix = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
             total = len(pix.samples)
             if total == 0:
@@ -331,9 +500,9 @@ def _remove_empty_pages(pdf_path: str):
     except Exception as e:
         print(f"Не удалось удалить пустые страницы: {e}")
 
-# ISO A0..A3 стороны (мм). Допуск шире — внешняя рамка листа часто чуть больше поля чертежа.
-ISO_SIDES_MM = (297.0, 420.0, 594.0, 841.0, 1189.0)
-ISO_SIDE_TOL = 25.0
+# Стандартные ширины рулонов и листов (мм) по ГОСТ 2.301-68 / СПДС
+STANDARD_WIDTHS_MM = (297.0, 420.0, 594.0, 610.0, 841.0, 914.0)
+WIDTH_TOL = 20.0
 DUMP_TIMEOUT_SEC = 300
 ORTHO_TOL = 1.5
 CORNER_TOL = 3.0
@@ -356,35 +525,47 @@ def _decode_acad_out(raw: bytes) -> str:
     except Exception:
         return raw.decode("cp1251", errors="replace")
 
-def _is_iso_side(length: float, tol: float = ISO_SIDE_TOL) -> bool:
-    return any(abs(length - side) <= tol for side in ISO_SIDES_MM)
+def _is_standard_width(side: float, tol: float = WIDTH_TOL) -> bool:
+    return any(abs(side - std) <= tol for std in STANDARD_WIDTHS_MM)
 
 def _paper_for_frame(w: float, h: float) -> str:
     """
-    Бумага должна быть чуть больше рамки. Для «длинных» листов ~840×297
-    стандартного формата нет — берём A1 и потом обрезаем поля в PDF.
+    Выбор формата бумаги плоттера.
+    Ширина рулона/листа фиксирована (297, 420, 594, 610, 841, 914),
+    а длина может быть произвольной (в т.ч. удлиненной/нестандартной).
+    AutoCAD центрирует и масштабирует Fit, а затем _trim_pdf_to_content
+    обрезает поля строго до точного размера рамки чертежа.
     """
-    if w >= h:
-        if w <= 430 and h <= 310:
+    long_side = max(w, h)
+    short_side = min(w, h)
+    is_landscape = (w >= h)
+
+    if is_landscape:
+        if long_side <= 430 and short_side <= 310:
             return "ISO_full_bleed_A3_(420.00_x_297.00_MM)"
-        if w <= 610 and h <= 430:
+        if long_side <= 610 and short_side <= 430:
             return "ISO_full_bleed_A2_(594.00_x_420.00_MM)"
-        if w <= 860 and h <= 610:
+        if long_side <= 860 and short_side <= 610:
             return "ISO_full_bleed_A1_(841.00_x_594.00_MM)"
+        if long_side <= 1200 and short_side <= 860:
+            return "ISO_full_bleed_A0_(1189.00_x_841.00_MM)"
+        # Длинные рулоны (> 1189 мм) - выбираем максимальный A0 (подрезка восстановит точный bbox)
         return "ISO_full_bleed_A0_(1189.00_x_841.00_MM)"
-    if w <= 310 and h <= 430:
-        return "ISO_full_bleed_A3_(297.00_x_420.00_MM)"
-    if w <= 430 and h <= 610:
-        return "ISO_full_bleed_A2_(420.00_x_594.00_MM)"
-    if w <= 610 and h <= 860:
-        return "ISO_full_bleed_A1_(594.00_x_841.00_MM)"
-    return "ISO_full_bleed_A0_(841.00_x_1189.00_MM)"
+    else:
+        if short_side <= 310 and long_side <= 430:
+            return "ISO_full_bleed_A3_(297.00_x_420.00_MM)"
+        if short_side <= 430 and long_side <= 610:
+            return "ISO_full_bleed_A2_(420.00_x_594.00_MM)"
+        if short_side <= 610 and long_side <= 860:
+            return "ISO_full_bleed_A1_(594.00_x_841.00_MM)"
+        return "ISO_full_bleed_A0_(841.00_x_1189.00_MM)"
 
 
-def _trim_pdf_to_content(pdf_path: str, pad_pt: float = 4.0):
+def _trim_pdf_to_content(pdf_path: str, pad_pt: float = 3.0):
     """
     Убирает пустые поля после печати рамки Model на более крупный ISO-лист
-    (например 840×297 → A1 841×594 с Fit). Обрезка по реальному содержимому.
+    (например рамка А3х2 840×297 напечатана на А1 841×594).
+    Точная векторная обрезка по границам чертежа.
     """
     if not os.path.exists(pdf_path):
         return
@@ -393,46 +574,28 @@ def _trim_pdf_to_content(pdf_path: str, pad_pt: float = 4.0):
         doc = fitz.open(pdf_path)
         changed = False
         for page in doc:
-            # Низкое разрешение достаточно, чтобы найти непустую область
-            mat = fitz.Matrix(0.25, 0.25)
-            pix = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
-            w, h = pix.width, pix.height
-            samples = pix.samples
-            thr = 250
-            min_x, min_y, max_x, max_y = w, h, -1, -1
-            for y in range(h):
-                row = y * w
-                for x in range(w):
-                    if samples[row + x] < thr:
-                        if x < min_x:
-                            min_x = x
-                        if y < min_y:
-                            min_y = y
-                        if x > max_x:
-                            max_x = x
-                        if y > max_y:
-                            max_y = y
-            if max_x < 0:
+            rects = [d['rect'] for d in page.get_drawings()]
+            if not rects:
                 continue
-            # координаты pixmap → точки PDF
-            sx = page.rect.width / w
-            sy = page.rect.height / h
-            rect = fitz.Rect(
-                min_x * sx - pad_pt,
-                min_y * sy - pad_pt,
-                (max_x + 1) * sx + pad_pt,
-                (max_y + 1) * sy + pad_pt,
-            )
-            rect = rect & page.rect
-            # Обрезаем только если поля заметные (>3% с любой стороны)
-            pr = page.rect
-            if (
-                rect.width < pr.width * 0.97
-                or rect.height < pr.height * 0.97
-            ):
-                page.set_cropbox(rect)
-                page.set_mediabox(rect)
+            bbox = rects[0]
+            for r in rects[1:]:
+                bbox |= r
+            
+            # Если страница заметно больше содержимого (>30 пунктов / >10 мм с любой стороны)
+            diff_w = page.rect.width - bbox.width
+            diff_h = page.rect.height - bbox.height
+            # Защита: обрезка применяется только если сам чертеж адекватных размеров (> 150 мм по каждой стороне)
+            if (diff_w > 30 or diff_h > 30) and bbox.width > 400 and bbox.height > 400:
+                new_crop = fitz.Rect(
+                    max(0, bbox.x0 - pad_pt),
+                    max(0, bbox.y0 - pad_pt),
+                    min(page.rect.width, bbox.x1 + pad_pt),
+                    min(page.rect.height, bbox.y1 + pad_pt)
+                )
+                page.set_cropbox(new_crop)
+                page.set_mediabox(new_crop)
                 changed = True
+
         if changed:
             tmp = pdf_path + ".trim.pdf"
             doc.save(tmp, deflate=True)
@@ -448,11 +611,11 @@ def _trim_pdf_to_content(pdf_path: str, pad_pt: float = 4.0):
                 os.replace(tmp, alt)
                 print(f"Исходный PDF занят, сохранено: {alt}")
                 return
-            print(f"Trimmed PDF margins: {pdf_path}")
+            print(f"Trimmed oversized page margins in: {pdf_path}")
         else:
             doc.close()
     except Exception as e:
-        print(f"Не удалось обрезать поля PDF: {e}")
+        print(f"Не удалось скорректировать поля PDF: {e}")
 
 def _build_dump_lisp(lines_file: str) -> str:
     """
@@ -538,7 +701,7 @@ def _build_dump_lisp(lines_file: str) -> str:
                   (if (> (cadr p) ymax) (setq ymax (cadr p)))
                 )
                 (setq w (- xmax xmin) h (- ymax ymin))
-                (if (and (> w 200.0) (> h 200.0) (< w 2000.0) (< h 2000.0))
+                (if (and (> w 200.0) (> h 200.0) (< w 10000.0) (< h 10000.0))
                   (write-line
                     (strcat "P;"
                             (rtos xmin 2 3) ";"
@@ -574,24 +737,21 @@ def _write_lsp_and_scr(lsp_path: str, scr_path: str, lisp_code: str):
 
 def _is_sheet_size(w: float, h: float) -> bool:
     """
-    Рамка листа в Model: ISO или нестандарт (Robur ~631×297, 840×297 и т.п.).
-    Короткая сторона ~высота листа, длинная — ширина формата.
+    Рамка листа в Model: ширина рулона стандартна (297, 420, 594, 610, 841, 914 мм),
+    а длина может быть произвольной (в т.ч. удлиненной/нестандартной по ГОСТ 2.301-68).
     """
-    a, b = (w, h) if w >= h else (h, w)
-    if b < 240 or a < 280 or a > 2000 or b > 1300:
+    a, b = (w, h) if w >= h else (h, w)  # a - длина, b - ширина/высота
+    # Минимальный формат А4 (210×297) или рулон от 200 мм; максимальная длина до 10 метров
+    if b < 200.0 or a < 280.0 or b > 1500.0 or a > 10000.0:
         return False
-    ratio = a / b
-    if ratio > 4.0:
-        return False
-    # классический ISO ~1.414
-    if 1.25 <= ratio <= 1.55 and _is_iso_side(a) and _is_iso_side(b):
+    # Короткая сторона (ширина рулона) должна быть стандартной
+    if _is_standard_width(b):
         return True
-    # удлинённый / нестандарт: высота листа ~A4..A3, ширина произвольная
-    if 240 <= b <= 340 and a >= b * 1.15:
+    # Либо длинная сторона стандартная (вертикальный лист)
+    if _is_standard_width(a) and b >= 200.0:
         return True
-    if _is_iso_side(b) and a >= b * 1.2:
-        return True
-    if _is_iso_side(a) and b >= 240:
+    # Классический лист А4 (210х297)
+    if abs(b - 210.0) <= WIDTH_TOL and abs(a - 297.0) <= WIDTH_TOL:
         return True
     return False
 
@@ -781,7 +941,9 @@ def _find_frames_from_dump(lines_file: str):
             if _is_sheet_size(fr[4], fr[5]) or (fr[4] > 200 and fr[5] > 200):
                 stamp_line_frames.append(fr[:6])
 
-    stamp_frames = _keep_outermost(stamp_line_frames + stamp_poly_frames)
+    stamp_frames = _keep_outermost(stamp_poly_frames) if stamp_poly_frames else []
+    if not stamp_frames and stamp_line_frames:
+        stamp_frames = _keep_outermost(stamp_line_frames)
     stamp_frames = _pick_widest_per_row(stamp_frames)
 
     if stamp_frames:
@@ -836,8 +998,17 @@ def _find_frames_from_dump(lines_file: str):
         print(f"Stamp sheets: {len(result)} sizes={sizes}")
         return result
 
-    # --- Запасной путь: только Bounds / линии без штампа ---
-    frames = list(bounds_frames)
+    # Если найдены готовые полилинии рамок (Bounds / Штамп) — используем строго их!
+    candidate_polys = stamp_poly_frames if stamp_poly_frames else bounds_frames
+    if candidate_polys:
+        result = _keep_outermost(candidate_polys)
+        result.sort(key=lambda fr: (-fr[1], fr[0]))
+        from collections import Counter
+        print(f"Poly sheet frames: {len(result)} sizes={dict(Counter((round(f[4]), round(f[5])) for f in result))}")
+        return result
+
+    # --- Запасной путь: только если полилиний рамок вообще нет в чертеже ---
+    frames = []
     all_hl = [x for lines in hl_by.values() for x in lines]
     all_vl = [x for lines in vl_by.values() for x in lines]
     for fr in _rects_from_hv(all_hl, all_vl, require_v=bool(all_vl)):
@@ -883,7 +1054,7 @@ def _build_plot_lisp(frames, pdf_prefix: str) -> str:
         "_Unlock", "*",
         "",  # выход из -LAYER
     ]
-    margin = 0.5
+    margin = 0.0
     for idx, frm in enumerate(frames, 1):
         paper = _paper_for_frame(frm[4], frm[5])
         outpath = f"{pdf_prefix}_{idx}.pdf".replace("\\", "/")
@@ -921,6 +1092,8 @@ def convert(
     ctb: str = Form(None),
     profile: str = Form(None),
     smb_dwg_path: str = Form(None),
+    smb_user: str = Form(None),
+    smb_pass: str = Form(None),
     smart_search: str = Form(None)
 ):
     if not ACAD_PATH or not os.path.exists(ACAD_PATH):
@@ -940,13 +1113,29 @@ def convert(
     try:
         # 1. Определение путей и копирование файла
         if smb_dwg_path:
+            ensure_smb_connection(smb_dwg_path, username=smb_user, password=smb_pass)
             local_path = unc_to_local(smb_dwg_path)
             if os.path.exists(local_path):
-                safe_dwg_path = os.path.join(WORK_DIR, f"input_{safe_uid}.dwg")
-                shutil.copy2(local_path, safe_dwg_path)
+                safe_dwg_path = local_path
                 safe_filename = os.path.basename(local_path)
+                dwg_path = None
+            elif os.path.exists(smb_dwg_path):
+                # Если файл на удалённой SMB-шаре (например, \\192.168.88.22\...):
+                # Копируем папку с файлом и ссылками на локальный SSD для ускорения работы AutoCAD в 10 раз
+                safe_filename = os.path.basename(smb_dwg_path)
+                remote_dir = os.path.dirname(smb_dwg_path)
+                local_job_dir = os.path.join(WORK_DIR, f"proj_{safe_uid}")
+                try:
+                    print(f"[ACCEL] Копируем проект из {remote_dir} на локальный SSD {local_job_dir}...")
+                    shutil.copytree(remote_dir, local_job_dir, dirs_exist_ok=True)
+                    safe_dwg_path = os.path.join(local_job_dir, safe_filename)
+                    dwg_path = local_job_dir # чтобы удалилось в finally
+                except Exception as e:
+                    print(f"[ACCEL WARN] Не удалось скопировать проект локально ({e}), читаем напрямую с сети...")
+                    safe_dwg_path = smb_dwg_path
+                    dwg_path = None
             else:
-                return JSONResponse(status_code=400, content={"error": f"Файл не найден по локальному пути: {local_path}"})
+                return JSONResponse(status_code=400, content={"error": f"Файл не найден по локальному или сетевому пути: {local_path} / {smb_dwg_path}"})
         elif file and file.filename:
             safe_filename = file.filename.replace(" ", "_")
             dwg_path = os.path.join(WORK_DIR, f"input_{safe_uid}.dwg")
@@ -959,6 +1148,7 @@ def convert(
         # Итоговые пути
         safe_pdf_path = os.path.join(WORK_DIR, f"input_{safe_uid}.pdf")
         scr_path = os.path.join(WORK_DIR, f"print_{safe_uid}.scr")
+        lsp_path = os.path.join(WORK_DIR, f"print_{safe_uid}.lsp")
 
         # 2. Флаги логики
         name_lower = safe_filename.lower()
@@ -969,7 +1159,9 @@ def convert(
         # 3. Генерация и запись LISP скрипта
         if not is_smart:
             lisp_code = _generate_lisp_script(safe_pdf_path, False, ctb)
-            with open(scr_path, "w", encoding="cp1251") as f:
+            with open(scr_path, "w", encoding="cp1251", errors="replace") as f:
+                f.write(lisp_code)
+            with open("C:/CadServer/cad_server_workdir/LAST_RUN.scr", "w", encoding="cp1251", errors="replace") as f:
                 f.write(lisp_code)
 
             cmd = [ACAD_PATH, "/i", safe_dwg_path, "/l", "ru-RU", "/s", scr_path]
@@ -980,7 +1172,15 @@ def convert(
                 result = _run_accore(cmd, ACAD_TIMEOUT_SEC)
                 stdout_text = _decode_acad_out(result.stdout)
             except subprocess.TimeoutExpired:
-                return JSONResponse(status_code=504, content={"error": f"AutoCAD timeout {ACAD_TIMEOUT_SEC}s. Process killed.", "log": ""})
+                _kill_accore()
+                # Проверяем, успели ли сгенерироваться листы до таймаута
+                pdf_prefix_base = safe_pdf_path.replace(".pdf", "")
+                parts = glob.glob(f"{pdf_prefix_base}_[0-9]*.pdf")
+                if parts:
+                    print(f"[TIMEOUT WARN] Таймаут {ACAD_TIMEOUT_SEC}s, но найдены {len(parts)} сгенерированных листов! Продолжаем сборку...")
+                    stdout_text = f"AutoCAD timeout {ACAD_TIMEOUT_SEC}s, salvaged {len(parts)} parts."
+                else:
+                    return JSONResponse(status_code=504, content={"error": f"AutoCAD timeout {ACAD_TIMEOUT_SEC}s. Process killed.", "log": ""})
         else:
             lines_file = os.path.join(WORK_DIR, f"cad_lines_{safe_uid}.txt")
             dump_scr = os.path.join(WORK_DIR, f"dump_{safe_uid}.scr")
@@ -1026,16 +1226,27 @@ def convert(
                 result = _run_accore(cmd2, ACAD_TIMEOUT_SEC)
                 stdout_text = _decode_acad_out(result.stdout)
             except subprocess.TimeoutExpired:
-                return JSONResponse(status_code=504, content={"error": f"AutoCAD timeout {ACAD_TIMEOUT_SEC}s on step 2."})
+                _kill_accore()
+                pdf_prefix_base = safe_pdf_path.replace(".pdf", "")
+                parts = glob.glob(f"{pdf_prefix_base}_[0-9]*.pdf")
+                if parts:
+                    print(f"[TIMEOUT WARN] Таймаут {ACAD_TIMEOUT_SEC}s на шаге 2, но найдены {len(parts)} листов! Продолжаем сборку...")
+                    stdout_text = f"AutoCAD timeout {ACAD_TIMEOUT_SEC}s on step 2, salvaged {len(parts)} parts."
+                else:
+                    return JSONResponse(status_code=504, content={"error": f"AutoCAD timeout {ACAD_TIMEOUT_SEC}s on step 2."})
 
         if "ERROR_NO_LAYOUTS" in stdout_text:
             print(f"ОШИБКА: В чертеже {safe_filename} нет настроенных листов!")
             return JSONResponse(status_code=400, content={"error": "В чертеже нет ни одного листа (Layout).", "log": stdout_text})
 
         # 5. Сборка PDF и удаление пустых листов
-        if is_smart:
+        pdf_prefix_base = safe_pdf_path.replace(".pdf", "")
+        parts = sorted(
+            glob.glob(f"{pdf_prefix_base}_[0-9]*.pdf"),
+            key=lambda f: int(f.rsplit("_", 1)[-1].replace(".pdf", "")) if f.rsplit("_", 1)[-1].replace(".pdf", "").isdigit() else 0
+        )
+        if parts:
             try:
-                pdf_prefix_base = safe_pdf_path.replace(".pdf", "")
                 _merge_pdf_parts(pdf_prefix_base, safe_pdf_path)
             except ValueError as e:
                 return JSONResponse(status_code=400, content={"error": str(e), "log": stdout_text[-4000:]})
@@ -1067,9 +1278,16 @@ def convert(
     finally:
         try:
             if dwg_path and os.path.exists(dwg_path):
-                os.remove(dwg_path)
+                if os.path.isdir(dwg_path):
+                    shutil.rmtree(dwg_path, ignore_errors=True)
+                else:
+                    os.remove(dwg_path)
             if scr_path and os.path.exists(scr_path):
-                os.remove(scr_path)
+                try: os.remove(scr_path)
+                except: pass
+            if lsp_path and os.path.exists(lsp_path):
+                try: os.remove(lsp_path)
+                except: pass
         except Exception as e:
             print(f"Ошибка при очистке временных файлов: {e}")
 
