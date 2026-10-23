@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body { font-family: system-ui, sans-serif; background: #0f172a; color: #e5e7eb; margin: 0; min-height: 100vh; padding: 24px; }
-    .wrap { max-width: 1400px; margin: 0 auto; }
+    .wrap { max-width: 1700px; margin: 0 auto; width: 100%; box-sizing: border-box; }
     .box { padding: 24px; background: #111827; border: 1px solid rgba(148,163,184,.3); border-radius: 16px; margin-bottom: 20px; }
     h1 { margin: 0 0 8px; color: #38bdf8; font-size: 22px; }
     h2 { margin: 0 0 12px; color: #7dd3fc; font-size: 16px; }
@@ -25,18 +25,92 @@
     .collapse-toggle[aria-expanded="false"] .chevron { transform: rotate(-90deg); }
     .collapse-body { overflow: hidden; transition: max-height .3s ease; max-height: 1000px; }
     .collapse-body.is-collapsed { max-height: 0; }
-    .work-grid { display: flex; gap: 16px; min-width: 0; }
-    .work-grid > .tree-panel { width: 50%; min-width: 300px; resize: horizontal; overflow: hidden; }
-    .work-grid > .action-panel { flex: 1; min-width: 300px; }
-    @media (max-width: 800px) { .work-grid { flex-direction: column; } .work-grid > .tree-panel { width: 100%; resize: vertical; } }
-    .tree-panel { border: 1px solid rgba(148,163,184,.25); border-radius: 12px; background: #0f172a; min-height: 320px; display: flex; flex-direction: column; min-width: 0; }
-    .tree-toolbar { display:flex; align-items:center; gap:6px; padding:12px; background:#1e293b; border-bottom:1px solid #334155; position:sticky; top:0; z-index:10; }
+    .work-grid { display: flex; gap: 0; min-width: 0; align-items: stretch; position: relative; }
+    .work-grid > .tree-panel { flex: 0 0 62%; min-width: 320px; max-width: 85%; }
+    .grid-splitter {
+      width: 10px;
+      margin: 0 4px;
+      cursor: col-resize;
+      background: transparent;
+      position: relative;
+      flex-shrink: 0;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .grid-splitter::after {
+      content: '';
+      width: 3px;
+      height: 48px;
+      border-radius: 3px;
+      background: #475569;
+      transition: background 0.15s, height 0.15s;
+    }
+    .grid-splitter:hover::after, .grid-splitter.active::after {
+      background: #38bdf8;
+      height: 90px;
+    }
+    .work-grid > .action-panel { flex: 1; min-width: 280px; padding-left: 8px; }
+    @media (max-width: 900px) {
+      .work-grid { flex-direction: column; }
+      .work-grid > .tree-panel { flex: 1 1 auto; width: 100%; max-width: 100%; }
+      .grid-splitter { display: none; }
+      .work-grid > .action-panel { padding-left: 0; margin-top: 16px; }
+    }
+    .tree-panel { border: 1px solid rgba(148,163,184,.25); border-radius: 12px; background: #0f172a; min-height: 360px; display: flex; flex-direction: column; min-width: 0; }
+    .tree-toolbar { display:flex; align-items:center; gap:6px; padding:10px 12px; background:#1e293b; border-bottom:1px solid #334155; position:sticky; top:0; z-index:10; }
     .tree-toolbar button { display:flex; align-items:center; gap:6px; font-weight:500; font-size:13px; }
+
+    /* Шапка колонок в проводнике */
+    .tree-header-row {
+      display: flex;
+      align-items: center;
+      padding: 6px 12px;
+      background: #0f172a;
+      border-bottom: 1px solid #334155;
+      font-size: 12px;
+      font-weight: 600;
+      color: #94a3b8;
+      user-select: none;
+      position: sticky;
+      top: 51px;
+      z-index: 8;
+    }
+    .tree-header-col-name {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tree-header-meta {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+      padding-right: 8px;
+    }
+    .tree-header-col-size {
+      min-width: 68px;
+      text-align: right;
+    }
+    .tree-header-col-date {
+      min-width: 105px;
+      text-align: right;
+    }
+    .tree-header-col-action {
+      min-width: 24px;
+    }
     
     .selection-toolbar { 
       display:none; align-items:center; justify-content:space-between; 
       padding:10px 16px; background:#312e81; border-bottom:1px solid #4338ca; 
-      position:sticky; top:54px; z-index:9; 
+      position:sticky; top:51px; z-index:9; 
       animation: slideDown 0.2s ease-out;
     }
     .selection-toolbar.active { display:flex; }
@@ -48,14 +122,21 @@
       to { transform: translateY(0); opacity: 1; }
     }
     .tree-path { font-size: 12px; color: #64748b; word-break: break-all; flex: 1; }
-    .tree-list { overflow: auto; flex: 1; padding: 8px 0; min-height: 400px; max-height: 65vh; }
-    .tree-item { display: flex; align-items: center; gap: 8px; padding: 6px 12px; cursor: pointer; font-size: 15px; }
+    .tree-list { overflow: auto; flex: 1; padding: 4px 0; min-height: 400px; max-height: 70vh; }
+    .tree-item { display: flex; align-items: center; gap: 8px; padding: 6px 12px; cursor: pointer; font-size: 14px; }
     .tree-item:hover { background: rgba(56,189,248,.08); }
     .tree-item.dir { font-weight: 500; color: #7dd3fc; }
     .tree-item.file { color: #e5e7eb; padding-left: 28px; }
     .tree-item.file.disabled { opacity: .45; cursor: default; }
     .tree-item .icon { width: 22px; font-size: 18px; text-align: center; flex-shrink: 0; }
-    .tree-item .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tree-item .name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-right: 8px;
+    }
     .action-panel { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
     .drop { border: 2px dashed rgba(148,163,184,.4); border-radius: 12px; padding: 16px; text-align: center; cursor: pointer; font-size: 13px; color: #9ca3af; }
     .drop:hover { border-color: #38bdf8; color: #7dd3fc; }
@@ -118,6 +199,76 @@
     }
     #btn-cancel-active.visible { display: inline-block; }
     #jobs-queue-hint { font-size: 12px; color: #94a3b8; margin-bottom: 8px; }
+
+    /* Прогресс-бар конвертации */
+    .progress-card {
+      margin: 12px 0 8px;
+      padding: 12px 14px;
+      background: #0f172a;
+      border: 1px solid rgba(56,189,248,.35);
+      border-radius: 10px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.3);
+    }
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .progress-stage-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #38bdf8;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 80%;
+    }
+    .progress-percent-val {
+      font-size: 13px;
+      font-weight: 700;
+      color: #7dd3fc;
+      font-variant-numeric: tabular-nums;
+    }
+    .progress-bar-bg {
+      width: 100%;
+      height: 8px;
+      background: rgba(148,163,184,.18);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #0284c7, #38bdf8);
+      border-radius: 999px;
+      transition: width 0.4s ease;
+    }
+    .progress-bar-fill.success {
+      background: #10b981;
+    }
+    .progress-bar-fill.error {
+      background: #ef4444;
+    }
+    .progress-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+    .progress-detail-text {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 65%;
+    }
+    .progress-eta-text {
+      color: #fbbf24;
+      font-weight: 500;
+    }
+
     .merge-panel { display: none; border: 1px solid rgba(148,163,184,.25); border-radius: 10px; padding: 10px; background: #0b1220; }
     .merge-panel.visible { display: block; }
     .merge-list { max-height: 200px; overflow: auto; margin: 8px 0; }
@@ -133,9 +284,91 @@
     .num-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
     .num-row input[type=number] { width: 72px; margin: 0; padding: 6px 8px; }
     .num-preview { font-size: 12px; color: #94a3b8; margin: 4px 0 0; }
-    .tree-item .format-badge { font-size: 11px; color: #94a3b8; margin-left: auto; flex-shrink: 0; white-space: nowrap; }
+    .tree-item .format-badge { font-size: 11px; color: #94a3b8; flex-shrink: 0; white-space: nowrap; }
     .tree-item.format-warn .format-badge { color: #fbbf24; }
     .tree-item.format-bad { opacity: .55; }
+    .tree-item.dragging { opacity: .4; }
+    .tree-item.drag-over-folder, #tree-up.drag-over-folder {
+      background: rgba(2, 132, 199, 0.35) !important;
+      outline: 2px dashed #38bdf8 !important;
+      outline-offset: -2px;
+      border-radius: 4px;
+    }
+    .modal-move-folder-item {
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #e2e8f0;
+    }
+    .modal-move-folder-item:hover {
+      background: #334155;
+    }
+    .modal-move-folder-item.selected {
+      background: #0284c7;
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .tree-item-meta {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+      padding-right: 8px;
+    }
+    .tree-item .file-size-col {
+      min-width: 68px;
+      text-align: right;
+      font-size: 13px;
+      font-weight: 600;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      color: #38bdf8;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .tree-item .file-size-col.size-large {
+      color: #fbbf24;
+    }
+    .tree-item .file-size-col.size-huge {
+      color: #f87171;
+    }
+    .tree-item .file-date {
+      color: #94a3b8;
+      font-size: 12px;
+      white-space: nowrap;
+      min-width: 105px;
+      text-align: right;
+    }
+
+    .file-size-badge {
+      font-size: 11px;
+      font-weight: 500;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      padding: 1px 6px;
+      border-radius: 4px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .file-size-normal {
+      color: #94a3b8;
+      background: rgba(51, 65, 85, 0.45);
+      border: 1px solid rgba(71, 85, 105, 0.4);
+    }
+    .file-size-medium {
+      color: #fbbf24;
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.35);
+    }
+    .file-size-large {
+      color: #f87171;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      font-weight: 600;
+    }
     
     /* Увеличенные чекбоксы с акцентным стилем */
     input[type=checkbox] {
@@ -173,6 +406,24 @@
       background: rgba(56,189,248,.18);
       border-color: #38bdf8;
       color: #38bdf8;
+    }
+    .tree-item .btn-edit {
+      flex-shrink: 0;
+      margin-left: 4px;
+      padding: 2px 7px;
+      font-size: 12px;
+      line-height: 1.2;
+      border-radius: 6px;
+      border: 1px solid rgba(251,191,36,.4);
+      background: rgba(251,191,36,.1);
+      color: #fbbf24;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .tree-item .btn-edit:hover {
+      background: rgba(251,191,36,.25);
+      border-color: #fbbf24;
+      color: #fef08a;
     }
     .tree-toggle:hover { color: #38bdf8; }
     .tree-toggle { width: 22px; display: inline-block; text-align: center; cursor: pointer; color: #94a3b8; font-weight: bold; margin-right: 4px; font-size: 18px; line-height: 1; }
@@ -288,15 +539,50 @@ window.addEventListener('unhandledrejection', function(e) {
           <div class="selection-toolbar" id="selection-toolbar">
             <div class="sel-text" id="sel-toolbar-text">Выбрано: 0</div>
             <div class="sel-actions">
+              <button type="button" id="btn-toolbar-edit" style="padding:6px 14px; background: #fbbf24; color: #000; font-size:13px; font-weight:600; border-radius:6px; border:none; cursor:pointer;" title="Открыть выбранные файлы в визуальном редакторе PDF">✏️ Редактировать PDF</button>
+              <button type="button" id="btn-move-sel" style="padding:6px 12px; background: #0284c7; color: #fff; font-size:13px; font-weight:500; border-radius:6px; border:none; cursor:pointer;" title="Переместить выбранные элементы в другую папку">📦 Переместить в...</button>
               <button type="button" id="btn-clear-sel" class="secondary" style="padding:6px 10px; font-size:13px;" title="Очистить выделение">❌ Снять выделение</button>
               <button type="button" id="btn-delete" style="padding:6px 10px; background: #e11d48; color: #fff; font-size:13px;" title="Удалить выбранное">🗑️ Удалить</button>
+            </div>
+          </div>
+          <!-- Модальное окно перемещения файлов -->
+          <div id="modal-move" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.75); z-index:99999; align-items:center; justify-content:center;">
+            <div style="background:#1e293b; border:1px solid #475569; border-radius:12px; width:90%; max-width:560px; max-height:85vh; display:flex; flex-direction:column; box-shadow:0 25px 50px -12px rgba(0,0,0,0.7);">
+              <div style="padding:16px 20px; border-bottom:1px solid #334155; display:flex; justify-content:space-between; align-items:center;">
+                <h3 style="margin:0; font-size:16px; color:#f8fafc; font-weight:600;">📁 Перемещение файлов и папок</h3>
+                <button type="button" id="btn-close-move-modal" style="background:transparent; border:none; color:#94a3b8; font-size:22px; cursor:pointer; line-height:1;">✕</button>
+              </div>
+              <div style="padding:16px 20px; flex-grow:1; overflow-y:auto;">
+                <div id="move-modal-items-info" style="font-size:13px; color:#94a3b8; margin-bottom:12px;"></div>
+                <div style="font-size:13px; font-weight:600; color:#cbd5e1; margin-bottom:8px;">Выберите папку назначения:</div>
+                <div id="move-modal-tree" style="background:#0f172a; border:1px solid #334155; border-radius:8px; padding:10px; max-height:260px; overflow-y:auto; font-size:13px;"></div>
+                <div style="margin-top:12px; font-size:13px; color:#38bdf8; display:flex; align-items:center; gap:6px;">
+                  <span style="color:#94a3b8;">Целевая папка:</span> <b id="move-modal-target-path" style="word-break:break-all;">-</b>
+                </div>
+              </div>
+              <div style="padding:14px 20px; border-top:1px solid #334155; display:flex; justify-content:flex-end; gap:10px;">
+                <button type="button" id="btn-cancel-move" class="secondary" style="padding:8px 16px;">Отмена</button>
+                <button type="button" id="btn-confirm-move" style="padding:8px 18px; background:#0284c7; color:#fff; font-weight:600; border-radius:6px; border:none; cursor:pointer;">✓ Переместить сюда</button>
+              </div>
             </div>
           </div>
           <!-- Скрытые поля для загрузки -->
           <input type="file" id="upload-files-input" style="display:none" multiple />
           <input type="file" id="upload-folder-input" style="display:none" webkitdirectory directory multiple />
+          <!-- Заголовок колонок проводника -->
+          <div class="tree-header-row" id="tree-header-row">
+            <div class="tree-header-col-name">
+              <span>Имя файла / папки</span>
+            </div>
+            <div class="tree-header-meta">
+              <span class="tree-header-col-size">Размер</span>
+              <span class="tree-header-col-date">Дата изм.</span>
+              <span class="tree-header-col-action"></span>
+            </div>
+          </div>
           <div class="tree-list" id="tree-list"></div>
         </div>
+        <div class="grid-splitter" id="grid-splitter" title="Потяните для изменения ширины панелей"></div>
         <div class="action-panel">
           <div class="drop" id="drop-upload" style="display:none">📎 Загрузить с компьютера (один или несколько файлов)</div>
           <input type="file" id="file-upload" style="display:none" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.rtf,.dwg,.dxf" />
@@ -306,7 +592,6 @@ window.addEventListener('unhandledrejection', function(e) {
         <p class="sel-count" id="upload-count" style="display:none; color:#94a3b8">С компьютера: 0</p>
         <div class="chk" style="display:none"><input type="checkbox" id="recursive" checked /><label for="recursive" style="margin:0">Включая вложенные подпапки (для выбранных папок)</label></div>
         <div class="chk"><input type="checkbox" id="smart-search" /><label for="smart-search" style="margin:0">Умный поиск поперечников (печать рамок из Модели)</label></div>
-          <p class="hint" style="margin-top: -6px; margin-bottom: 10px; margin-left: 24px; color: #94a3b8; font-size: 13px;">Если в имени файла есть <b>_модель</b> или <b>_model</b>, листы (Layouts) игнорируются, печать рамок производится из пространства Модели.</p>
         <div class="chk"><input type="checkbox" id="merge" /><label for="merge" style="margin:0">Собрать в один PDF</label></div>
           <div class="merge-panel" id="merge-panel">
             <p class="hint" style="margin:0 0 6px">Порядок в сборке — перетащите мышью или ↑ ↓:</p>
@@ -325,8 +610,21 @@ window.addEventListener('unhandledrejection', function(e) {
           <input type="text" id="output-name" value="сборка.pdf" style="display:none;" />
           <div class="btn-row">
             <button type="button" id="btn-server" style="display:none;">Конвертировать на сервере</button>
-            
+            <button type="button" id="btn-preview-draft" style="display:none; background: #fbbf24; color: #000;">✏️ Редактор PDF</button>
             <button type="button" id="btn-download" style="display:none;">Скачать PDF</button>
+          </div>
+          <div id="progress-card" class="progress-card" style="display:none">
+            <div class="progress-header">
+              <span id="progress-stage-title" class="progress-stage-title">Конвертация…</span>
+              <span id="progress-percent-val" class="progress-percent-val">0%</span>
+            </div>
+            <div class="progress-bar-bg">
+              <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%"></div>
+            </div>
+            <div class="progress-meta">
+              <span id="progress-detail-text" class="progress-detail-text">Подготовка файла…</span>
+              <span id="progress-eta-text" class="progress-eta-text"></span>
+            </div>
           </div>
           <pre id="log-work" style="display:none"></pre>
           <button type="button" id="btn-cancel-active">Отменить задание</button>
@@ -389,62 +687,66 @@ window.addEventListener('unhandledrejection', function(e) {
     }
 
     function isSelected(path) {
-      if (window.excludedSelections && window.excludedSelections.has(path)) return false;
-      return orderedSelections.some(s => s.path === path || path.startsWith(s.path + '/'));
+      return orderedSelections.some(s => s.path === path);
     }
 
-    
-    function updateAllCheckboxes() {
-         document.querySelectorAll('.chk-box').forEach(cb => {
-           if (cb.dataset.path) {
-             const p = cb.dataset.path;
-             if (isSelected(p)) {
-               cb.checked = true;
-               cb.indeterminate = false;
-             } else if (isIndeterminate(p)) {
-               cb.checked = false;
-               cb.indeterminate = true;
-             } else {
-               cb.checked = false;
-               cb.indeterminate = false;
-             }
-           }
-         });
+    function formatFileSize(bytes) {
+      if (bytes === null || bytes === undefined || isNaN(bytes) || bytes === '') return '';
+      bytes = Number(bytes);
+      if (bytes <= 0) return '0 Б';
+      if (bytes < 1024) return bytes + ' Б';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' КБ';
+      if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' МБ';
+      return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' ГБ';
     }
 
-    function isIndeterminate(path) {
-      if (isSelected(path)) return false;
-      return orderedSelections.some(s => s.path.startsWith(path + '/'));
+    function formatFileSizeSimple(bytes) {
+      if (bytes === null || bytes === undefined || isNaN(bytes) || bytes === '') return '';
+      const b = Number(bytes);
+      if (b <= 0) return '0 b';
+      if (b < 1024) return b + ' b';
+      if (b < 1024 * 1024) {
+        const kb = b / 1024;
+        return (kb >= 10 ? Math.round(kb) : kb.toFixed(1)) + ' Kb';
+      }
+      if (b < 1024 * 1024 * 1024) {
+        const mb = b / (1024 * 1024);
+        return (mb >= 10 ? Math.round(mb) : mb.toFixed(1)) + ' Mb';
+      }
+      return (b / (1024 * 1024 * 1024)).toFixed(1) + ' Gb';
     }
 
-    function toggleSelection(path, name, type, checked) {
+    function formatSizeBadgeHtml(bytes) {
+      if (bytes === null || bytes === undefined || isNaN(bytes) || bytes === '') return '';
+      const b = Number(bytes);
+      const text = formatFileSize(b);
+      let cls = 'file-size-normal';
+      let icon = '';
+      if (b >= 100 * 1024 * 1024) { // >100 МБ - тяжелые чертежи/файлы
+        cls = 'file-size-large';
+        icon = ' ⚡';
+      } else if (b >= 30 * 1024 * 1024) { // >30 МБ
+        cls = 'file-size-medium';
+      }
+      return '<span class="file-size-badge ' + cls + '" title="Размер: ' + b.toLocaleString('ru-RU') + ' байт">' + text + icon + '</span>';
+    }
+
+    function toggleSelection(path, name, type, checked, size) {
       if (checked) {
-        window.excludedSelections.delete(path);
-        // If it was excluded, checking it just removes it from exclusions
-        // But if its parent isn't selected, we must add it to orderedSelections
-        if (!isSelected(path) || window.excludedSelections.has(path)) {
-           orderedSelections.push({ path, name, type });
-        }
+        if (!isSelected(path)) orderedSelections.push({ path, name, type, size: size || 0 });
       } else {
-        const direct = orderedSelections.some(s => s.path === path);
-        if (!direct && isSelected(path)) {
-           // Parent is selected, so we add to exclusions instead of alerting
-           window.excludedSelections.add(path);
-        } else {
-           // Was directly selected, remove it
-           orderedSelections = orderedSelections.filter(s => s.path !== path);
-           // Also remove any exclusions that were children of this folder
-           if (type === 'dir') {
-             for (const ex of window.excludedSelections) {
-                if (ex.startsWith(path + '/')) window.excludedSelections.delete(ex);
-             }
-           }
-        }
+        orderedSelections = orderedSelections.filter(s => s.path !== path);
       }
       updateSelCount();
       refreshMergePanel();
-      
-      setTimeout(updateAllCheckboxes, 10);
+    }
+
+    function clearAllSelection() {
+      orderedSelections = [];
+      updateSelCount();
+      const chkAll = document.getElementById('chk-select-all');
+      if (chkAll) chkAll.checked = false;
+      refreshMergePanel();
     }
 
     function updateSelCount() {
@@ -463,7 +765,9 @@ window.addEventListener('unhandledrejection', function(e) {
       const parts = [];
       if (dirs.length) parts.push(dirs.length + ' ' + plural(dirs.length, 'папка', 'папки', 'папок'));
       if (files.length) parts.push(files.length + ' ' + plural(files.length, 'файл', 'файла', 'файлов'));
-      const text = 'Выбрано: ' + parts.join(', ');
+      const totalBytes = files.reduce((acc, f) => acc + (Number(f.size) || 0), 0);
+      const sizeSuffix = totalBytes > 0 ? ' (' + formatFileSize(totalBytes) + ')' : '';
+      const text = 'Выбрано: ' + parts.join(', ') + sizeSuffix;
       selCountEl.textContent = text;
       document.getElementById('sel-toolbar-text').textContent = text;
       scheduleResolveCount();
@@ -558,8 +862,6 @@ window.addEventListener('unhandledrejection', function(e) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             paths: orderedSelections.map(s => s.path),
-              excluded_paths: Array.from(window.excludedSelections || []),
-            excluded_paths: Array.from(window.excludedSelections || []),
             recursive: document.getElementById('recursive').checked
           })
         });
@@ -586,7 +888,7 @@ window.addEventListener('unhandledrejection', function(e) {
       const numberPages = document.getElementById('number-pages').checked;
       const btnConvert = document.getElementById('btn-server');
       const btnDownload = document.getElementById('btn-download');
-      
+      const btnPreviewDraft = document.getElementById('btn-preview-draft');
       const outNameLabel = document.querySelector('label[for="output-name"]');
       const outNameInp = document.getElementById('output-name');
       
@@ -594,12 +896,11 @@ window.addEventListener('unhandledrejection', function(e) {
       if (hasFiles) {
         btnConvert.style.display = 'inline-block';
         btnDownload.style.display = 'inline-block';
-        
-        
+        btnPreviewDraft.style.display = 'inline-block';
       } else {
         btnConvert.style.display = 'none';
         btnDownload.style.display = 'none';
-        
+        btnPreviewDraft.style.display = 'none';
       }
       
       if (mergeOn) {
@@ -644,8 +945,6 @@ window.addEventListener('unhandledrejection', function(e) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               paths: orderedSelections.map(s => s.path),
-              excluded_paths: Array.from(window.excludedSelections || []),
-            excluded_paths: Array.from(window.excludedSelections || []),
               recursive: document.getElementById('recursive').checked
             })
           });
@@ -728,6 +1027,8 @@ window.addEventListener('unhandledrejection', function(e) {
         }
         const mtime = item.mtime || (item.file && item.file.lastModified ? item.file.lastModified / 1000 : 0);
         const dateStr = mtime ? '<span style="margin-left:auto;color:#9ca3af;font-size:12px;padding-right:12px;">' + formatDate(mtime) + '</span>' : '<span style="margin-left:auto;"></span>';
+        const itemSize = item.size || (item.file && item.file.size);
+        const sizeBadge = formatSizeBadgeHtml(itemSize);
 
         row.innerHTML =
           '<span class="drag-handle" title="Перетащите">⠿</span>' +
@@ -736,7 +1037,9 @@ window.addEventListener('unhandledrejection', function(e) {
           '<button type="button" class="secondary btn-remove" data-remove="' + idx + '" title="Исключить из сборки">✕</button>' +
           '<span class="fname">' + (idx + 1) + '. ' + item.name +
           (item.format_valid === false ? ' ⚠' : (item.extension_ok === false ? ' ⚠' : '')) +
-          '</span>' + dateStr +
+          '</span>' +
+          sizeBadge +
+          dateStr +
           formatBadgeHtml(item);
 
         row.addEventListener('dragstart', (e) => {
@@ -830,7 +1133,6 @@ window.addEventListener('unhandledrejection', function(e) {
     }
 
     window.expandedDirs = new Set();
-    window.excludedSelections = new Set();
     
     async function fetchDir(path) {
       const q = path !== undefined ? ('?path=' + encodeURIComponent(path)) : '';
@@ -879,8 +1181,27 @@ window.addEventListener('unhandledrejection', function(e) {
         row.className = 'tree-item ' + e.type + (e.type === 'file' && !e.convertible ? ' disabled' : '') + (e.type === 'file' ? formatRowClass(e) : '');
         row.style.paddingLeft = (12 + level * 20) + 'px';
         
+        // Drag-and-Drop для перемещения файлов и папок
+        row.setAttribute('draggable', 'true');
+        row.addEventListener('dragstart', (ev) => {
+          let toMove = [];
+          if (isSelected(e.path)) {
+            toMove = orderedSelections.slice();
+          } else {
+            toMove = [{ path: e.path, name: e.name, type: e.type }];
+          }
+          ev.dataTransfer.setData('application/json', JSON.stringify(toMove));
+          ev.dataTransfer.setData('text/plain', e.path);
+          ev.dataTransfer.effectAllowed = 'move';
+          row.classList.add('dragging');
+        });
+        row.addEventListener('dragend', () => {
+          row.classList.remove('dragging');
+          document.querySelectorAll('.drag-over-folder').forEach(el => el.classList.remove('drag-over-folder'));
+        });
+        
         const checked = sel ? 'checked' : '';
-        const cb = '<input type="checkbox" class="chk-box" data-path="' + escapeHtml(e.path) + '" ' + checked + ' />';
+        const cb = '<input type="checkbox" class="chk-box" ' + checked + ' />';
 
         function formatDate(m) {
           if (!m) return '';
@@ -888,7 +1209,7 @@ window.addEventListener('unhandledrejection', function(e) {
           return [String(d.getDate()).padStart(2, '0'), String(d.getMonth() + 1).padStart(2, '0'), d.getFullYear()].join('.') + ' ' +
                  [String(d.getHours()).padStart(2, '0'), String(d.getMinutes()).padStart(2, '0')].join(':');
         }
-        const dateStr = e.mtime ? '<span style="margin-left:auto;color:#9ca3af;font-size:12px;padding-right:12px;">' + formatDate(e.mtime) + '</span>' : '<span style="margin-left:auto;"></span>';
+        const dateStr = e.mtime ? formatDate(e.mtime) : '';
 
         let toggleHtml = '';
         if (e.type === 'dir') {
@@ -899,7 +1220,11 @@ window.addEventListener('unhandledrejection', function(e) {
         }
 
         if (e.type === 'dir') {
-          row.innerHTML = toggleHtml + cb + '<span class="icon">📁</span><span class="name">' + escapeHtml(e.name) + '</span>' + dateStr;
+          const folderMeta = '<div class="tree-item-meta">' +
+            '<span class="file-size-col" style="color:transparent;user-select:none;">—</span>' +
+            '<span class="file-date">' + dateStr + '</span>' +
+            '</div>';
+          row.innerHTML = toggleHtml + cb + '<span class="icon">📁</span><span class="name" title="' + escapeHtml(e.name) + '">' + escapeHtml(e.name) + '</span>' + folderMeta;
           
           const toggleEl = row.querySelector('.tree-toggle');
           const childrenContainer = document.createElement('div');
@@ -949,6 +1274,33 @@ window.addEventListener('unhandledrejection', function(e) {
             };
           }
           
+          // Обработка броска (Drop) файлов/папок в эту папку
+          row.addEventListener('dragover', (ev) => {
+            ev.preventDefault();
+            ev.dataTransfer.dropEffect = 'move';
+            row.classList.add('drag-over-folder');
+          });
+          row.addEventListener('dragleave', (ev) => {
+            if (!row.contains(ev.relatedTarget)) {
+              row.classList.remove('drag-over-folder');
+            }
+          });
+          row.addEventListener('drop', async (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            row.classList.remove('drag-over-folder');
+            const dataStr = ev.dataTransfer.getData('application/json');
+            if (!dataStr) return;
+            try {
+              const itemsToMove = JSON.parse(dataStr);
+              if (Array.isArray(itemsToMove) && itemsToMove.length > 0) {
+                await performMove(itemsToMove, e.path, e.name);
+              }
+            } catch (err) {
+              console.error('Drop error:', err);
+            }
+          });
+          
           rowWrap.appendChild(row);
           rowWrap.appendChild(childrenContainer);
           container.appendChild(rowWrap);
@@ -965,21 +1317,50 @@ window.addEventListener('unhandledrejection', function(e) {
             ? ('<a class="btn-preview" href="' + viewHref +
                '" target="_blank" rel="noopener noreferrer" title="Просмотр в новой вкладке">👁</a>')
             : '';
+          const editLink = e.convertible
+            ? ('<button type="button" class="btn-edit" title="Редактировать в визуальном редакторе PDF (порядок листов, нумерация, добавление страниц)">✏️</button>')
+            : '';
+          const b = Number(e.size) || 0;
+          let sizeCls = '';
+          if (b >= 100 * 1024 * 1024) {
+            sizeCls = ' size-huge';
+          } else if (b >= 30 * 1024 * 1024) {
+            sizeCls = ' size-large';
+          }
+          const sizeText = formatFileSizeSimple(e.size);
+          const sizeHtml = sizeText
+            ? ('<span class="file-size-col' + sizeCls + '" title="Точный размер: ' + b.toLocaleString('ru-RU') + ' байт">' + sizeText + '</span>')
+            : '<span class="file-size-col" style="color:transparent;user-select:none;">—</span>';
+
+          const fileMeta = '<div class="tree-item-meta">' +
+            sizeHtml +
+            '<span class="file-date">' + dateStr + '</span>' +
+            viewLink +
+            editLink +
+            '</div>';
+
           row.innerHTML = toggleHtml + cb + '<span class="icon">' + fileIcon + '</span>' +
             (e.convertible
               ? ('<a class="name previewable" href="' + viewHref +
-                 '" target="_blank" rel="noopener noreferrer" title="Просмотр в новой вкладке">' +
+                 '" target="_blank" rel="noopener noreferrer" title="' + escapeHtml(e.name) + ' (клик — просмотр)">' +
                  escapeHtml(e.name) + '</a>')
-              : ('<span class="name">' + escapeHtml(e.name) + '</span>')) +
-            (e.format_label ? formatBadgeHtml(e) : '') + dateStr + viewLink;
-          row.querySelectorAll('a.previewable, a.btn-preview').forEach(a => {
+              : ('<span class="name" title="' + escapeHtml(e.name) + '">' + escapeHtml(e.name) + '</span>')) +
+            (e.format_label ? formatBadgeHtml(e) : '') + fileMeta;
+          row.querySelectorAll('a.previewable, a.btn-preview, .btn-edit').forEach(a => {
             a.addEventListener('click', ev => ev.stopPropagation());
           });
+          const editBtn = row.querySelector('.btn-edit');
+          if (editBtn) {
+            editBtn.addEventListener('click', (ev) => {
+              ev.stopPropagation();
+              openInEditor([e.path]);
+            });
+          }
           const checkbox = row.querySelector('.chk-box');
           if (checkbox) {
             checkbox.onclick = ev => {
               ev.stopPropagation();
-              toggleSelection(e.path, e.name, 'file', checkbox.checked);
+              toggleSelection(e.path, e.name, 'file', checkbox.checked, e.size);
               checkbox.checked = isSelected(e.path);
             };
           }
@@ -1073,17 +1454,15 @@ window.addEventListener('unhandledrejection', function(e) {
     });
 
     document.getElementById('btn-clear-sel').onclick = () => {
-      orderedSelections = [];
-      updateSelCount();
+      clearAllSelection();
       loadTree(currentPath);
-      document.getElementById('chk-select-all').checked = false;
     };
 
     document.getElementById('chk-select-all').onchange = (e) => {
       const checked = e.target.checked;
       if (!window.currentEntries) return;
       if (checked) {
-        window.currentEntries.forEach(item => toggleSelection(item.path, item.name, item.type, true));
+        window.currentEntries.forEach(item => toggleSelection(item.path, item.name, item.type, true, item.size));
       } else {
         window.currentEntries.forEach(item => toggleSelection(item.path, item.name, item.type, false));
       }
@@ -1125,6 +1504,196 @@ window.addEventListener('unhandledrejection', function(e) {
         btnObj.innerText = originalText;
       }
     };
+
+    // --- ПЕРЕМЕЩЕНИЕ ФАЙЛОВ И ПАПОК ---
+    async function performMove(items, targetDir, targetDirName) {
+      if (!items || !items.length || !targetDir) return;
+
+      const validItems = items.filter(it => {
+        if (!it || !it.path) return false;
+        if (it.path === targetDir) return false;
+        if (targetDir.startsWith(it.path + '/')) return false;
+        const parent = it.path.substring(0, it.path.lastIndexOf('/'));
+        if (parent === targetDir) return false;
+        return true;
+      });
+
+      if (validItems.length === 0) {
+        alert('Выбранные элементы уже находятся в этой папке или нельзя переместить папку саму в себя.');
+        return;
+      }
+
+      const namesPreview = validItems.length === 1 
+        ? `«${validItems[0].name}»` 
+        : `${validItems.length} элементов`;
+
+      const folderLabel = targetDirName || targetDir.split('/').pop() || targetDir;
+      const conf = confirm(`Переместить ${namesPreview} в папку «${folderLabel}»?`);
+      if (!conf) return;
+
+      const btnMove = document.getElementById('btn-move-sel');
+      const originalText = btnMove ? btnMove.innerText : '';
+      if (btnMove) btnMove.innerText = '⏳';
+
+      try {
+        const fd = new FormData();
+        fd.append('target_dir', targetDir);
+        validItems.forEach(it => fd.append('paths', it.path));
+
+        const res = await fetch('/api/move-smb', { method: 'POST', body: fd });
+        const json = await res.json();
+
+        if (!res.ok) {
+          alert('Ошибка при перемещении: ' + (json.detail || JSON.stringify(json)));
+        } else {
+          if (json.errors && json.errors.length > 0) {
+            const errMsgs = json.errors.map(e => `${e.path.split('/').pop()}: ${e.error}`).join('\n');
+            alert('Перемещено частично.\nОшибки:\n' + errMsgs);
+          }
+          if (json.moved) {
+            const movedFrom = json.moved.map(m => m.from);
+            orderedSelections = orderedSelections.filter(s => !movedFrom.includes(s.path));
+            updateSelCount();
+          }
+          loadTree(currentPath);
+        }
+      } catch (err) {
+        alert('Ошибка сети: ' + err.message);
+      } finally {
+        if (btnMove) btnMove.innerText = originalText;
+      }
+    }
+
+    // Поддержка перетаскивания (Drop) на кнопку "Наверх"
+    const treeUpEl = document.getElementById('tree-up');
+    if (treeUpEl) {
+      treeUpEl.addEventListener('dragover', (ev) => {
+        if (window.currentTreeData && window.currentTreeData.parent) {
+          ev.preventDefault();
+          ev.dataTransfer.dropEffect = 'move';
+          treeUpEl.classList.add('drag-over-folder');
+        }
+      });
+      treeUpEl.addEventListener('dragleave', () => treeUpEl.classList.remove('drag-over-folder'));
+      treeUpEl.addEventListener('drop', async (ev) => {
+        ev.preventDefault();
+        treeUpEl.classList.remove('drag-over-folder');
+        const parentPath = window.currentTreeData && window.currentTreeData.parent;
+        if (!parentPath) return;
+        const dataStr = ev.dataTransfer.getData('application/json');
+        if (!dataStr) return;
+        try {
+          const itemsToMove = JSON.parse(dataStr);
+          if (Array.isArray(itemsToMove) && itemsToMove.length > 0) {
+            await performMove(itemsToMove, parentPath, 'родительскую папку (наверх)');
+          }
+        } catch (err) {
+          console.error('Tree up drop error:', err);
+        }
+      });
+    }
+
+    // Логика модального окна выбора папки для перемещения
+    const modalMove = document.getElementById('modal-move');
+    const moveTreeEl = document.getElementById('move-modal-tree');
+    const moveTargetEl = document.getElementById('move-modal-target-path');
+    const moveInfoEl = document.getElementById('move-modal-items-info');
+    let selectedMoveTargetDir = null;
+
+    function openMoveModal() {
+      if (orderedSelections.length === 0) {
+        alert('Сначала выберите файлы или папки для перемещения!');
+        return;
+      }
+      moveInfoEl.textContent = `Выбрано для перемещения: ${orderedSelections.length} шт. (${orderedSelections.map(s => s.name).slice(0, 3).join(', ')}${orderedSelections.length > 3 ? '...' : ''})`;
+      selectedMoveTargetDir = currentPath;
+      moveTargetEl.textContent = selectedMoveTargetDir || '/';
+      modalMove.style.display = 'flex';
+      loadMoveModalFolders();
+    }
+
+    function closeMoveModal() {
+      modalMove.style.display = 'none';
+      selectedMoveTargetDir = null;
+    }
+
+    document.getElementById('btn-move-sel').addEventListener('click', openMoveModal);
+    document.getElementById('btn-close-move-modal').addEventListener('click', closeMoveModal);
+    document.getElementById('btn-cancel-move').addEventListener('click', closeMoveModal);
+
+    document.getElementById('btn-confirm-move').addEventListener('click', async () => {
+      if (!selectedMoveTargetDir) {
+        alert('Выберите папку назначения!');
+        return;
+      }
+      const targetDir = selectedMoveTargetDir;
+      closeMoveModal();
+      await performMove(orderedSelections, targetDir, targetDir.split('/').pop());
+    });
+
+    async function loadMoveModalFolders() {
+      moveTreeEl.innerHTML = '<div style="color:#64748b; padding:8px;">Загрузка структуры папок…</div>';
+      try {
+        const rootPath = (window.currentTreeData && window.currentTreeData.base) || '/data/smb/default';
+        const res = await fetchDir(rootPath);
+        moveTreeEl.innerHTML = '';
+
+        const rootItem = document.createElement('div');
+        rootItem.className = 'modal-move-folder-item' + (selectedMoveTargetDir === rootPath ? ' selected' : '');
+        rootItem.innerHTML = '<span>📁</span> <b>[Корень сетевой папки]</b>';
+        rootItem.onclick = () => {
+          selectedMoveTargetDir = rootPath;
+          moveTargetEl.textContent = rootPath;
+          document.querySelectorAll('.modal-move-folder-item').forEach(el => el.classList.remove('selected'));
+          rootItem.classList.add('selected');
+        };
+        moveTreeEl.appendChild(rootItem);
+
+        async function renderModalDirs(entries, container, level) {
+          const dirs = (entries || []).filter(e => e.type === 'dir');
+          for (const d of dirs) {
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'modal-move-folder-item' + (selectedMoveTargetDir === d.path ? ' selected' : '');
+            itemDiv.style.paddingLeft = (12 + level * 18) + 'px';
+            itemDiv.innerHTML = '<span style="font-size:14px;">📁</span> <span>' + escapeHtml(d.name) + '</span>';
+            
+            const subContainer = document.createElement('div');
+            subContainer.style.display = 'none';
+
+            itemDiv.onclick = async (ev) => {
+              ev.stopPropagation();
+              selectedMoveTargetDir = d.path;
+              moveTargetEl.textContent = d.path;
+              document.querySelectorAll('.modal-move-folder-item').forEach(el => el.classList.remove('selected'));
+              itemDiv.classList.add('selected');
+
+              if (subContainer.style.display === 'none') {
+                if (!subContainer.hasChildNodes()) {
+                  subContainer.innerHTML = '<div style="padding-left:' + (28 + level * 18) + 'px; color:#64748b; font-size:12px;">Загрузка…</div>';
+                  subContainer.style.display = 'block';
+                  try {
+                    const subRes = await fetchDir(d.path);
+                    subContainer.innerHTML = '';
+                    await renderModalDirs(subRes.entries, subContainer, level + 1);
+                  } catch (e) {
+                    subContainer.innerHTML = '';
+                  }
+                } else {
+                  subContainer.style.display = 'block';
+                }
+              }
+            };
+
+            container.appendChild(itemDiv);
+            container.appendChild(subContainer);
+          }
+        }
+
+        await renderModalDirs(res.entries, moveTreeEl, 0);
+      } catch (err) {
+        moveTreeEl.innerHTML = '<div style="color:#f87171; padding:8px;">Ошибка: ' + escapeHtml(err.message) + '</div>';
+      }
+    }
 
 
     function handleUploadSelect(files) {
@@ -1425,12 +1994,74 @@ window.addEventListener('unhandledrejection', function(e) {
       } catch (_) { /* ignore */ }
     }
 
+    function updateProgressBar(j) {
+      const card = document.getElementById('progress-card');
+      const title = document.getElementById('progress-stage-title');
+      const pctVal = document.getElementById('progress-percent-val');
+      const fill = document.getElementById('progress-bar-fill');
+      const detail = document.getElementById('progress-detail-text');
+      const eta = document.getElementById('progress-eta-text');
+      if (!card || !title || !fill) return;
+
+      if (!j) {
+        card.style.display = 'none';
+        return;
+      }
+
+      card.style.display = 'block';
+
+      if (j.status === 'queued') {
+        title.textContent = (j.queue_position && j.queue_position > 1) ? ('В очереди (позиция ' + j.queue_position + ')…') : 'Ожидание запуска…';
+        pctVal.textContent = '0%';
+        fill.style.width = '2%';
+        fill.className = 'progress-bar-fill';
+        detail.textContent = 'Задание ожидает освобождения конвертера';
+        eta.textContent = '';
+        return;
+      }
+
+      if (j.status === 'running') {
+        const pct = Math.max(3, Math.min(98, j.progress_pct || 15));
+        fill.style.width = pct + '%';
+        fill.className = 'progress-bar-fill';
+        pctVal.textContent = pct + '%';
+        title.textContent = j.progress_stage || 'Конвертация чертежа…';
+        
+        let detailStr = '';
+        if (j.current_file) detailStr += j.current_file;
+        if (j.total_sheets > 0) detailStr += (detailStr ? ' • ' : '') + 'Лист ' + (j.current_sheet || 0) + ' из ' + j.total_sheets;
+        else if (j.total_files > 1) detailStr += (detailStr ? ' • ' : '') + 'Файл ' + (j.current_file_idx || 1) + ' из ' + j.total_files;
+        detail.textContent = detailStr || (j.progress_stage || 'Обработка данных AutoCAD…');
+
+        if (j.eta_sec && j.eta_sec > 0) {
+          const m = Math.floor(j.eta_sec / 60);
+          const s = j.eta_sec % 60;
+          eta.textContent = 'Осталось: ~' + (m > 0 ? (m + ' мин ' + s + ' сек') : (s + ' сек'));
+        } else {
+          eta.textContent = '';
+        }
+      } else if (j.status === 'done') {
+        fill.style.width = '100%';
+        fill.className = 'progress-bar-fill success';
+        pctVal.textContent = '100%';
+        title.textContent = 'Готово!';
+        detail.textContent = 'Конвертация успешно завершена';
+        eta.textContent = '';
+      } else if (j.status === 'error' || j.status === 'cancelled') {
+        fill.className = 'progress-bar-fill error';
+        pctVal.textContent = j.status === 'cancelled' ? 'Отмена' : 'Ошибка';
+        title.textContent = j.status === 'cancelled' ? 'Отменено пользователем' : 'Ошибка конвертации';
+        detail.textContent = (j.error || '').slice(0, 100);
+        eta.textContent = '';
+      }
+    }
+
     async function pollConvertJob(jobId) {
       setActiveJob(jobId);
       try {
-        for (let i = 0; i < 900; i++) {
+        for (let i = 0; i < 1800; i++) {
           if (pollAbort) throw new Error('Отменено пользователем');
-          await new Promise(r => setTimeout(r, 2000));
+          await new Promise(r => setTimeout(r, 1200));
           if (pollAbort) throw new Error('Отменено пользователем');
           let r;
           try {
@@ -1441,6 +2072,9 @@ window.addEventListener('unhandledrejection', function(e) {
           if (r.status === 502 || r.status === 503) continue;
           const j = await r.json();
           if (!r.ok) throw new Error(j.detail || JSON.stringify(j));
+          
+          updateProgressBar(j);
+
           if (j.status === 'queued' && j.queue_position > 0) {
             const qmsg = j.queue_position === 1
               ? 'Следующий в очереди…'
@@ -1448,7 +2082,14 @@ window.addEventListener('unhandledrejection', function(e) {
             showLog((logWork.textContent || '').split('\n')[0] + '\n' + qmsg);
           }
           if (j.status === 'running') refreshJobsHistory();
-          if (j.status === 'done') { refreshJobsHistory(); return j.result; }
+          if (j.status === 'done') {
+            refreshJobsHistory();
+            setTimeout(() => {
+              const card = document.getElementById('progress-card');
+              if (card && activeJobId !== jobId) card.style.display = 'none';
+            }, 6000);
+            return j.result;
+          }
           if (j.status === 'cancelled') { refreshJobsHistory(); throw new Error(j.error || 'Отменено пользователем'); }
           if (j.status === 'error') { refreshJobsHistory(); throw new Error(j.error || 'Ошибка конвертации'); }
         }
@@ -1492,6 +2133,18 @@ window.addEventListener('unhandledrejection', function(e) {
 
     let progressTimer = null;
     function startProgress(baseMsg) {
+      const card = document.getElementById('progress-card');
+      if (card) {
+        card.style.display = 'block';
+        const titleEl = document.getElementById('progress-stage-title');
+        if (titleEl) titleEl.textContent = (baseMsg || '').split('\n')[0] || 'Запуск конвертации…';
+        const pctEl = document.getElementById('progress-percent-val');
+        if (pctEl) pctEl.textContent = '1%';
+        const fillEl = document.getElementById('progress-bar-fill');
+        if (fillEl) { fillEl.style.width = '2%'; fillEl.className = 'progress-bar-fill'; }
+        const detailEl = document.getElementById('progress-detail-text');
+        if (detailEl) detailEl.textContent = 'Инициализация задач и AutoCAD…';
+      }
       const t0 = Date.now();
       const tick = () => {
         const sec = Math.floor((Date.now() - t0) / 1000);
@@ -1526,7 +2179,10 @@ window.addEventListener('unhandledrejection', function(e) {
 
     function progressMessage(merge, fileCount) {
       if (merge && fileCount > 1) {
-        
+        const estMin = Math.max(1, Math.round(fileCount * 1.5));
+        const estMax = Math.max(estMin + 1, Math.round(fileCount * 1.75));
+        return 'Сборка ' + fileCount + ' ' + plural(fileCount, 'файла', 'файлов', 'файлов') +
+          ' в один PDF…\nОценка: ' + estMin + '–' + estMax + ' мин.\n' +
           'Word/Excel конвертируются по одному — не закрывайте страницу.';
       }
       if (fileCount > 1) {
@@ -1563,7 +2219,6 @@ window.addEventListener('unhandledrejection', function(e) {
           }
           checkPayload = {
             paths: mergeOrder.map(f => f.path),
-            excluded_paths: Array.from(window.excludedSelections || []),
             merge: true,
             output_name,
             recursive: document.getElementById('recursive').checked,
@@ -1573,7 +2228,6 @@ window.addEventListener('unhandledrejection', function(e) {
         } else if (orderedSelections.length > 0) {
           checkPayload = {
             paths: orderedSelections.map(s => s.path),
-            excluded_paths: Array.from(window.excludedSelections || []),
             merge: false,
             recursive: document.getElementById('recursive').checked,
             windows_cad_ip: winIpInput.value.trim(),
@@ -1602,7 +2256,6 @@ window.addEventListener('unhandledrejection', function(e) {
         if (merge) {
           const j = await apiPost('/api/convert-paths', {
             paths: mergeOrder.map(f => f.path),
-            excluded_paths: Array.from(window.excludedSelections || []),
             merge: true,
             output_name,
             number_pages,
@@ -1621,11 +2274,11 @@ window.addEventListener('unhandledrejection', function(e) {
             }
           }
           showLog(logMsg);
+          clearAllSelection();
         } else if (orderedSelections.length > 0) {
           const underlays = window.smbUnderlays ? Object.keys(window.smbUnderlays).filter(k => window.smbUnderlays[k]) : [];
           const j = await apiPost('/api/convert-paths', {
             paths: orderedSelections.map(s => s.path),
-            excluded_paths: Array.from(window.excludedSelections || []),
             underlay_paths: underlays,
             merge: false,
             recursive: document.getElementById('recursive').checked,
@@ -1638,6 +2291,7 @@ window.addEventListener('unhandledrejection', function(e) {
           });
           showLog('Готово: ' + j.stats.ok + ' OK, ошибок ' + j.stats.error + '\n' +
             j.files.map(f => f.status + ' | ' + f.source).join('\n'));
+          clearAllSelection();
         } else if (currentPath) {
           const underlays = window.smbUnderlays ? Object.keys(window.smbUnderlays).filter(k => window.smbUnderlays[k]) : [];
           const j = await apiPost('/api/convert-folder', {
@@ -1666,6 +2320,7 @@ window.addEventListener('unhandledrejection', function(e) {
             showLog('Готово: ' + j.stats.ok + ' файлов\n' +
               j.files.map(f => f.status + ' | ' + f.source).join('\n'));
           }
+          clearAllSelection();
         } else {
           alert('Выберите файлы/папки в дереве или откройте папку');
         }
@@ -1679,6 +2334,66 @@ window.addEventListener('unhandledrejection', function(e) {
         loadTree(currentPath);
       }
     };
+
+    async function openInEditor(paths) {
+      if (!paths || !paths.length) {
+        alert('Выберите файлы или папки для открытия в редакторе');
+        return;
+      }
+
+      startProgress(progressMessage(true, paths.length));
+      try {
+        const r = await fetch('/api/convert-draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            paths: paths,
+            merge: true,
+            output_name: 'draft.pdf',
+            recursive: document.getElementById('recursive').checked,
+            windows_cad_ip: document.getElementById('win-ip').value.trim(),
+            windows_cad_profile: document.getElementById('win-acad-profile').value.trim(),
+            smart_search: document.getElementById('smart-search').checked
+          })
+        });
+        
+        if (!r.ok) {
+            let msg = 'Ошибка подготовки черновика';
+            try { msg = (await r.json()).detail || msg; } catch(e){}
+            throw new Error(msg);
+        }
+        
+        const data = await r.json();
+        const qNum = document.getElementById('number-pages').checked ? 1 : 0;
+        const qFrom = parseInt(document.getElementById('page-start').value, 10) || 1;
+        const qStart = parseInt(document.getElementById('num-start').value, 10) || 1;
+        const cadIp = encodeURIComponent(document.getElementById('win-ip').value.trim());
+        const smart = document.getElementById('smart-search').checked ? 1 : 0;
+        window.open('/convert/editor?draft_id=' + encodeURIComponent(data.draft_id) + '&count=' + data.page_count + '&num=' + qNum + '&num_from=' + qFrom + '&num_start=' + qStart + '&cad_ip=' + cadIp + '&smart=' + smart, '_blank');
+        
+      } catch (e) {
+        alert('Ошибка открытия редактора: ' + e.message);
+      } finally {
+        stopProgress();
+      }
+    }
+
+    document.getElementById('btn-preview-draft').onclick = () => {
+      const pathsToPreview = (mergeOrder && mergeOrder.length) 
+        ? mergeOrder.map(f => f.path) 
+        : orderedSelections.map(s => s.path);
+      openInEditor(pathsToPreview);
+    };
+
+    const btnToolbarEdit = document.getElementById('btn-toolbar-edit');
+    if (btnToolbarEdit) {
+      btnToolbarEdit.onclick = () => {
+        const pathsToPreview = (mergeOrder && mergeOrder.length) 
+          ? mergeOrder.map(f => f.path) 
+          : orderedSelections.map(s => s.path);
+        openInEditor(pathsToPreview);
+      };
+    }
 
     document.getElementById('btn-download').onclick = async () => {
       const merge = document.getElementById('merge').checked;
@@ -1716,7 +2431,6 @@ window.addEventListener('unhandledrejection', function(e) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               paths: mergeOrder.map(f => f.path),
-            excluded_paths: Array.from(window.excludedSelections || []),
               merge: true,
               output_name,
               recursive: document.getElementById('recursive').checked,
@@ -1724,7 +2438,8 @@ window.addEventListener('unhandledrejection', function(e) {
               numbering_from_page,
               numbering_start,
               windows_cad_ip: winIpInput.value.trim(),
-              windows_cad_profile: document.getElementById('win-acad-profile').value.trim()
+              windows_cad_profile: document.getElementById('win-acad-profile').value.trim(),
+              smart_search: document.getElementById('smart-search').checked
             })
           });
           if (!r.ok) {
@@ -1739,10 +2454,11 @@ window.addEventListener('unhandledrejection', function(e) {
           a.download = output_name.endsWith('.pdf') ? output_name : output_name + '.pdf';
           a.click();
           URL.revokeObjectURL(a.href);
-          showLog('Сборка PDF скачана' + numberingLog({
+           showLog('Сборка PDF скачана' + numberingLog({
             numbering_from_page: number_pages ? numbering_from_page : null,
             numbering_start: number_pages ? numbering_start : null
           }));
+          clearAllSelection();
         } else if (merge && hasUpload) {
           const filesToSend = uploadFiles;
           if (filesToSend.length > maxMerge) { alert('Максимум ' + maxMerge + ' файлов'); return; }
@@ -1763,6 +2479,7 @@ window.addEventListener('unhandledrejection', function(e) {
           }
           fd.append('windows_cad_ip', winIpInput.value.trim());
           fd.append('windows_cad_profile', document.getElementById('win-acad-profile').value.trim());
+          fd.append('smart_search', document.getElementById('smart-search').checked ? 'true' : 'false');
           fd.append('output_name', output_name);
           const r = await fetch('/api/convert-local-workspace', { method: 'POST', body: fd });
           if (!r.ok) { showLog(await r.text()); return; }
@@ -1775,6 +2492,8 @@ window.addEventListener('unhandledrejection', function(e) {
             numbering_from_page: number_pages ? numbering_from_page : null,
             numbering_start: number_pages ? numbering_start : null
           }));
+          uploadFiles = [];
+          updateUploadCount();
         } else {
           // БЕЗ СБОРКИ (одиночные файлы)
           
@@ -1785,8 +2504,6 @@ window.addEventListener('unhandledrejection', function(e) {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 paths: orderedSelections.map(s => s.path),
-              excluded_paths: Array.from(window.excludedSelections || []),
-            excluded_paths: Array.from(window.excludedSelections || []),
                 recursive: document.getElementById('recursive').checked
               })
             });
@@ -1805,7 +2522,8 @@ window.addEventListener('unhandledrejection', function(e) {
                      numbering_from_page,
                      numbering_start,
                      windows_cad_ip: winIpInput.value.trim(),
-                     windows_cad_profile: document.getElementById('win-acad-profile').value.trim()
+                     windows_cad_profile: document.getElementById('win-acad-profile').value.trim(),
+                     smart_search: document.getElementById('smart-search').checked
                    })
                  });
                  if (res.ok) {
@@ -1820,6 +2538,7 @@ window.addEventListener('unhandledrejection', function(e) {
                    showLog(`Ошибка скачивания ${f.name}`);
                  }
                }
+               clearAllSelection();
             }
           }
           
@@ -1841,6 +2560,7 @@ window.addEventListener('unhandledrejection', function(e) {
             }
             fd.append('windows_cad_ip', winIpInput.value.trim());
             fd.append('windows_cad_profile', document.getElementById('win-acad-profile').value.trim());
+            fd.append('smart_search', document.getElementById('smart-search').checked ? 'true' : 'false');
             const res = await fetch('/api/convert-local-workspace', { method: 'POST', body: fd });
             if (res.ok) {
               const blob = await res.blob();
@@ -1854,6 +2574,8 @@ window.addEventListener('unhandledrejection', function(e) {
               a.download = filename;
               a.click();
               URL.revokeObjectURL(a.href);
+              uploadFiles = [];
+              updateUploadCount();
               await new Promise(resolve => setTimeout(resolve, 800));
             } else {
               showLog(`Ошибка конвертации локальных файлов: ` + await res.text());
@@ -2132,6 +2854,49 @@ window.addEventListener('unhandledrejection', function(e) {
         }
       } catch (e) {}
     }
+
+    // Инициализация перетаскиваемого разделителя колонок (Grid Splitter)
+    (function initGridSplitter() {
+      const splitter = document.getElementById('grid-splitter');
+      const treePanel = document.querySelector('.work-grid > .tree-panel');
+      const workGrid = document.querySelector('.work-grid');
+      if (!splitter || !treePanel || !workGrid) return;
+
+      const savedWidth = localStorage.getItem('treePanelWidthPct');
+      if (savedWidth && window.innerWidth > 900) {
+        treePanel.style.flex = '0 0 ' + savedWidth + '%';
+      }
+
+      let isDragging = false;
+
+      splitter.addEventListener('mousedown', (e) => {
+        if (window.innerWidth <= 900) return;
+        isDragging = true;
+        splitter.classList.add('active');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const gridRect = workGrid.getBoundingClientRect();
+        const newWidth = e.clientX - gridRect.left;
+        let pct = (newWidth / gridRect.width) * 100;
+        if (pct < 25) pct = 25;
+        if (pct > 85) pct = 85;
+        treePanel.style.flex = '0 0 ' + pct.toFixed(1) + '%';
+        localStorage.setItem('treePanelWidthPct', pct.toFixed(1));
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (!isDragging) return;
+        isDragging = false;
+        splitter.classList.remove('active');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      });
+    })();
 
     loadTree('');
     refreshSmb();

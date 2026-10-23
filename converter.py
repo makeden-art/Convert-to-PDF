@@ -72,6 +72,15 @@ SUPPORTED_CAD = CAD_EXTENSIONS
 
 SUPPORTED_ALL = SUPPORTED_OFFICE | SUPPORTED_CAD | {".pdf"}
 
+def _safe_update_job(job_id: str | None, **kwargs) -> None:
+    if not job_id:
+        return
+    try:
+        from convert_jobs import update_job_progress
+        update_job_progress(job_id, **kwargs)
+    except Exception:
+        pass
+
 
 
 
@@ -636,7 +645,7 @@ CONVERT_ISOLATE = os.getenv("CONVERT_ISOLATE", "1").strip().lower() in ("1", "tr
 
 FILE_CONVERT_TIMEOUT_SEC = int(os.getenv("CONVERT_FILE_TIMEOUT_SEC", "300"))
 
-CAD_CONVERT_TIMEOUT_SEC = int(os.getenv("CONVERT_CAD_TIMEOUT_SEC", "1800"))
+CAD_CONVERT_TIMEOUT_SEC = int(os.getenv("CONVERT_CAD_TIMEOUT_SEC", "3600"))
 
 CONVERT_CHILD_MEM_MB = int(os.getenv("CONVERT_CHILD_MEM_MB", "4096"))
 
@@ -1316,7 +1325,128 @@ def _smb_delete(virtual_path: Path, is_dir: bool):
 
 
 
+def _smb_move(src_virtual_path: Path, dst_virtual_dir: Path) -> Path:
+
+    """Переместить файл или папку на SMB в целевой каталог."""
+
+    base = _smb_mount_base()
+
+    share_prefix = _smb_share_path_prefix()
+
+
+
+    rel_src = src_virtual_path.resolve().relative_to(base)
+
+    src_remote = _join_remote_dir(share_prefix, str(rel_src)) if share_prefix else str(rel_src)
+
+    src_remote = src_remote.replace("/", "\\")
+
+
+
+    dst_virtual_path = dst_virtual_dir / src_virtual_path.name
+
+    rel_dst = dst_virtual_path.resolve().relative_to(base)
+
+    dst_remote = _join_remote_dir(share_prefix, str(rel_dst)) if share_prefix else str(rel_dst)
+
+    dst_remote = dst_remote.replace("/", "\\")
+
+
+
+    if src_remote.lower() == dst_remote.lower():
+
+        return dst_virtual_path
+
+
+
+    quoted_src = src_remote.replace('"', '\\"')
+
+    quoted_dst = dst_remote.replace('"', '\\"')
+
+
+
+    cmd = f'rename "{quoted_src}" "{quoted_dst}"'
+
+    try:
+
+        _run_smbclient("", cmd, timeout=30)
+
+    except ValueError as e:
+
+        err_str = str(e)
+
+        if "OBJECT_NAME_COLLISION" in err_str or "ALREADY_EXISTS" in err_str.upper():
+
+            raise ValueError(f"В папке назначения уже есть элемент с именем '{src_virtual_path.name}'") from e
+
+        if "ACCESS_DENIED" in err_str:
+
+            raise ValueError("Нет прав доступа на перемещение объекта в SMB") from e
+
+        raise
+
+    return dst_virtual_path
+
+
+
+def move_path(src_str: str, dst_dir_str: str) -> str:
+
+    """Переместить файл или папку src_str в каталог dst_dir_str."""
+
+    src = Path(src_str).expanduser().resolve()
+
+    dst_dir = Path(dst_dir_str).expanduser().resolve()
+
+    _ensure_under_allowed_roots(src)
+
+    _ensure_under_allowed_roots(dst_dir)
+
+
+
+    if src == dst_dir or src.parent == dst_dir:
+
+        return str(src)
+
+
+
+    try:
+
+        if dst_dir == src or dst_dir.is_relative_to(src):
+
+            raise ValueError("Нельзя переместить папку внутрь самой себя")
+
+    except AttributeError:
+
+        pass
+
+
+
+    if _is_smb_path(src):
+
+        if not _is_smb_path(dst_dir):
+
+            raise ValueError("Нельзя перемещать файлы между SMB и локальным диском")
+
+        res = _smb_move(src, dst_dir)
+
+        return str(res)
+
+    else:
+
+        dst_target = dst_dir / src.name
+
+        if dst_target.exists():
+
+            raise ValueError(f"В папке назначения уже есть элемент с именем '{src.name}'")
+
+        shutil.move(str(src), str(dst_target))
+
+        return str(dst_target)
+
+
+
 def _smb_put_file(local_path: Path, virtual_path: Path) -> Path:
+
 
     """Загрузить файл на SMB. Возвращает фактический путь (может отличаться при блокировке)."""
 
@@ -1706,107 +1836,77 @@ def convert_paths(
     numbering_start: int = 1,
     underlay_paths: list[str] | None = None,
     smart_search: bool = False,
+    job_id: str | None = None,
 ) -> dict:
-
     """Конвертировать выбранные файлы и папки на сервере."""
-
     inputs = resolve_ordered_inputs(paths, recursive=recursive, excluded_paths=excluded_paths)
-
     
-
     if underlay_paths:
-
         u_paths = [Path(u).expanduser().resolve() for u in underlay_paths]
-
         filtered = []
-
         for f in inputs:
-
             is_u = False
-
             for u in u_paths:
-
                 try:
-
                     f.relative_to(u)
-
                     is_u = True
-
                     break
-
                 except ValueError:
-
                     if f == u:
-
                         is_u = True
-
                         break
-
             if not is_u:
-
                 filtered.append(f)
-
         inputs = filtered
 
-
+    total_files = len(inputs)
+    _safe_update_job(job_id, total_files=total_files, current_file_idx=0, progress_pct=5, progress_stage="Подготовка файлов к конвертации...")
 
     if merge:
-
         folder = inputs[0].parent
-
         from_page = numbering_from_page if number_pages else None
-
         start_num = numbering_start if number_pages else 1
-
         return _convert_folder_merged(
-
             folder,
-
             inputs,
-
             output_name,
-
             recursive=False,
-
             windows_cad_ip=windows_cad_ip,
-
             windows_cad_profile=windows_cad_profile,
-
             numbering_from_page=from_page,
-
             numbering_start=start_num,
-
+            smart_search=smart_search,
+            job_id=job_id,
         )
-
-
 
     results = []
-
     stats = {"ok": 0, "skipped": 0, "error": 0}
-
-    for src in inputs:
-
+    for idx, src in enumerate(inputs, start=1):
         check_cancelled()
-
-        item = convert_file_in_place(
-
-            src, 
-
-            windows_cad_ip=windows_cad_ip,
-
-            windows_cad_profile=windows_cad_profile,
-
-            number_pages=number_pages,
-
-            numbering_from_page=numbering_from_page,
-
-            numbering_start=numbering_start
-
+        file_pct = int((idx - 1) / max(1, total_files) * 85) + 5
+        _safe_update_job(
+            job_id,
+            current_file_idx=idx,
+            total_files=total_files,
+            current_file=src.name,
+            progress_stage=f"Конвертация: {src.name} ({idx} из {total_files})",
+            progress_pct=file_pct
         )
-
+        item = convert_file_in_place(
+            src, 
+            windows_cad_ip=windows_cad_ip,
+            windows_cad_profile=windows_cad_profile,
+            number_pages=number_pages,
+            numbering_from_page=numbering_from_page,
+            numbering_start=numbering_start,
+            smart_search=smart_search,
+            job_id=job_id,
+        )
+        check_cancelled()
         results.append(item)
-
         stats[item["status"]] = stats.get(item["status"], 0) + 1
+
+    _safe_update_job(job_id, progress_stage="Конвертация успешно завершена!", progress_pct=100, eta_sec=0)
 
 
 
@@ -2089,39 +2189,34 @@ def _apply_pdf_numbering(path: Path, *, from_page: int, start: int) -> None:
 
 
 def _run_merge_parts(
-
-    inputs: list[Path], tmp: Path, windows_cad_ip: str = "", windows_cad_profile: str = ""
-
+    inputs: list[Path], tmp: Path, windows_cad_ip: str = "", windows_cad_profile: str = "", smart_search: bool = False, job_id: str | None = None
 ) -> list[tuple[int, Path | None, dict]]:
-
     """Конвертация частей сборки: по умолчанию последовательно (экономия RAM)."""
-
     workers = min(MERGE_WORKERS, len(inputs))
-
+    total_files = len(inputs)
     part_results: list[tuple[int, Path | None, dict]] = []
 
     if workers <= 1:
-
-        for idx, src in enumerate(inputs):
-
+        for idx, src in enumerate(inputs, start=1):
             check_cancelled()
-
-            part_results.append(_convert_merge_part(idx, src, tmp, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile))
-
+            file_pct = int((idx - 1) / max(1, total_files) * 85) + 5
+            _safe_update_job(
+                job_id,
+                current_file_idx=idx,
+                total_files=total_files,
+                current_file=src.name,
+                progress_stage=f"Конвертация в сборку: {src.name} ({idx} из {total_files})",
+                progress_pct=file_pct
+            )
+            part_results.append(_convert_merge_part(idx - 1, src, tmp, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile, smart_search=smart_search, job_id=job_id))
             release_memory()
-
         return part_results
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
-
-        futs = [ex.submit(_convert_merge_part, idx, src, tmp, windows_cad_ip, windows_cad_profile) for idx, src in enumerate(inputs)]
-
+        futs = [ex.submit(_convert_merge_part, idx, src, tmp, windows_cad_ip, windows_cad_profile, smart_search, job_id) for idx, src in enumerate(inputs)]
         for fut in futs:
-
             check_cancelled()
-
             part_results.append(fut.result())
-
             release_memory()
 
     return part_results
@@ -2262,21 +2357,16 @@ def convert_file_to_pdf_isolated(src: Path, dest: Path, windows_cad_ip: str = ""
 
 
 
-def _convert_local_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None, original_src: Path = None, windows_cad_profile: str = "", smart_search: bool = False) -> dict | None:
-
+def _convert_local_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None, original_src: Path = None, windows_cad_profile: str = "", smart_search: bool = False, job_id: str = None) -> dict | None:
+    suffix = src.suffix.lower()
+    if suffix in SUPPORTED_CAD:
+        return convert_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path, original_src=original_src, windows_cad_profile=windows_cad_profile, smart_search=smart_search, job_id=job_id)
     if CONVERT_ISOLATE:
-
         return convert_file_to_pdf_isolated(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path, original_src=original_src, windows_cad_profile=windows_cad_profile, smart_search=smart_search)
-
     else:
+        return convert_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path, original_src=original_src, windows_cad_profile=windows_cad_profile, smart_search=smart_search, job_id=job_id)
 
-        return convert_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, dsd_path=dsd_path, original_src=original_src, windows_cad_profile=windows_cad_profile, smart_search=smart_search)
-
-
-
-
-
-def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None, original_src: Path = None, windows_cad_profile: str = "", smart_search: bool = False) -> dict | None:
+def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_path: str = None, original_src: Path = None, windows_cad_profile: str = "", smart_search: bool = False, job_id: str = None) -> dict | None:
 
     """Конвертировать один локальный файл в указанный PDF. Для CAD возвращает meta."""
 
@@ -2384,6 +2474,11 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
 
 
 
+            orig_name = Path(original_src).name if original_src else src.name
+            fname_lower = orig_name.lower()
+            if "_model" in fname_lower or "модель" in fname_lower or "поперечник" in fname_lower:
+                smart_search = True
+
             with _cad_sem:
 
                 pdf_tmp, cad_meta = convert_cad_to_pdf(
@@ -2395,7 +2490,9 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
                         "smb_dwg_path": smb_dwg_path,
                         "smb_user": smb_user,
                         "smb_pass": smb_pass,
-                        "smart_search": smart_search
+                        "smart_search": smart_search,
+                        "job_id": job_id,
+                        "original_filename": orig_name
                     }
                 )
 
@@ -2487,7 +2584,7 @@ def convert_file_to_pdf(src: Path, dest: Path, windows_cad_ip: str = "", dsd_pat
 
 
 
-def _convert_source_to_temp_pdf(src: Path, dest: Path, windows_cad_ip: str = "", windows_cad_profile: str = "") -> dict | None:
+def _convert_source_to_temp_pdf(src: Path, dest: Path, windows_cad_ip: str = "", windows_cad_profile: str = "", smart_search: bool = False, job_id: str | None = None) -> dict | None:
 
     """Конвертировать файл с сервера (локальный или SMB) во временный PDF."""
 
@@ -2495,9 +2592,9 @@ def _convert_source_to_temp_pdf(src: Path, dest: Path, windows_cad_ip: str = "",
 
         with _smb_local_file(src) as local_src:
 
-            return _convert_local_file_to_pdf(local_src, dest, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile, original_src=src)
+            return _convert_local_file_to_pdf(local_src, dest, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile, original_src=src, smart_search=smart_search, job_id=job_id)
 
-    return _convert_local_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile)
+    return _convert_local_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile, smart_search=smart_search, job_id=job_id)
 
 
 
@@ -2522,21 +2619,14 @@ def _save_merged_pdf(local_pdf: Path, dest: Path) -> Path:
 
 
 def convert_file_in_place(
-
     src: Path,
-
     windows_cad_ip: str = "",
-
     number_pages: bool = False,
-
     numbering_from_page: int | None = None,
-
     numbering_start: int = 1,
-
     windows_cad_profile: str = "",
-
     smart_search: bool = False,
-
+    job_id: str | None = None,
 ) -> dict:
 
     """Конвертирует файл и кладёт PDF в ту же папку: doc.docx → doc.pdf."""
@@ -2637,7 +2727,7 @@ def convert_file_in_place(
 
                 tmp_pdf = local_src.with_suffix(".pdf")
 
-                cad_meta = _convert_local_file_to_pdf(local_src, tmp_pdf, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile, original_src=src, smart_search=smart_search)
+                cad_meta = _convert_local_file_to_pdf(local_src, tmp_pdf, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile, original_src=src, smart_search=smart_search, job_id=job_id)
 
                 if number_pages and tmp_pdf.exists():
 
@@ -2647,7 +2737,7 @@ def convert_file_in_place(
 
         else:
 
-            cad_meta = _convert_local_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile, smart_search=smart_search)
+            cad_meta = _convert_local_file_to_pdf(src, dest, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile, smart_search=smart_search, job_id=job_id)
 
             if number_pages and dest.exists():
 
@@ -2693,18 +2783,17 @@ def convert_file_in_place(
 
         }
 
+    except JobCancelledError:
+        raise
     except Exception as e:
-
+        from job_control import is_cancelled
+        if is_cancelled(job_id):
+            raise JobCancelledError("Отменено пользователем")
         return {
-
             "source": str(src),
-
             "pdf": None,
-
             "status": "error",
-
             "message": str(e),
-
         }
 
 
@@ -3081,51 +3170,29 @@ def convert_folder(
 
 
 
-def _convert_merge_part(idx: int, src: Path, tmp: Path, windows_cad_ip: str = "", windows_cad_profile: str = "") -> tuple[int, Path | None, dict]:
-
+def _convert_merge_part(idx: int, src: Path, tmp: Path, windows_cad_ip: str = "", windows_cad_profile: str = "", smart_search: bool = False, job_id: str | None = None) -> tuple[int, Path | None, dict]:
     part = tmp / f"{idx:04d}.pdf"
-
     h = get_file_content_hash(src)
-
     cache_dir = get_local_cache_dir(src)
-
     cached_pdf = cache_dir / f"{h}.pdf"
 
-
-
     # Пытаемся взять готовый PDF из локального кэша
-
     if cached_pdf.exists():
-
         try:
-
             shutil.copy2(cached_pdf, part)
-
             return idx, part, {
-
                 "source": str(src),
-
                 "pdf": str(part),
-
                 "status": "ok",
-
                 "message": "Включён в сборку (из кэша)",
-
                 "hash": h,
-
             }
-
         except Exception:
-
             pass
 
-
-
     # Стандартная конвертация
-
     try:
-
-        _convert_source_to_temp_pdf(src, part, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile)
+        _convert_source_to_temp_pdf(src, part, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile, smart_search=smart_search, job_id=job_id)
 
         # Сохраняем результат в кэш для последующих сборок
 
@@ -3172,27 +3239,18 @@ def _convert_merge_part(idx: int, src: Path, tmp: Path, windows_cad_ip: str = ""
 
 
 def _convert_folder_merged(
-
     folder: Path,
-
     inputs: list[Path],
-
     output_name: str,
-
     recursive: bool,
-
     *,
-
     windows_cad_ip: str = "",
-
     windows_cad_profile: str = "",
-
     numbering_from_page: int | None = None,
-
     numbering_start: int = 1,
-
     download_to: Path | None = None,
-
+    smart_search: bool = False,
+    job_id: str | None = None,
 ) -> dict:
 
     if not inputs:
@@ -3225,7 +3283,7 @@ def _convert_folder_merged(
 
     try:
 
-        part_results = _run_merge_parts(inputs, tmp, windows_cad_ip=windows_cad_ip)
+        part_results = _run_merge_parts(inputs, tmp, windows_cad_ip=windows_cad_ip, windows_cad_profile=windows_cad_profile, smart_search=smart_search, job_id=job_id)
 
 
 
@@ -3270,17 +3328,12 @@ def _convert_folder_merged(
 
 
         check_cancelled()
-
+        _safe_update_job(job_id, progress_stage=f"Объединение страниц в {safe_name}...", progress_pct=92)
         merge_pdfs(
-
             pdf_parts,
-
             local_merged,
-
             numbering_from_page=numbering_from_page,
-
             numbering_start=numbering_start,
-
         )
 
         if download_to:
@@ -3376,9 +3429,7 @@ def _convert_folder_merged(
         results.clear()
 
         release_memory()
-
-        
-
+    _safe_update_job(job_id, progress_stage=f"Сборка {safe_name} успешно завершена!", progress_pct=100, eta_sec=0)
     return ret
 
 
@@ -3397,6 +3448,8 @@ def convert_paths_merged_download(
     numbering_start: int = 1,
 
     windows_cad_ip: str = "",
+
+    smart_search: bool = False,
 
 ) -> tuple[Path, Path, dict]:
 
@@ -3435,6 +3488,8 @@ def convert_paths_merged_download(
         numbering_start=numbering_start,
 
         download_to=dest,
+
+        smart_search=smart_search,
 
     )
 

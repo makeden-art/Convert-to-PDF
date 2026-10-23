@@ -324,7 +324,9 @@ def resolve_view_document(path: str, variant: str = "source") -> tuple[Path, Pat
         tmp = Path(tempfile.mkdtemp(prefix="view_cad_"))
         dest_pdf = tmp / f"{file_path.stem}.pdf"
         cad_ip = get_saved_cad_ip()
-        _convert_source_to_temp_pdf(target, dest_pdf, windows_cad_ip=cad_ip)
+        name_lower = file_path.name.lower()
+        is_model = "_model" in name_lower or "модель" in name_lower or "поперечник" in name_lower
+        _convert_source_to_temp_pdf(target, dest_pdf, windows_cad_ip=cad_ip, smart_search=is_model)
         if not dest_pdf.exists():
             raise RuntimeError("Не удалось сгенерировать PDF предпросмотра через AutoCAD")
         return dest_pdf, tmp

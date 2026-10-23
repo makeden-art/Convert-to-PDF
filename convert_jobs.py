@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from converter import release_memory
-from stats import update_stats_from_result
+try:
+    from stats import update_stats_from_result
+except ImportError:
+    def update_stats_from_result(result: Any) -> None:
+        pass
 from job_control import (
     JobCancelledError,
     begin_job,
@@ -122,6 +126,11 @@ def _update_job(job_id: str, **fields: Any) -> None:
     _save_history()
 
 
+def update_job_progress(job_id: str, **fields: Any) -> None:
+    """Обновить прогресс и статус задачи для отображения в UI."""
+    _update_job(job_id, **fields)
+
+
 def _queue_position(job_id: str) -> int | None:
     """0 = выполняется, 1+ = место в очереди, None = завершена."""
     with _lock:
@@ -185,7 +194,12 @@ def _run_job(job_id: str) -> None:
     begin_job(job_id)
     _update_job(job_id, status="running", started=time.time())
     try:
-        result = fn()
+        import inspect
+        sig = inspect.signature(fn)
+        if len(sig.parameters) > 0:
+            result = fn(job_id)
+        else:
+            result = fn()
         if is_cancelled(job_id):
             raise JobCancelledError("Отменено пользователем")
         
@@ -297,7 +311,22 @@ def cancel_job(job_id: str) -> dict[str, Any]:
 
     if status == "running":
         kill_children()
-        return {"ok": True, "job_id": job_id, "status": "cancelling"}
+        try:
+            from cad_converter import get_saved_cad_ip
+            cad_ip = get_saved_cad_ip()
+            if cad_ip:
+                if not cad_ip.startswith("http"):
+                    cad_ip = "http://" + cad_ip
+                subprocess.run(['curl', '-s', '-X', 'POST', f"{cad_ip.rstrip('/')}/job-cancel/{job_id}"], timeout=2)
+        except Exception:
+            pass
+        _update_job(
+            job_id,
+            status="cancelled",
+            error="Отменено пользователем",
+            finished=time.time(),
+        )
+        return {"ok": True, "job_id": job_id, "status": "cancelled"}
 
     return {"ok": False, "error": f"Нельзя отменить задачу в статусе {status}"}
 

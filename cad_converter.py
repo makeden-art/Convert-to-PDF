@@ -1,11 +1,13 @@
 """Конвертация DWG/DXF в PDF через Windows CAD Server."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -36,9 +38,15 @@ def convert_cad_to_pdf(
     dsd_path = meta.get('dsd_path')
     smb_dwg_path = meta.get('smb_dwg_path')
     smart_search = meta.get('smart_search', False)
+    job_id = meta.get('job_id')
     
     tmp = Path(tempfile.mkdtemp(prefix="cad_pdf_"))
     pdf_path = tmp / f"{input_path.stem}.pdf"
+
+    original_filename = meta.get('original_filename') or input_path.name
+    fname_lower = original_filename.lower()
+    if "_model" in fname_lower or "модель" in fname_lower or "поперечник" in fname_lower:
+        smart_search = True
 
     if windows_cad_ip:
         try:
@@ -66,14 +74,76 @@ def convert_cad_to_pdf(
                 if smb_pass:
                     cmd.extend(['-F', f'smb_pass={smb_pass}'])
             else:
-                cmd.extend(['-F', f'file=@{input_path};filename=input{input_path.suffix}'])
+                upload_name = original_filename if original_filename.endswith(input_path.suffix) else f"{original_filename}{input_path.suffix}"
+                cmd.extend(['-F', f'file=@{input_path};filename={upload_name}'])
 
             if smart_search:
                 cmd.extend(['-F', 'smart_search=true'])
 
             if dsd_path and Path(dsd_path).exists():
                 cmd.extend(['-F', f'dsd_file=@{dsd_path};filename=input.dsd'])
-            res = subprocess.run(cmd, capture_output=True, text=True)
+
+            if job_id:
+                cmd.extend(['-F', f'job_id={job_id}'])
+
+            stop_poller = threading.Event()
+            def _poll_cad():
+                try:
+                    from convert_jobs import update_job_progress
+                except Exception:
+                    return
+                try:
+                    from job_control import is_cancelled
+                except Exception:
+                    def is_cancelled(_): return False
+
+                prog_url = windows_cad_ip.rstrip('/') + f'/job-progress/{job_id}'
+                cancel_url = windows_cad_ip.rstrip('/') + f'/job-cancel/{job_id}'
+                while not stop_poller.is_set():
+                    if job_id and is_cancelled(job_id):
+                        try:
+                            subprocess.run(['curl', '-s', '-X', 'POST', cancel_url], timeout=2)
+                        except Exception:
+                            pass
+                        break
+                    try:
+                        pr = subprocess.run(['curl', '-s', '--max-time', '2', prog_url], capture_output=True, text=True)
+                        if pr.returncode == 0 and pr.stdout:
+                            pdata = json.loads(pr.stdout)
+                            if pdata.get('status') == 'running':
+                                update_job_progress(
+                                    job_id,
+                                    progress_stage=pdata.get('stage_text'),
+                                    progress_pct=pdata.get('percent'),
+                                    current_sheet=pdata.get('current_sheet'),
+                                    total_sheets=pdata.get('total_sheets'),
+                                    eta_sec=pdata.get('eta_sec')
+                                )
+                    except Exception:
+                        pass
+                    stop_poller.wait(1.0)
+
+            t_poller = None
+            if job_id:
+                t_poller = threading.Thread(target=_poll_cad, daemon=True)
+                t_poller.start()
+
+            try:
+                from job_control import run_monitored, JobCancelledError
+                res = run_monitored(cmd, timeout=3600, text=True)
+            except JobCancelledError:
+                if job_id:
+                    cancel_url = windows_cad_ip.rstrip('/') + f'/job-cancel/{job_id}'
+                    try:
+                        subprocess.run(['curl', '-s', '-X', 'POST', cancel_url], timeout=2)
+                    except Exception:
+                        pass
+                raise
+            finally:
+                if t_poller:
+                    stop_poller.set()
+                    t_poller.join(timeout=0.5)
+
             http_code = res.stdout.strip()
             
             if ('200' in http_code) and pdf_path.exists() and pdf_path.stat().st_size > 0:

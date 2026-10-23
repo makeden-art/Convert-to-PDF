@@ -2,128 +2,746 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <title>Редактор документа</title>
+  <title>Редактор документа — Road Platform</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { font-family: system-ui, sans-serif; background: #0f172a; color: #e5e7eb; margin: 0; padding: 20px; }
-    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-    .header h1 { margin: 0; color: #38bdf8; font-size: 24px; }
-    .controls { display: flex; gap: 15px; align-items: center; background: #1e293b; padding: 15px; border-radius: 12px; margin-bottom: 20px; }
-    .controls input[type="number"] { width: 60px; padding: 5px; border-radius: 4px; border: 1px solid #475569; background: #0f172a; color: #fff; }
-    .btn { background: #38bdf8; color: #000; border: none; padding: 8px 16px; border-radius: 6px; font-weight: 600; cursor: pointer; }
-    .btn:hover { background: #7dd3fc; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #e5e7eb;
+      margin: 0;
+      padding: 24px;
+      min-height: 100vh;
+    }
+    
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .header-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .header h1 {
+      margin: 0;
+      color: #38bdf8;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .header .stats-badge {
+      background: #1e293b;
+      border: 1px solid #334155;
+      padding: 5px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    .header .stats-badge b { color: #38bdf8; }
+    
+    .header-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      background: #38bdf8;
+      color: #0f172a;
+      border: none;
+      padding: 9px 18px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+      user-select: none;
+    }
+    .btn:hover { background: #7dd3fc; transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    
+    .btn-success { background: #10b981; color: #fff; }
+    .btn-success:hover { background: #34d399; }
+    
     .btn-danger { background: #ef4444; color: #fff; }
     .btn-danger:hover { background: #f87171; }
     
-    .grid { display: flex; flex-wrap: wrap; gap: 16px; }
-    .page-card { 
-      background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px;
-      width: 150px; display: flex; flex-direction: column; align-items: center; cursor: grab;
+    .btn-secondary { background: #334155; color: #cbd5e1; }
+    .btn-secondary:hover { background: #475569; color: #fff; }
+
+    .select-pos {
+      background: #1e293b;
+      color: #f1f5f9;
+      border: 1px solid #475569;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .controls {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      background: #1e293b;
+      padding: 12px 18px;
+      border-radius: 10px;
+      border: 1px solid #334155;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .controls label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      user-select: none;
+    }
+    .controls input[type="number"], .controls input[type="text"] {
+      padding: 5px 8px;
+      border-radius: 6px;
+      border: 1px solid #475569;
+      background: #0f172a;
+      color: #fff;
+      font-size: 13px;
+    }
+    .controls input[type="number"] { width: 64px; }
+    .controls .num-options {
+      display: inline-flex;
+      gap: 12px;
+      align-items: center;
+      border-left: 1px solid #475569;
+      padding-left: 16px;
+    }
+
+    .jump-group {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-left: 1px solid #475569;
+      padding-left: 16px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 16px;
       position: relative;
     }
-    .page-card.dragging { opacity: 0.5; }
-    .page-card.deleted { opacity: 0.3; filter: grayscale(100%); }
-    .page-card img { width: 100%; height: 180px; object-fit: contain; background: #fff; border-radius: 4px; margin-bottom: 10px; pointer-events: none; }
-    .page-card .page-num { font-size: 14px; font-weight: bold; color: #94a3b8; }
-    .page-card .delete-btn {
-      position: absolute; top: -8px; right: -8px; background: #ef4444; color: #fff;
-      border: none; border-radius: 50%; width: 24px; height: 24px; font-size: 12px;
-      cursor: pointer; display: flex; align-items: center; justify-content: center;
+
+    .page-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      cursor: grab;
+      position: relative;
+      user-select: none;
+      transition: border-color 0.15s ease, transform 0.15s ease, opacity 0.15s ease, box-shadow 0.2s ease;
     }
-    .page-card .delete-btn:hover { background: #f87171; }
+    .page-card:hover {
+      border-color: #38bdf8;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+    }
+    .page-card:active { cursor: grabbing; }
+    .page-card.dragging {
+      opacity: 0.35;
+      transform: scale(0.96);
+      border-color: #38bdf8;
+    }
     
-    .page-card.drag-over-left { border-left: 3px solid #38bdf8; margin-left: -2px; }
-    .page-card.drag-over-right { border-right: 3px solid #38bdf8; margin-right: -2px; }
+    .page-card.drag-over-left {
+      border-left: 4px solid #38bdf8;
+    }
+    .page-card.drag-over-right {
+      border-right: 4px solid #38bdf8;
+    }
+
+    .page-card.deleted {
+      opacity: 0.4;
+      filter: grayscale(90%);
+      background: #182030;
+      border-color: #64748b;
+    }
+    .page-card.deleted .img-wrap::after {
+      content: "ИСКЛЮЧЕН";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) rotate(-20deg);
+      background: rgba(239, 68, 68, 0.88);
+      color: #fff;
+      font-weight: bold;
+      font-size: 12px;
+      padding: 4px 12px;
+      border-radius: 4px;
+      pointer-events: none;
+      letter-spacing: 0.05em;
+    }
+
+    /* Выбранная страница для вставки/манипуляций */
+    .page-card.selected-card {
+      border-color: #38bdf8 !important;
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.4), 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+      background: #1e3a5f;
+    }
+    .page-card.selected-card .sheet-num {
+      color: #38bdf8 !important;
+    }
+
+    /* Анимация подсветки только что добавленных листов */
+    .page-card.just-added {
+      border-color: #10b981 !important;
+      box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.4), 0 10px 25px rgba(0,0,0,0.6) !important;
+      animation: pulseGreen 2.5s infinite ease-in-out;
+    }
+    @keyframes pulseGreen {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.4); }
+      50% { transform: scale(1.03); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.7); }
+    }
+    .new-badge {
+      position: absolute;
+      top: -8px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #10b981;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 10px;
+      letter-spacing: 0.05em;
+      z-index: 10;
+      pointer-events: none;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    }
+
+    .img-wrap {
+      width: 100%;
+      height: 200px;
+      background: #020617;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      border: 1px solid #1e293b;
+    }
+    .img-wrap img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      background: #fff;
+      border-radius: 3px;
+      pointer-events: none;
+      transition: transform 0.2s ease;
+    }
+
+    .card-footer {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      margin-bottom: 6px;
+    }
+    .card-footer .sheet-num {
+      font-size: 14px;
+      font-weight: 700;
+      color: #f1f5f9;
+    }
+    .card-footer .orig-num {
+      font-size: 11px;
+      color: #94a3b8;
+    }
+
+    /* Стрелки быстрого перемещения карточки */
+    .card-nav {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      gap: 3px;
+      border-top: 1px solid #334155;
+      padding-top: 6px;
+      margin-top: 2px;
+    }
+    .card-nav-btn {
+      background: #0f172a;
+      color: #94a3b8;
+      border: 1px solid #334155;
+      border-radius: 4px;
+      font-size: 11px;
+      padding: 3px 5px;
+      cursor: pointer;
+      flex: 1;
+      text-align: center;
+      transition: all 0.12s ease;
+    }
+    .card-nav-btn:hover {
+      background: #38bdf8;
+      color: #0f172a;
+      border-color: #38bdf8;
+      font-weight: bold;
+    }
+
+    .card-btn {
+      position: absolute;
+      top: 6px;
+      border: none;
+      border-radius: 6px;
+      width: 28px;
+      height: 28px;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s ease;
+      z-index: 5;
+    }
+    .btn-delete {
+      right: 6px;
+      background: rgba(239, 68, 68, 0.85);
+      color: #fff;
+    }
+    .btn-delete:hover {
+      background: #ef4444;
+      transform: scale(1.1);
+    }
+    .page-card.deleted .btn-delete {
+      background: rgba(34, 197, 94, 0.85);
+    }
+    .page-card.deleted .btn-delete:hover {
+      background: #22c55e;
+    }
+
+    .btn-rotate {
+      left: 6px;
+      background: rgba(30, 41, 59, 0.85);
+      color: #cbd5e1;
+      border: 1px solid #475569;
+    }
+    .btn-rotate:hover {
+      background: #334155;
+      color: #38bdf8;
+      border-color: #38bdf8;
+      transform: scale(1.1);
+    }
+
+    /* Toast уведомление */
+    #toast-msg {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #1e293b;
+      border: 1px solid #38bdf8;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      padding: 14px 20px;
+      border-radius: 10px;
+      color: #f1f5f9;
+      display: none;
+      align-items: center;
+      gap: 14px;
+      z-index: 3000;
+      animation: slideUp 0.3s ease;
+    }
+    @keyframes slideUp {
+      from { transform: translateY(30px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    #toast-msg.show { display: flex; }
+    #toast-msg .toast-btn {
+      background: #38bdf8;
+      color: #0f172a;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    /* Drag-and-drop file overlay */
+    #drop-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.9);
+      border: 4px dashed #38bdf8;
+      z-index: 1000;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    #drop-overlay.active { display: flex; }
+    #drop-overlay .drop-box {
+      background: #1e293b;
+      padding: 32px 48px;
+      border-radius: 16px;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    #drop-overlay h2 { margin: 0 0 10px; color: #38bdf8; font-size: 24px; }
+    #drop-overlay p { margin: 0; color: #94a3b8; font-size: 14px; }
+
+    /* Loading modal */
+    #loading-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(4px);
+      z-index: 2000;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    #loading-modal.active { display: flex; }
+    .loading-card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      padding: 30px 40px;
+      border-radius: 14px;
+      text-align: center;
+      max-width: 440px;
+    }
+    .spinner {
+      width: 46px;
+      height: 46px;
+      border: 4px solid #334155;
+      border-top-color: #38bdf8;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 18px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
 
 <div class="header">
-  <h1>Редактор документа (Предпросмотр)</h1>
-  
-    <button class="btn" id="btn-save" style="background:#22c55e; margin-right:8px; display:none;">💾 Сохранить</button>
-    <button class="btn" id="btn-download" style="background:#3b82f6; margin-right:8px;">⬇️ Скачать PDF</button>
-    <button class="btn btn-danger" id="btn-close" style="background:#ef4444;">❌ Закрыть</button>
-
+  <div class="header-title">
+    <h1>Редактор документа</h1>
+    <div class="stats-badge" id="stats-badge">Загрузка страниц…</div>
+  </div>
+  <div class="header-actions">
+    <select class="select-pos" id="insert-position" title="Куда вставлять новые страницы">
+      <option value="end" selected>Вставлять: В конец 🔽</option>
+      <option value="start">Вставлять: В начало 🔼</option>
+      <option value="after-selected" id="opt-after-selected" disabled>Вставлять: После выбранного листа 👉</option>
+    </select>
+    <button class="btn btn-success" id="btn-add-file" title="Загрузить PDF, документ или чертеж">
+      ➕ Добавить файл / страницы
+    </button>
+    <button class="btn" id="btn-finalize">💾 Сохранить и Скачать PDF</button>
+    <button class="btn btn-secondary" id="btn-reset" title="Сбросить все изменения">Сбросить</button>
+  </div>
 </div>
 
 <div class="controls">
-  <label><input type="checkbox" id="chk-numbering"> Добавить нумерацию</label>
-  <div id="num-options" style="display: none; gap: 10px; align-items: center;">
-    <span>с страницы: <input type="number" id="num-from" value="1" min="1"></span>
-    <span>с числа: <input type="number" id="num-start" value="1" min="1"></span>
+  <label><input type="checkbox" id="chk-numbering"> Сквозная нумерация листов</label>
+  <div class="num-options" id="num-options" style="display: none;">
+    <span>с страницы альбома: <input type="number" id="num-from" value="1" min="1"></span>
+    <span>первый номер: <input type="number" id="num-start" value="1" min="1"></span>
   </div>
-  <button class="btn btn-danger" id="btn-reset" style="margin-left: auto;">Сбросить изменения</button>
+  <div class="jump-group">
+    <span style="font-size: 13px; color: #94a3b8;">Лист №:</span>
+    <input type="number" id="jump-to-sheet" min="1" placeholder="№" style="width: 58px;">
+    <button type="button" class="btn btn-secondary" id="btn-jump" style="padding: 5px 10px; font-size: 12px;">Найти</button>
+  </div>
+  <div style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+    <span style="font-size: 13px; color: #94a3b8;">Имя файла:</span>
+    <input type="text" id="output-name" value="сборка.pdf" style="width: 170px;">
+  </div>
 </div>
 
 <div class="grid" id="grid">
-  <!-- Pages will be injected here -->
+  <!-- Карточки страниц создаются динамически -->
+</div>
+
+<!-- Скрытый инпут выбора файлов -->
+<input type="file" id="file-input-append" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.odt,.ods,.rtf,.dwg,.dxf,.jpg,.jpeg,.png,.tif,.tiff" style="display: none;" />
+
+<!-- Полноэкранный оверлей для Drag & Drop файлов с компьютера -->
+<div id="drop-overlay">
+  <div class="drop-box">
+    <div style="font-size: 48px; margin-bottom: 12px;">📥</div>
+    <h2>Перетащите файлы сюда</h2>
+    <p>PDF, Word, Excel, чертежи DWG/DXF или изображения будут добавлены в альбом</p>
+  </div>
+</div>
+
+<!-- Индикатор загрузки / обработки -->
+<div id="loading-modal">
+  <div class="loading-card">
+    <div class="spinner"></div>
+    <h3 id="loading-title" style="margin: 0 0 8px; color: #f1f5f9; font-size: 18px;">Обработка файлов...</h3>
+    <p id="loading-desc" style="margin: 0; color: #94a3b8; font-size: 14px;">Пожалуйста, подождите завершения конвертации и добавления страниц</p>
+  </div>
+</div>
+
+<!-- Всплывающее уведомление (Toast) -->
+<div id="toast-msg">
+  <span id="toast-text"></span>
+  <button type="button" class="toast-btn" id="toast-action-btn">Перейти</button>
 </div>
 
 <script>
   const urlParams = new URLSearchParams(window.location.search);
   const draftId = urlParams.get('draft_id');
-  const pageCount = parseInt(urlParams.get('count') || '0');
-  
+  let pageCount = parseInt(urlParams.get('count') || '0', 10);
+  const cadIpParam = urlParams.get('cad_ip') || '';
+  const smartSearchParam = urlParams.get('smart') !== '0';
+
   if (urlParams.get('num') === '1') {
     document.getElementById('chk-numbering').checked = true;
-    document.getElementById('num-options').style.display = 'flex';
+    document.getElementById('num-options').style.display = 'inline-flex';
   }
   if (urlParams.has('num_from')) document.getElementById('num-from').value = urlParams.get('num_from');
   if (urlParams.has('num_start')) document.getElementById('num-start').value = urlParams.get('num_start');
-  
+
   if (!draftId || !pageCount) {
-    alert("Ошибка загрузки черновика");
+    alert("Ошибка загрузки черновика: не указан draft_id или количество страниц");
   }
 
   const grid = document.getElementById('grid');
-  let deletedPages = new Set();
+  const statsBadge = document.getElementById('stats-badge');
+  const deletedPages = new Set();
+  const pageRotations = {}; // pageNum -> degrees (0, 90, 180, 270)
   
-  // Render pages
-  for (let i = 1; i <= pageCount; i++) {
-    const card = document.createElement('div');
-    card.className = 'page-card';
-    card.draggable = true;
-    card.dataset.page = i;
-    
-    // Fetch image from the dedicated draft preview endpoint
-    card.innerHTML = `
-      <button class="delete-btn" title="Удалить страницу">✕</button>
-      <img src="/api/draft/${draftId}/preview?page=${i}" alt="Page ${i}" loading="lazy" />
-      <div class="page-num">Стр. ${i}</div>
-    `;
-    
-    card.querySelector('.delete-btn').addEventListener('click', () => {
-      if (deletedPages.has(i)) {
-        deletedPages.delete(i);
-        card.classList.remove('deleted');
+  let isDraggingCard = false;
+
+  function showLoading(title, desc) {
+    document.getElementById('loading-title').textContent = title || 'Обработка...';
+    document.getElementById('loading-desc').textContent = desc || 'Пожалуйста, подождите';
+    document.getElementById('loading-modal').classList.add('active');
+  }
+
+  function hideLoading() {
+    document.getElementById('loading-modal').classList.remove('active');
+  }
+
+  let toastTimer = null;
+  function showToast(text, onActionClick) {
+    const toast = document.getElementById('toast-msg');
+    const toastText = document.getElementById('toast-text');
+    const toastBtn = document.getElementById('toast-action-btn');
+    toastText.textContent = text;
+    if (onActionClick) {
+      toastBtn.style.display = 'inline-block';
+      toastBtn.onclick = () => {
+        onActionClick();
+        toast.classList.remove('show');
+      };
+    } else {
+      toastBtn.style.display = 'none';
+    }
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 6000);
+  }
+
+  function updateStatsAndNumbers() {
+    const cards = Array.from(grid.querySelectorAll('.page-card'));
+    let activeIndex = 1;
+    let deletedCount = 0;
+
+    cards.forEach(card => {
+      const pageNum = parseInt(card.dataset.page, 10);
+      const isDel = deletedPages.has(pageNum);
+      const sheetNumEl = card.querySelector('.sheet-num');
+      
+      if (isDel) {
+        deletedCount++;
+        sheetNumEl.textContent = '—';
+        sheetNumEl.style.color = '#ef4444';
       } else {
-        deletedPages.add(i);
-        card.classList.add('deleted');
+        sheetNumEl.textContent = 'Лист ' + activeIndex;
+        sheetNumEl.style.color = '#f1f5f9';
+        card.dataset.activeSheet = activeIndex;
+        activeIndex++;
       }
     });
-    
-    // Drag and Drop
+
+    const total = cards.length;
+    const active = total - deletedCount;
+    statsBadge.innerHTML = `Всего листов: <b>${total}</b> (в документе: <b>${active}</b>${deletedCount > 0 ? `, исключено: ${deletedCount}` : ''})`;
+  }
+
+  let selectedCard = null;
+  function selectCard(card) {
+    if (selectedCard === card) {
+      // Снять выделение при повторном клике
+      card.classList.remove('selected-card');
+      selectedCard = null;
+      const opt = document.getElementById('opt-after-selected');
+      opt.disabled = true;
+      opt.textContent = 'Вставлять: После выбранного листа 👉';
+      if (document.getElementById('insert-position').value === 'after-selected') {
+        document.getElementById('insert-position').value = 'end';
+      }
+      return;
+    }
+
+    if (selectedCard) {
+      selectedCard.classList.remove('selected-card');
+    }
+    selectedCard = card;
+    card.classList.add('selected-card');
+
+    const sheetNum = card.dataset.activeSheet || card.dataset.page;
+    const opt = document.getElementById('opt-after-selected');
+    opt.disabled = false;
+    opt.textContent = `Вставлять: После листа ${sheetNum} 👉`;
+    document.getElementById('insert-position').value = 'after-selected';
+    showToast(`Выбран Лист ${sheetNum}. Новые файлы будут вставляться после него.`);
+  }
+
+  function moveCard(card, direction) {
+    if (direction === 'first') {
+      const first = grid.querySelector('.page-card');
+      if (first && first !== card) grid.insertBefore(card, first);
+    } else if (direction === 'last') {
+      grid.appendChild(card);
+    } else if (direction === 'prev') {
+      const prev = card.previousElementSibling;
+      if (prev && prev.classList.contains('page-card')) grid.insertBefore(card, prev);
+    } else if (direction === 'next') {
+      const next = card.nextElementSibling;
+      if (next && next.classList.contains('page-card')) grid.insertBefore(card, next.nextSibling);
+    }
+    updateStatsAndNumbers();
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function createPageCard(pageNum, isNew = false) {
+    const card = document.createElement('div');
+    card.className = 'page-card' + (isNew ? ' just-added' : '');
+    card.draggable = true;
+    card.dataset.page = pageNum;
+
+    const newBadgeHtml = isNew ? '<div class="new-badge">✨ НОВЫЙ ЛИСТ</div>' : '';
+
+    card.innerHTML = `
+      ${newBadgeHtml}
+      <button type="button" class="card-btn btn-rotate" title="Повернуть на 90° по часовой стрелке">↻</button>
+      <button type="button" class="card-btn btn-delete" title="Исключить страницу из документа">✕</button>
+      <div class="img-wrap">
+        <img src="/api/draft/${draftId}/preview?page=${pageNum}" alt="Страница ${pageNum}" ${isNew ? 'loading="eager"' : 'loading="lazy"'} />
+      </div>
+      <div class="card-footer">
+        <div class="sheet-num">Лист</div>
+        <div class="orig-num">исх. стр. ${pageNum}</div>
+      </div>
+      <div class="card-nav">
+        <button type="button" class="card-nav-btn" data-move="first" title="Переместить в самое начало альбома">⏮</button>
+        <button type="button" class="card-nav-btn" data-move="prev" title="Переместить на 1 позицию назад">◀</button>
+        <button type="button" class="card-nav-btn" data-move="next" title="Переместить на 1 позицию вперед">▶</button>
+        <button type="button" class="card-nav-btn" data-move="last" title="Переместить в самый конец альбома">⏭</button>
+      </div>
+    `;
+
+    const img = card.querySelector('img');
+    const btnDel = card.querySelector('.btn-delete');
+    const btnRot = card.querySelector('.btn-rotate');
+
+    // Перезагрузка превью при временной недоступности
+    img.onerror = () => {
+      setTimeout(() => {
+        img.src = `/api/draft/${draftId}/preview?page=${pageNum}&t=${Date.now()}`;
+      }, 1200);
+    };
+
+    // Выбор карточки кликом (для позиции вставки и манипуляций)
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('button')) return;
+      card.classList.remove('just-added');
+      selectCard(card);
+    });
+
+    // Кнопка удаления / восстановления
+    btnDel.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (deletedPages.has(pageNum)) {
+        deletedPages.delete(pageNum);
+        card.classList.remove('deleted');
+        btnDel.textContent = '✕';
+        btnDel.title = 'Исключить страницу из документа';
+      } else {
+        deletedPages.add(pageNum);
+        card.classList.add('deleted');
+        btnDel.textContent = '↶';
+        btnDel.title = 'Восстановить страницу';
+      }
+      updateStatsAndNumbers();
+    });
+
+    // Кнопка поворота на 90°
+    btnRot.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const currentRot = pageRotations[pageNum] || 0;
+      const nextRot = (currentRot + 90) % 360;
+      pageRotations[pageNum] = nextRot;
+      img.style.transform = `rotate(${nextRot}deg)`;
+    });
+
+    // Кнопки быстрого перемещения (стрелки)
+    card.querySelectorAll('.card-nav-btn').forEach(btn => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        moveCard(card, btn.dataset.move);
+      });
+    });
+
+    // Drag and Drop страниц
     card.addEventListener('dragstart', (e) => {
+      if (e.target.closest('button')) {
+        e.preventDefault();
+        return;
+      }
+      isDraggingCard = true;
       card.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
-      // Workaround for Firefox
-      e.dataTransfer.setData('text/plain', i); 
+      e.dataTransfer.setData('text/plain', String(pageNum));
     });
-    
+
     card.addEventListener('dragend', () => {
+      isDraggingCard = false;
       card.classList.remove('dragging');
-      grid.querySelectorAll('.page-card').forEach(c => c.classList.remove('drag-over', 'drag-over-left', 'drag-over-right'));
+      grid.querySelectorAll('.page-card').forEach(c => c.classList.remove('drag-over-left', 'drag-over-right'));
+      updateStatsAndNumbers();
     });
-    
+
     card.addEventListener('dragover', (e) => {
-      e.preventDefault(); // Necessary to allow dropping
-      const draggingCard = document.querySelector('.dragging');
+      if (!isDraggingCard) return;
+      e.preventDefault();
+      const draggingCard = document.querySelector('.page-card.dragging');
       if (!draggingCard || draggingCard === card) return;
-      
+
       const box = card.getBoundingClientRect();
       const offset = e.clientX - box.left - box.width / 2;
-      
+
       card.classList.remove('drag-over-left', 'drag-over-right');
       if (offset < 0) {
         card.classList.add('drag-over-left');
@@ -137,119 +755,304 @@
     });
 
     card.addEventListener('drop', (e) => {
+      if (!isDraggingCard) return;
       e.preventDefault();
-      const draggingCard = document.querySelector('.dragging');
       card.classList.remove('drag-over-left', 'drag-over-right');
-      
+
+      const draggingCard = document.querySelector('.page-card.dragging');
       if (!draggingCard || draggingCard === card) return;
-      
+
       const box = card.getBoundingClientRect();
       const offset = e.clientX - box.left - box.width / 2;
-      
+
       if (offset < 0) {
         grid.insertBefore(draggingCard, card);
       } else {
         grid.insertBefore(draggingCard, card.nextSibling);
       }
+      updateStatsAndNumbers();
     });
 
-    grid.appendChild(card);
+    return card;
   }
-  
-  // Drag over grid (fallback for empty areas)
-  grid.addEventListener('dragover', (e) => {
+
+  // Первоначальный рендеринг страниц
+  for (let i = 1; i <= pageCount; i++) {
+    grid.appendChild(createPageCard(i));
+  }
+  updateStatsAndNumbers();
+
+  // Синхронизация реального числа страниц с сервером
+  fetch(`/api/draft/${encodeURIComponent(draftId)}/pages`)
+    .then(r => r.ok ? r.json() : null)
+    .then(d => {
+      if (d && d.page_count && d.page_count > pageCount) {
+        const added = [];
+        for (let i = pageCount + 1; i <= d.page_count; i++) {
+          const c = createPageCard(i, true);
+          grid.appendChild(c);
+          added.push(c);
+        }
+        pageCount = d.page_count;
+        updateStatsAndNumbers();
+        const u = new URL(window.location.href);
+        u.searchParams.set('count', pageCount);
+        window.history.replaceState({}, '', u.toString());
+        if (added.length > 0) {
+          showToast(`Восстановлено ${added.length} добавленных ранее листов`, () => {
+            added[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+          });
+        }
+      }
+    })
+    .catch(e => console.warn("Sync pages check error:", e));
+
+  // Быстрый переход к номеру листа
+  function jumpToSheet() {
+    const val = parseInt(document.getElementById('jump-to-sheet').value, 10);
+    if (!val || val < 1) return;
+    const card = grid.querySelector(`.page-card[data-active-sheet="${val}"]`);
+    if (card) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.add('just-added');
+      setTimeout(() => card.classList.remove('just-added'), 2500);
+    } else {
+      alert(`Лист № ${val} не найден в документе.`);
+    }
+  }
+  document.getElementById('btn-jump').addEventListener('click', jumpToSheet);
+  document.getElementById('jump-to-sheet').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') jumpToSheet();
+  });
+
+  // Добавление новых файлов (API append)
+  async function uploadAndAppendFiles(filesList) {
+    if (!filesList || filesList.length === 0) return;
+
+    const insertPos = document.getElementById('insert-position').value; // 'end', 'start', 'after-selected'
+
+    showLoading(
+      'Добавление файлов...',
+      `Загрузка и обработка: ${filesList.length} файл(ов). Чертежи и документы конвертируются в PDF...`
+    );
+
+    const fd = new FormData();
+    for (let i = 0; i < filesList.length; i++) {
+      fd.append('files', filesList[i]);
+    }
+    if (cadIpParam) fd.append('windows_cad_ip', cadIpParam);
+    fd.append('smart_search', smartSearchParam ? 'true' : 'false');
+
+    try {
+      const res = await fetch(`/api/draft/${encodeURIComponent(draftId)}/append`, {
+        method: 'POST',
+        body: fd
+      });
+
+      if (!res.ok) {
+        let errMsg = 'Ошибка при добавлении файлов';
+        try {
+          const j = await res.json();
+          errMsg = j.detail || errMsg;
+        } catch (_) {
+          errMsg = await res.text();
+        }
+        throw new Error(errMsg);
+      }
+
+      const data = await res.json();
+      pageCount = data.total_pages;
+
+      // Создаем карточки новых страниц
+      const createdCards = [];
+      if (Array.isArray(data.added_pages)) {
+        data.added_pages.forEach(p => {
+          const card = createPageCard(p, true);
+          createdCards.push(card);
+        });
+      }
+
+      if (createdCards.length > 0) {
+        if (insertPos === 'start') {
+          // Вставляем строго в начало альбома (перед первой карточкой)
+          const firstCard = grid.querySelector('.page-card');
+          if (firstCard) {
+            createdCards.forEach(c => grid.insertBefore(c, firstCard));
+          } else {
+            createdCards.forEach(c => grid.appendChild(c));
+          }
+        } else if (insertPos === 'after-selected' && selectedCard && selectedCard.parentNode === grid) {
+          // Вставляем сразу после выбранной карточки
+          let anchor = selectedCard.nextSibling;
+          createdCards.forEach(c => {
+            grid.insertBefore(c, anchor);
+          });
+          // Выделяем последнюю добавленную карточку, чтобы следующий файл добавлялся за ней
+          selectCard(createdCards[createdCards.length - 1]);
+        } else {
+          // По умолчанию: в самый конец альбома
+          createdCards.forEach(c => {
+            grid.appendChild(c);
+          });
+        }
+
+        updateStatsAndNumbers();
+
+        // Обновляем query параметр count в URL, чтобы при перезагрузке (F5) страницы не исчезали
+        const newUrl = new URL(window.location.href);
+        newUrl.searchParams.set('count', pageCount);
+        window.history.replaceState({}, '', newUrl.toString());
+
+        // Плавно скроллим к первой новой карточке
+        const firstNew = createdCards[0];
+        if (firstNew) {
+          setTimeout(() => {
+            firstNew.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 150);
+        }
+
+        // Показываем Toast с точными номерами листов
+        const firstSheetNum = firstNew.dataset.activeSheet || firstNew.dataset.page;
+        const lastNew = createdCards[createdCards.length - 1];
+        const lastSheetNum = lastNew.dataset.activeSheet || lastNew.dataset.page;
+        const labelSheets = firstSheetNum === lastSheetNum ? `Лист ${firstSheetNum}` : `Листы ${firstSheetNum}–${lastSheetNum}`;
+
+        showToast(`✅ Добавлено: ${createdCards.length} лист(ов) (${labelSheets})`, () => {
+          firstNew.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+      }
+    } catch (err) {
+      alert('Не удалось добавить файлы:\n' + err.message);
+    } finally {
+      hideLoading();
+    }
+  }
+
+  // Кнопка добавления файла
+  const fileInput = document.getElementById('file-input-append');
+  document.getElementById('btn-add-file').addEventListener('click', () => {
+    fileInput.click();
+  });
+
+  fileInput.addEventListener('change', (e) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      uploadAndAppendFiles(Array.from(files));
+    }
+    fileInput.value = '';
+  });
+
+  // Drag & drop файлов из Проводника в окно браузера
+  const dropOverlay = document.getElementById('drop-overlay');
+  let dragCounter = 0;
+
+  window.addEventListener('dragenter', (e) => {
+    if (isDraggingCard) return;
+    if (e.dataTransfer && e.dataTransfer.types && e.dataTransfer.types.includes('Files')) {
+      dragCounter++;
+      dropOverlay.classList.add('active');
+    }
+  });
+
+  window.addEventListener('dragleave', (e) => {
+    if (isDraggingCard) return;
+    dragCounter--;
+    if (dragCounter <= 0) {
+      dragCounter = 0;
+      dropOverlay.classList.remove('active');
+    }
+  });
+
+  window.addEventListener('dragover', (e) => {
+    if (isDraggingCard) return;
     e.preventDefault();
   });
 
-  
-  // Numbering toggle
+  window.addEventListener('drop', (e) => {
+    if (isDraggingCard) return;
+    e.preventDefault();
+    dragCounter = 0;
+    dropOverlay.classList.remove('active');
+
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      uploadAndAppendFiles(Array.from(e.dataTransfer.files));
+    }
+  });
+
+  // Нумерация страниц
   document.getElementById('chk-numbering').addEventListener('change', (e) => {
-    document.getElementById('num-options').style.display = e.target.checked ? 'flex' : 'none';
+    document.getElementById('num-options').style.display = e.target.checked ? 'inline-flex' : 'none';
   });
-  
-  // Reset
+
+  // Сброс страницы
   document.getElementById('btn-reset').addEventListener('click', () => {
-    window.location.reload();
+    if (confirm('Сбросить все перемещения, повороты и удаленные страницы?')) {
+      window.location.reload();
+    }
   });
-  
-  // Finalize
-  const origPath = urlParams.get('path');
-    if (origPath) {
-      const btnSave = document.getElementById('btn-save');
-      if (btnSave) btnSave.style.display = 'inline-block';
+
+  // Финализация и скачивание готового PDF
+  document.getElementById('btn-finalize').addEventListener('click', async () => {
+    const cards = Array.from(grid.querySelectorAll('.page-card'));
+    const pageOrder = cards.map(c => parseInt(c.dataset.page, 10));
+
+    // Проверяем, есть ли хоть одна неудаленная страница
+    const activeCount = pageOrder.filter(p => !deletedPages.has(p)).length;
+    if (activeCount === 0) {
+      alert('Нельзя сохранить документ: все страницы удалены!');
+      return;
     }
 
-    const btnClose = document.getElementById('btn-close');
-    if (btnClose) {
-      btnClose.addEventListener('click', () => {
-        window.close();
+    const outName = document.getElementById('output-name').value.trim() || 'сборка.pdf';
+
+    const req = {
+      page_order: pageOrder,
+      deleted_pages: Array.from(deletedPages),
+      rotations: pageRotations,
+      number_pages: document.getElementById('chk-numbering').checked,
+      numbering_from_page: parseInt(document.getElementById('num-from').value, 10) || 1,
+      numbering_start: parseInt(document.getElementById('num-start').value, 10) || 1,
+      output_name: outName,
+    };
+
+    const btn = document.getElementById('btn-finalize');
+    btn.disabled = true;
+    showLoading('Сборка документа...', 'Формирование итогового PDF, применение нумерации и ориентации...');
+
+    try {
+      const res = await fetch(`/api/draft/${encodeURIComponent(draftId)}/finalize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req)
       });
-    }
 
-    function getReqData() {
-      return {
-        path: origPath || '',
-        page_order: [...document.querySelectorAll('.page-card')].map(c => parseInt(c.dataset.page)),
-        deleted_pages: Array.from(deletedPages),
-        number_pages: document.getElementById('chk-numbering').checked,
-        numbering_from_page: parseInt(document.getElementById('num-from').value),
-        numbering_start: parseInt(document.getElementById('num-start').value),
-      };
-    }
-
-    const btnSave = document.getElementById('btn-save');
-    if (btnSave) {
-      btnSave.addEventListener('click', async () => {
-        if (!origPath) return;
-        const oldText = btnSave.innerText;
-        btnSave.disabled = true;
-        btnSave.innerText = '⏳ Сохранение...';
+      if (!res.ok) {
+        let msg = 'Ошибка финализации документа';
         try {
-          const res = await fetch(`/api/draft/${draftId}/save-to-smb`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(getReqData())
-          });
-          if (!res.ok) throw new Error(await res.text());
-          btnSave.innerText = '✅ Сохранено!';
-          setTimeout(() => window.close(), 1500);
-        } catch (err) {
-          alert("Ошибка сохранения: " + err.message);
-          btnSave.innerText = oldText;
-          btnSave.disabled = false;
+          const j = await res.json();
+          msg = j.detail || msg;
+        } catch (_) {
+          msg = await res.text();
         }
-      });
-    }
+        throw new Error(msg);
+      }
 
-    const btnDownload = document.getElementById('btn-download');
-    if (btnDownload) {
-      btnDownload.addEventListener('click', async () => {
-        const oldText = btnDownload.innerText;
-        btnDownload.disabled = true;
-        btnDownload.innerText = '⏳ Подготовка...';
-        try {
-          const res = await fetch(`/api/draft/${draftId}/finalize`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(getReqData())
-          });
-          if (!res.ok) throw new Error(await res.text());
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = (origPath ? origPath.split('/').pop() : 'сборка.pdf');
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-        } catch (err) {
-          alert("Ошибка скачивания: " + err.message);
-        } finally {
-          btnDownload.disabled = false;
-          btnDownload.innerText = oldText;
-        }
-      });
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = outName.endsWith('.pdf') ? outName : outName + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      alert('Ошибка при сохранении: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      hideLoading();
     }
+  });
 </script>
 </body>
 </html>
